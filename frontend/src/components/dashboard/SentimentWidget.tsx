@@ -1,80 +1,25 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
-import { api } from "@/lib/api"
+import { useMarketStore } from "@/store/market"
 import { cn } from "@/lib/utils"
-import { Brain, Smile, Frown, Meh, AlertCircle } from "lucide-react"
+import { Brain, Smile, Frown, Meh } from "lucide-react"
 
-interface FearGreed {
-  value?: number
-  value_classification?: string
+function getClassification(v: number): string {
+  if (v <= 25) return "Extreme Fear"
+  if (v <= 45) return "Fear"
+  if (v <= 55) return "Neutral"
+  if (v <= 75) return "Greed"
+  return "Extreme Greed"
 }
 
 export function SentimentWidget() {
-  const [fearGreed, setFearGreed] = useState<FearGreed | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.getFearGreed()
-      setFearGreed(data)
-      setError(null)
-    } catch {
-      setError("Sentiment unavailable")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const timer = setTimeout(load, 0)
-    const interval = setInterval(load, 300000)
-    return () => {
-      clearTimeout(timer)
-      clearInterval(interval)
-    }
-  }, [load])
-
-  if (loading) {
-    return (
-      <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
-        <div className="animate-pulse space-y-3">
-          <div className="h-3 w-24 bg-gray-800 rounded" />
-          <div className="h-16 bg-gray-800 rounded" />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Market Sentiment</h3>
-          <Brain className="w-3.5 h-3.5 text-purple-400" />
-        </div>
-        <div className="flex items-center gap-2 text-yellow-400 text-xs">
-          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-          {error}
-        </div>
-      </div>
-    )
-  }
+  const fearGreed = useMarketStore((s) => s.fearGreed)
+  const isLive = useMarketStore((s) => s.isLive)
 
   const value = fearGreed?.value ?? 50
-  const classification = fearGreed?.value_classification || getClassification(value)
-
-  function getClassification(v: number): string {
-    if (v <= 25) return "Extreme Fear"
-    if (v <= 45) return "Fear"
-    if (v <= 55) return "Neutral"
-    if (v <= 75) return "Greed"
-    return "Extreme Greed"
-  }
-
-  const isBullish = value > 55
+  const classification = fearGreed?.classification || getClassification(value)
   const SentimentIcon = value <= 25 ? Frown : value <= 45 ? Meh : value <= 55 ? Meh : Smile
+  const isBullish = value > 55
 
   return (
     <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
@@ -120,6 +65,9 @@ export function SentimentWidget() {
             <div className="mt-1.5 text-[10px] text-gray-500">
               Market sentiment suggests bullish conditions
             </div>
+          )}
+          {!fearGreed && !isLive && (
+            <div className="mt-1.5 text-[9px] text-gray-700 animate-pulse">Waiting for data...</div>
           )}
         </div>
       </div>

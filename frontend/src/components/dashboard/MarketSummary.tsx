@@ -1,23 +1,12 @@
 "use client"
 
-import { useEffect, useState, useCallback, memo } from "react"
+import { useEffect, useState, memo } from "react"
 import { api } from "@/lib/api"
-import { cn, formatPrice, formatPercent, formatVolume, getChangeColor, ago } from "@/lib/utils"
+import { useMarketStore } from "@/store/market"
+import { cn, formatPrice, formatPercent, formatVolume, getChangeColor } from "@/lib/utils"
 import {
-  Globe, BarChart3,
-  AlertCircle, Activity, Coins,
+  Globe, BarChart3, Activity, Coins,
 } from "lucide-react"
-
-interface Overview {
-  total_volume_24h?: number
-  btc_dominance?: number
-  total_market_cap?: number
-}
-
-interface Ticker {
-  price?: number
-  change_percent?: number
-}
 
 const TOP_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "SUI/USDT"]
 
@@ -45,39 +34,16 @@ const TickerBar = memo(function TickerBar({ symbol, price, change }: TickerBarPr
 })
 
 export function MarketSummary() {
-  const [overview, setOverview] = useState<Overview | null>(null)
-  const [tickers, setTickers] = useState<Record<string, Ticker>>({})
-  const [error, setError] = useState<string | null>(null)
-  const [lastFetch, setLastFetch] = useState<string>("")
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.getOverview()
-      setOverview(data)
-      setLastFetch(new Date().toISOString())
-
-      const tickerData: Record<string, Ticker> = {}
-      for (const sym of TOP_SYMBOLS) {
-        try {
-          const t = await api.getTicker(sym)
-          tickerData[sym] = t
-        } catch {}
-      }
-      setTickers(tickerData)
-      setError(null)
-    } catch {
-      setError("Market data unavailable")
-    }
-  }, [])
+  const tickers = useMarketStore((s) => s.tickers)
+  const fearGreed = useMarketStore((s) => s.fearGreed)
+  const isLive = useMarketStore((s) => s.isLive)
+  const [overview, setOverview] = useState<{ total_volume_24h?: number; btc_dominance?: number; total_market_cap?: number } | null>(null)
 
   useEffect(() => {
-    const timer = setTimeout(load, 0)
-    const interval = setInterval(load, 60000)
-    return () => {
-      clearTimeout(timer)
-      clearInterval(interval)
-    }
-  }, [load])
+    api.getOverview().then(setOverview).catch(() => {})
+    const interval = setInterval(() => api.getOverview().then(setOverview).catch(() => {}), 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
@@ -87,12 +53,10 @@ export function MarketSummary() {
           <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Market Watch</h2>
         </div>
         <div className="flex items-center gap-3">
-          {lastFetch && (
-            <span className="text-[9px] text-gray-600">{ago(lastFetch)}</span>
-          )}
-          {error && (
-            <span className="text-[10px] text-yellow-500 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />{error}
+          {isLive && <span className="text-[9px] text-green-500">● LIVE</span>}
+          {fearGreed && (
+            <span className="text-[9px] text-gray-500">
+              F&G: {fearGreed.value} ({fearGreed.classification})
             </span>
           )}
         </div>
@@ -100,7 +64,7 @@ export function MarketSummary() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 mb-3">
         {TOP_SYMBOLS.map((sym) => (
-          <TickerBar key={sym} symbol={sym} price={tickers[sym]?.price} change={tickers[sym]?.change_percent} />
+          <TickerBar key={sym} symbol={sym} price={tickers[sym]?.price} change={tickers[sym]?.change} />
         ))}
       </div>
 
@@ -111,12 +75,9 @@ export function MarketSummary() {
             <span className="text-[10px] text-gray-500">24h Volume</span>
           </div>
           <div className="text-sm font-bold text-white font-mono">
-            {overview?.total_volume_24h != null
-              ? formatVolume(overview.total_volume_24h)
-              : "--"}
+            {overview?.total_volume_24h != null ? formatVolume(overview.total_volume_24h) : "--"}
           </div>
         </div>
-
         <div className="p-2.5 rounded-lg bg-gray-800/20">
           <div className="flex items-center gap-1 mb-0.5">
             <Globe className="w-3 h-3 text-gray-500" />
@@ -126,28 +87,22 @@ export function MarketSummary() {
             {overview?.btc_dominance != null ? `${overview.btc_dominance.toFixed(1)}%` : "--"}
           </div>
         </div>
-
         <div className="p-2.5 rounded-lg bg-gray-800/20">
           <div className="flex items-center gap-1 mb-0.5">
             <Coins className="w-3 h-3 text-gray-500" />
             <span className="text-[10px] text-gray-500">Market Cap</span>
           </div>
           <div className="text-sm font-bold text-white font-mono">
-            {overview?.total_market_cap != null
-              ? formatPrice(overview.total_market_cap, 0)
-              : "--"}
+            {overview?.total_market_cap != null ? formatPrice(overview.total_market_cap, 0) : "--"}
           </div>
         </div>
-
         <div className="p-2.5 rounded-lg bg-gray-800/20">
           <div className="flex items-center gap-1 mb-0.5">
             <Activity className="w-3 h-3 text-gray-500" />
             <span className="text-[10px] text-gray-500">Alt Season</span>
           </div>
           <div className="text-sm font-bold text-white font-mono">
-            {overview?.btc_dominance != null
-              ? `${(100 - overview.btc_dominance).toFixed(1)}%`
-              : "--"}
+            {overview?.btc_dominance != null ? `${(100 - overview.btc_dominance).toFixed(1)}%` : "--"}
           </div>
         </div>
       </div>

@@ -1,17 +1,46 @@
 "use client"
 
-import { useEffect, useState, useCallback, memo } from "react"
+import { useEffect, useState, useRef, memo, useCallback } from "react"
+import { useWS } from "@/components/WSProvider"
 import { api } from "@/lib/api"
-import { cn, formatPrice, confidenceColor, ago } from "@/lib/utils"
+import { cn, formatPrice, confidenceColor } from "@/lib/utils"
 import { Zap, AlertCircle, Target, Send } from "lucide-react"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SignalData = Record<string, any>
+interface SignalData {
+  symbol?: string
+  direction?: string
+  score?: number
+  confidence?: number
+  entry_zone?: { min?: number; max?: number } | number[]
+  entry_price?: number
+  stop_loss?: number
+  take_profit_1?: number
+  take_profit_2?: number
+  take_profit_3?: number
+  take_profit?: number[]
+  risk_reward?: number
+  timeframe?: string
+  reasons?: string[]
+  reason?: string
+  factors?: string[]
+  ai_factors?: string[]
+  created_at?: string
+}
 
 const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
-  const entryZone = (s.entry_zone || s.entry_price) as SignalData
-  const entryLow = entryZone?.min ?? entryZone?.[0] ?? entryZone ?? 0
-  const entryHigh = entryZone?.max ?? entryZone?.[1] ?? entryZone ?? 0
+  const entryZone: unknown = s.entry_zone ?? s.entry_price
+  const isObj = entryZone != null && typeof entryZone === "object" && !Array.isArray(entryZone)
+  const isArr = Array.isArray(entryZone)
+  const entryLow: number = isObj
+    ? (entryZone as Record<string, number>).min ?? 0
+    : isArr
+    ? (entryZone as number[])[0] ?? 0
+    : (entryZone as number) ?? 0
+  const entryHigh: number = isObj
+    ? (entryZone as Record<string, number>).max ?? 0
+    : isArr
+    ? (entryZone as number[])[1] ?? 0
+    : (entryZone as number) ?? 0
   const tp1 = Array.isArray(s.take_profit) ? s.take_profit[0] : s.take_profit_1 || 0
   const tp2 = Array.isArray(s.take_profit) ? s.take_profit[1] : s.take_profit_2
   const tp3 = Array.isArray(s.take_profit) ? s.take_profit[2] : s.take_profit_3
@@ -20,7 +49,6 @@ const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
   const rr = s.risk_reward || (tp1 && sl ? Math.abs((tp1 - entryLow) / (entryLow - sl)) : 0)
   const reasons = Array.isArray(s.reasons) ? s.reasons : s.reason ? [s.reason] : []
   const factors = s.factors || s.ai_factors || []
-  const created = s.created_at ? ago(s.created_at) : null
 
   return (
     <div className={cn("p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:brightness-110",
@@ -37,7 +65,6 @@ const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
               s.direction === "long" ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400")}>
               {s.direction?.toUpperCase()}
             </span>
-            {created && <span className="text-[9px] text-gray-700 ml-auto">{created}</span>}
           </div>
           <div className="flex items-center gap-3 mt-0.5">
             <span className="text-[10px] text-gray-500">{s.timeframe || "1h"}</span>
@@ -101,21 +128,17 @@ const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
       {factors.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {factors.slice(0, 3).map((f: string, i: number) => (
-            <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-800/50 text-gray-500">
-              {f}
-            </span>
+            <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-800/50 text-gray-500">{f}</span>
           ))}
         </div>
       )}
 
       <div className="flex items-center gap-2 mt-1.5">
         <button className="flex items-center gap-1 text-[9px] text-gray-600 hover:text-gray-400 transition-colors px-1.5 py-0.5 rounded hover:bg-gray-800/30">
-          <Target className="w-2.5 h-2.5" />
-          Copy
+          <Target className="w-2.5 h-2.5" /> Copy
         </button>
         <button className="flex items-center gap-1 text-[9px] text-gray-600 hover:text-gray-400 transition-colors px-1.5 py-0.5 rounded hover:bg-gray-800/30">
-          <Send className="w-2.5 h-2.5" />
-          Share
+          <Send className="w-2.5 h-2.5" /> Share
         </button>
       </div>
     </div>
@@ -123,11 +146,26 @@ const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
 })
 
 export function TopSignals() {
+  const { on, isConnected: isLive } = useWS()
   const [signals, setSignals] = useState<SignalData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const wsInitialized = useRef(false)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    const unsub = on("signal_update", (msg: { data?: unknown }) => {
+      const raw = msg?.data as { data?: SignalData[] } | SignalData[] | undefined
+      const list = Array.isArray(raw) ? raw : (raw as { data?: SignalData[] })?.data || []
+      if (Array.isArray(list) && list.length > 0) {
+        setSignals(list.slice(0, 5))
+        setError(null)
+      }
+      setLoading(false)
+    })
+    return unsub
+  }, [on])
+
+  const loadFallback = useCallback(async () => {
     try {
       const data = await api.scanAllV2(70)
       const list = data?.signals || data || []
@@ -141,13 +179,15 @@ export function TopSignals() {
   }, [])
 
   useEffect(() => {
-    const timer = setTimeout(load, 0)
-    const interval = setInterval(load, 60000)
-    return () => {
-      clearTimeout(timer)
-      clearInterval(interval)
+    if (signals.length === 0 && !wsInitialized.current) {
+      wsInitialized.current = true
+      loadFallback()
     }
-  }, [load])
+    const interval = setInterval(() => {
+      if (!isLive || signals.length === 0) loadFallback()
+    }, 60000)
+    return () => clearInterval(interval)
+  }, [isLive, signals.length, loadFallback])
 
   if (loading) {
     return (
@@ -182,11 +222,14 @@ export function TopSignals() {
           <Zap className="w-3.5 h-3.5 text-yellow-500" />
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Top Signals</h3>
         </div>
-        {signals.length > 0 && (
-          <span className="text-[10px] text-gray-600">
-            Best: {Math.round(Math.max(...signals.map((s) => s.confidence || s.score || 0)))}%
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {isLive && <span className="text-[9px] text-green-500">● LIVE</span>}
+          {signals.length > 0 && (
+            <span className="text-[10px] text-gray-600">
+              Best: {Math.round(Math.max(...signals.map((s) => s.confidence || s.score || 0)))}%
+            </span>
+          )}
+        </div>
       </div>
       {signals.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-gray-600">

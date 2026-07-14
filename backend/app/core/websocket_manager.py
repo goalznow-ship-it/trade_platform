@@ -27,8 +27,20 @@ class Channel:
     POSITIONS = "positions"
     PORTFOLIO = "portfolio"
     NOTIFICATIONS = "notifications"
+    ORDERFLOW = "orderflow"
+    DERIVATIVES = "derivatives"
+    NEWS = "news"
+    SENTIMENT = "sentiment"
+    ONCHAIN = "onchain"
+    MACRO = "macro"
+    BRAIN = "brain"
+    SCANNER = "scanner"
+    FEAR_GREED = "fear_greed"
+    BREADTH = "breadth"
 
-    ALL = [MARKET, TICKER, ORDERBOOK, SIGNALS, TRADES, POSITIONS, PORTFOLIO, NOTIFICATIONS]
+    ALL = [MARKET, TICKER, ORDERBOOK, SIGNALS, TRADES, POSITIONS, PORTFOLIO,
+           NOTIFICATIONS, ORDERFLOW, DERIVATIVES, NEWS, SENTIMENT, ONCHAIN,
+           MACRO, BRAIN, SCANNER, FEAR_GREED, BREADTH]
 
 
 class WebSocketClient:

@@ -23,6 +23,7 @@ from app.api.v1.websocket_v2 import router as ws_v2_router
 from app.services.alert import alert_service
 from app.services.binance_ws import binance_ws
 from app.services.market_coverage import market_coverage
+from app.services.streaming import streaming_service
 
 
 @asynccontextmanager
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
     await binance_ws.subscribe_klines(top_symbols[:10], "1m")
     await binance_ws.subscribe_depth(top_symbols[:5])
     await alert_service.start()
+    await streaming_service.start()
     try:
         await redis_client.ping()
         logger.info("Redis connected")
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Server starting on port {settings.PORT}")
     yield
     await alert_service.stop()
+    await streaming_service.stop()
     await binance_ws.stop()
     await ws_manager.stop()
     logger.info(f"Server shutting down")

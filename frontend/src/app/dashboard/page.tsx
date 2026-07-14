@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Navbar } from "@/components/Navbar"
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview"
+import { WSProvider } from "@/components/WSProvider"
+import { ConnectionQualityIndicator } from "@/components/dashboard/ConnectionQuality"
 import { useAuth } from "@/hooks/useAuth"
 import { useMarketStore } from "@/store/market"
 import {
   LayoutDashboard, LineChart, Activity, FileText, Settings,
   List, Bell, Shield, BookOpen, Wallet, Search,
-  PieChart, BarChart3, BellRing,
+  PieChart, BarChart3, BellRing, Wifi,
   ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -81,8 +83,11 @@ export default function DashboardPage() {
     "journal", "paper", "risk", "backtest", "notifications"].includes(activeTab)
 
   return (
+    <WSProvider>
     <div className="h-screen flex flex-col bg-[#0d1117]">
       <Navbar />
+
+      <ConnectionQualityIndicator />
 
       <main className="flex-1 flex overflow-hidden">
         <div className={cn(
@@ -182,5 +187,6 @@ export default function DashboardPage() {
         )}
       </main>
     </div>
+    </WSProvider>
   )
 }
