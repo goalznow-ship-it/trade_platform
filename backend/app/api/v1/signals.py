@@ -1,5 +1,6 @@
 """Enhanced Signal API with lifecycle tracking"""
 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -11,6 +12,16 @@ from app.ai_engine.engine import ai_engine
 from app.core.logging import logger
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
+
+@router.get("/{symbol}")
+async def get_signal(
+    symbol: str, timeframe: str = "1h",
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    signal = await ai_engine.generate_signal(symbol, timeframe)
+    if not signal:
+        raise HTTPException(503, "Unable to generate signal - data unavailable")
+    return signal
 
 @router.get("/generate/{symbol}")
 async def generate_signal(
