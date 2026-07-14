@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { api } from "@/lib/api"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 import {
   Radar, TrendingUp, TrendingDown, Activity,
@@ -17,24 +18,27 @@ export function MarketRadar() {
     async function load() {
       setLoading(true)
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/market/overview`)
-        const overview = await res.json()
+        const [overview, whales] = await Promise.all([
+          api.getOverview(),
+          api.getRecentWhales(5).catch(() => []),
+        ])
         setData(overview)
-        const now = Date.now()
-        setAlerts([
-          "BTC funding increased 40% in 5 minutes",
-          "Large whale deposit detected on Binance: 5,200 BTC",
-          "OI rising while price falling: possible liquidation cascade",
-          "ETH/BTC ratio at 3-month low: capital rotation detected",
-        ])
+        const alerts: string[] = []
+        if (overview?.btc_change && Math.abs(overview.btc_change) > 3) {
+          alerts.push(`BTC moved ${overview.btc_change > 0 ? "+" : ""}${overview.btc_change.toFixed(1)}% — high volatility`)
+        }
+        if (Array.isArray(whales) && whales.length > 0) {
+          whales.slice(0, 3).forEach((w: any) => {
+            alerts.push(`Whale: ${w.amount} ${w.symbol} moved — ${w.direction} impact ${w.impact}%`)
+          })
+        }
+        if (alerts.length === 0) {
+          alerts.push("No significant anomalies detected")
+        }
+        setAlerts(alerts)
       } catch {
-        setData(getMockData())
-        setAlerts([
-          "BTC funding rate extreme: potential squeeze",
-          "Whale accumulation detected across 3 exchanges",
-          "Open interest at ATH for BTC futures",
-          "Long/Short ratio skewed bearish: 1.2:1",
-        ])
+        setData(null)
+        setAlerts(["Data temporarily unavailable"])
       } finally {
         setLoading(false)
       }
@@ -223,15 +227,4 @@ export function MarketRadar() {
   )
 }
 
-function getMockData() {
-  return {
-    btc_dominance: 52.4,
-    eth_btc_ratio: 0.042,
-    funding_sentiment: "NEUTRAL",
-    funding_change: "+0.002%",
-    long_short_ratio: 1.24,
-    btc_price: 64200,
-    btc_change: 1.8,
-    eth_price: 3450,
-  }
-}
+

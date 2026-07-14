@@ -36,7 +36,7 @@ export function MarketScanner() {
     async function load() {
       setLoading(true)
       try {
-        const data = await api.scanAll("1h", 0)
+        const data = await api.scanAllV2(0)
         const signals = Array.isArray(data) ? data : []
         const long = signals.filter((s: any) => (s.direction || s.signal) === "long" || (s.direction || s.signal) === "bullish" || (s.direction || s.signal) === "buy")
           .sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
@@ -45,22 +45,14 @@ export function MarketScanner() {
           .sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
           .slice(0, 10)
         setResults({
-          long: long.length > 0 ? long : getMockLong(),
-          short: short.length > 0 ? short : getMockShort(),
-          volatility: getMockVolatility(),
-          volume: getMockVolume(),
-          liquidation: getMockLiquidation(),
-          whale: getMockWhale(),
+          long, short,
+          volatility: signals.filter((s: any) => s.details?.atr && s.details.atr > 2).slice(0, 5),
+          volume: signals.filter((s: any) => (s.scores?.volume || 0) > 0.3).slice(0, 5),
+          liquidation: signals.filter((s: any) => s.futures?.liquidation).slice(0, 5),
+          whale: signals.filter((s: any) => (s.confidence || 0) > 80).slice(0, 5),
         })
       } catch {
-        setResults({
-          long: getMockLong(),
-          short: getMockShort(),
-          volatility: getMockVolatility(),
-          volume: getMockVolume(),
-          liquidation: getMockLiquidation(),
-          whale: getMockWhale(),
-        })
+        setResults({ long: [], short: [], volatility: [], volume: [], liquidation: [], whale: [] })
       } finally {
         setLoading(false)
       }
@@ -191,68 +183,4 @@ export function MarketScanner() {
   )
 }
 
-function getMockPrice() { return Math.random() * 50000 + 10 }
 
-function getMockLong(): ScannerResult[] {
-  return [
-    { symbol: "BTC/USDT", direction: "long", confidence: 87, price: getMockPrice(), change: 2.4, reason: "Bullish breakout above resistance" },
-    { symbol: "SOL/USDT", direction: "long", confidence: 84, price: getMockPrice(), change: 5.1, reason: "Strong volume + momentum" },
-    { symbol: "LINK/USDT", direction: "long", confidence: 82, price: getMockPrice(), change: 3.8, reason: "Golden cross detected" },
-    { symbol: "AVAX/USDT", direction: "long", confidence: 79, price: getMockPrice(), change: 2.9, reason: "Support bounce + volume spike" },
-    { symbol: "BNB/USDT", direction: "long", confidence: 76, price: getMockPrice(), change: 1.7, reason: "EMA alignment bullish" },
-    { symbol: "ETH/USDT", direction: "long", confidence: 74, price: getMockPrice(), change: 1.2, reason: "Consolidation breakout" },
-    { symbol: "MATIC/USDT", direction: "long", confidence: 72, price: getMockPrice(), change: 4.3, reason: "Oversold bounce" },
-    { symbol: "DOT/USDT", direction: "long", confidence: 70, price: getMockPrice(), change: 2.1, reason: "Rising wedge breakout" },
-  ]
-}
-
-function getMockShort(): ScannerResult[] {
-  return [
-    { symbol: "DOGE/USDT", direction: "short", confidence: 81, price: getMockPrice(), change: -3.2, reason: "Bearish divergence" },
-    { symbol: "XRP/USDT", direction: "short", confidence: 78, price: getMockPrice(), change: -2.8, reason: "Resistance rejection" },
-    { symbol: "ADA/USDT", direction: "short", confidence: 75, price: getMockPrice(), change: -1.9, reason: "Lower high formation" },
-    { symbol: "ATOM/USDT", direction: "short", confidence: 73, price: getMockPrice(), change: -4.1, reason: "Death cross imminent" },
-    { symbol: "NEAR/USDT", direction: "short", confidence: 71, price: getMockPrice(), change: -2.5, reason: "Volume declining" },
-    { symbol: "APT/USDT", direction: "short", confidence: 68, price: getMockPrice(), change: -3.5, reason: "Trendline breakdown" },
-  ]
-}
-
-function getMockVolatility(): ScannerResult[] {
-  return [
-    { symbol: "SOL/USDT", direction: "long", confidence: 84, price: getMockPrice(), change: 5.1, reason: "ATR: 4.2% - High volatility" },
-    { symbol: "MATIC/USDT", direction: "long", confidence: 72, price: getMockPrice(), change: 4.3, reason: "ATR: 3.8% - Expanding" },
-    { symbol: "NEAR/USDT", direction: "short", confidence: 71, price: getMockPrice(), change: -2.5, reason: "ATR: 3.5% - Above average" },
-    { symbol: "DOGE/USDT", direction: "short", confidence: 81, price: getMockPrice(), change: -3.2, reason: "ATR: 3.1% - Increasing" },
-    { symbol: "AVAX/USDT", direction: "long", confidence: 79, price: getMockPrice(), change: 2.9, reason: "ATR: 2.9% - Steady" },
-  ]
-}
-
-function getMockVolume(): ScannerResult[] {
-  return [
-    { symbol: "BTC/USDT", direction: "long", confidence: 87, price: getMockPrice(), change: 2.4, reason: "Vol: 2.4x avg - Breakout" },
-    { symbol: "SOL/USDT", direction: "long", confidence: 84, price: getMockPrice(), change: 5.1, reason: "Vol: 3.1x avg - Spike" },
-    { symbol: "LINK/USDT", direction: "long", confidence: 82, price: getMockPrice(), change: 3.8, reason: "Vol: 1.8x avg - Above avg" },
-    { symbol: "ETH/USDT", direction: "long", confidence: 74, price: getMockPrice(), change: 1.2, reason: "Vol: 1.5x avg - Building" },
-    { symbol: "DOGE/USDT", direction: "short", confidence: 81, price: getMockPrice(), change: -3.2, reason: "Vol: 2.2x avg - Distribution" },
-  ]
-}
-
-function getMockLiquidation(): ScannerResult[] {
-  return [
-    { symbol: "BTC/USDT", direction: "long", confidence: 87, price: getMockPrice(), change: 2.4, reason: "$45M long liq cascade" },
-    { symbol: "ETH/USDT", direction: "short", confidence: 74, price: getMockPrice(), change: -1.2, reason: "$22M short squeeze" },
-    { symbol: "SOL/USDT", direction: "long", confidence: 84, price: getMockPrice(), change: 5.1, reason: "$18M long liquidations" },
-    { symbol: "XRP/USDT", direction: "short", confidence: 78, price: getMockPrice(), change: -2.8, reason: "$12M short positions" },
-    { symbol: "DOGE/USDT", direction: "short", confidence: 81, price: getMockPrice(), change: -3.2, reason: "$8M liquidations" },
-  ]
-}
-
-function getMockWhale(): ScannerResult[] {
-  return [
-    { symbol: "BTC/USDT", direction: "long", confidence: 87, price: getMockPrice(), change: 2.4, reason: "Whale accumulation: +12K BTC" },
-    { symbol: "ETH/USDT", direction: "long", confidence: 74, price: getMockPrice(), change: 1.2, reason: "Whale buys: 85K ETH" },
-    { symbol: "LINK/USDT", direction: "long", confidence: 82, price: getMockPrice(), change: 3.8, reason: "Large transfers to cold wallet" },
-    { symbol: "SOL/USDT", direction: "neutral", confidence: 50, price: getMockPrice(), change: 0.5, reason: "Whale redistribution detected" },
-    { symbol: "BNB/USDT", direction: "long", confidence: 76, price: getMockPrice(), change: 1.7, reason: "Exchange outflow: $50M" },
-  ]
-}

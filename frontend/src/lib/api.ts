@@ -207,6 +207,27 @@ export const api = {
   archiveNotification: (id: number) =>
     request(`/api/v1/notifications/${id}/archive`, { method: "PUT" }),
 
+  // AI Signals v2
+  generateSignal: (symbol: string, timeframe = "1h") =>
+    request<any>(`/api/v1/signals/generate/${symbol}?timeframe=${timeframe}`),
+
+  scanAllV2: (minConfidence = 50) =>
+    request<any[]>(`/api/v1/signals/scan?min_confidence=${minConfidence}`),
+
+  // Performance
+  getPerformanceStats: (days = 30) =>
+    request<any>(`/api/v1/performance/stats?days=${days}`),
+
+  getPerformanceAccuracy: (days = 90) =>
+    request<any[]>(`/api/v1/performance/accuracy?days=${days}`),
+
+  // Whales
+  getRecentWhales: (limit = 10) =>
+    request<any[]>(`/api/v1/whales/recent?limit=${limit}`),
+
+  getWhaleAlerts: (hours = 24) =>
+    request<any[]>(`/api/v1/whales/alerts?hours=${hours}`),
+
   // Admin
   getAdminStats: () => request<any>("/api/v1/admin/stats"),
   getAdminHealth: () => request<any>("/api/v1/admin/health"),

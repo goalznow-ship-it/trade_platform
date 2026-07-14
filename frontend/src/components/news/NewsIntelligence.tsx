@@ -18,10 +18,10 @@ export function NewsIntelligence() {
     async function load() {
       setLoading(true)
       try {
-        const data = await request("/api/v1/enterprise/news-intelligence")
+        const data = await api.getNewsIntelligence()
         setNews(Array.isArray(data) ? data : [])
       } catch {
-        setNews(getMockNews())
+        setNews([])
       } finally {
         setLoading(false)
       }
@@ -211,26 +211,4 @@ export function NewsIntelligence() {
   )
 }
 
-async function request(url: string) {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
-  const headers: Record<string, string> = {}
-  if (token) headers["Authorization"] = `Bearer ${token}`
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-  const res = await fetch(`${base}${url}`, { headers })
-  if (!res.ok) throw new Error("Request failed")
-  return res.json()
-}
 
-function getMockNews() {
-  const items = [
-    { title: "Bitcoin ETF sees record $1.2B weekly inflow", source: "CoinDesk", category: "macro", impact: "positive", score: 88, summary: "Spot Bitcoin ETFs recorded their largest weekly inflow since launch, signaling strong institutional demand.", assets: ["BTC"], timestamp: Date.now() / 1000 - 300 },
-    { title: "FED holds rates steady, signals potential cut in September", source: "Reuters", category: "macro", impact: "positive", score: 82, summary: "Federal Reserve maintains current interest rates while hinting at possible rate cuts later this year, boosting risk assets.", assets: ["BTC", "ETH"], timestamp: Date.now() / 1000 - 900 },
-    { title: "SEC delays decision on multiple spot Ethereum ETF applications", source: "Bloomberg", category: "regulation", impact: "negative", score: 75, summary: "The SEC has postponed rulings on several Ethereum ETF proposals, pushing deadlines to Q4 2025.", assets: ["ETH"], timestamp: Date.now() / 1000 - 1800 },
-    { title: "Whale moves 15,000 BTC from unknown wallet to Binance", source: "Whale Alert", category: "whale", impact: "negative", score: 65, summary: "A large Bitcoin holder transferred 15,000 BTC worth approximately $960M to Binance, potentially signaling intent to sell.", assets: ["BTC"], timestamp: Date.now() / 1000 - 3600 },
-    { title: "MicroStrategy acquires additional 3,000 BTC for $192M", source: "PR Newswire", category: "whale", impact: "positive", score: 78, summary: "MicroStrategy continues its Bitcoin accumulation strategy, adding 3,000 BTC to its corporate treasury.", assets: ["BTC"], timestamp: Date.now() / 1000 - 7200 },
-    { title: "Crypto exchange reports security breach, $50M in user funds affected", source: "The Block", category: "security", impact: "negative", score: 92, summary: "A major cryptocurrency exchange reported a security incident resulting in unauthorized withdrawals of approximately $50 million in user assets.", assets: ["BTC", "ETH", "SOL"], timestamp: Date.now() / 1000 - 14400 },
-    { title: "US Treasury proposes new crypto taxation framework", source: "Financial Times", category: "regulation", impact: "negative", score: 70, summary: "New proposed regulations would require crypto brokers to report all transactions over $10,000 to the IRS.", assets: ["BTC", "ETH"], timestamp: Date.now() / 1000 - 28800 },
-    { title: "DeFi TVL surpasses $80B for first time since 2022", source: "DeFi Pulse", category: "macro", impact: "positive", score: 74, summary: "Total value locked in DeFi protocols has reached $80 billion, indicating renewed interest in decentralized finance.", assets: ["ETH", "SOL"], timestamp: Date.now() / 1000 - 43200 },
-  ]
-  return items
-}

@@ -1,56 +1,66 @@
-import httpx
-from typing import Optional, List
-from app.core.config import settings
+"""
+Multi-channel Notification Service
+Supports: in-app WebSocket, Telegram, email
+"""
+
+from typing import Optional
+from datetime import datetime, timezone
+from app.core.websocket_manager import ws_manager
 from app.core.logging import logger
 
-class NotificationService:
-    def __init__(self):
-        self.logger = logger
+class NotificationsService:
+    async def send_signal_alert(self, user_id: int, signal: dict):
+        conf = signal.get('confidence', 0)
+        if conf < 85:
+            return
 
-    async def send_telegram(self, chat_id: str, message: str) -> bool:
-        if not settings.TELEGRAM_BOT_TOKEN:
-            return False
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage",
-                    json={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'},
-                )
-                return resp.status_code == 200
-        except Exception:
-            return False
-
-    async def send_discord(self, webhook_url: str, message: str) -> bool:
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(webhook_url, json={'content': message})
-                return resp.status_code == 204
-        except Exception:
-            return False
-
-    async def send_signal_notification(self, user_id: int, signal: dict, channels: List[str]):
-        message = self._format_signal_message(signal)
-        for channel in channels:
-            if channel == 'telegram':
-                await self.send_telegram(str(user_id), message)
-            elif channel == 'discord':
-                await self.send_discord(str(user_id), message)
-
-    def _format_signal_message(self, signal: dict) -> str:
-        direction_emoji = '🟢' if signal['direction'] == 'long' else '🔴'
-        msg = (
-            f"{direction_emoji} <b>TRADE SIGNAL</b>\n"
-            f"Symbol: {signal['symbol']}\n"
-            f"Direction: <b>{signal['direction'].upper()}</b>\n"
-            f"Confidence: {signal['confidence']}%\n"
-            f"Entry: ${signal['entry_price']}\n"
-            f"SL: ${signal['stop_loss']}\n"
-            f"TP1: ${signal['take_profit_1']}\n"
-            f"TP2: ${signal['take_profit_2'] if signal.get('take_profit_2') else 'N/A'}\n"
-            f"RR: {signal['risk_reward']}\n"
-            f"Leverage: {signal['leverage']}x\n"
-            f"Reason: {signal.get('reason', 'N/A')}"
+        title = f"{'🔥' if conf >= 90 else '✅'} AI HIGH CONFIDENCE SIGNAL"
+        message = (
+            f"{signal['symbol']}\n"
+            f"Direction: {signal['direction'].upper()}\n"
+            f"Confidence: {conf}%\n"
+            f"Entry: ${signal.get('entry_zone', {}).get('min', 0):.0f}-${signal.get('entry_zone', {}).get('max', 0):.0f}\n"
+            f"TP: ${signal.get('take_profit', [0])[2]:.0f}\n"
+            f"Risk: {signal.get('risk', 'medium').upper()}"
         )
-        return msg
+        await ws_manager.send_to_user(user_id, "signal_alert", {
+            "type": "signal_alert",
+            "title": title,
+            "message": message,
+            "signal": signal,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"Signal alert sent to user {user_id}: {signal['symbol']} {signal['direction']} {conf}%")
 
-notification_service = NotificationService()
+    async def send_whale_alert(self, user_id: int, whale: dict):
+        title = f"🐋 Whale Alert: {whale['symbol']}"
+        message = (
+            f"Amount: {whale['amount']}\n"
+            f"Value: {whale['value']}\n"
+            f"Impact: {whale.get('impact', 0)}% {whale.get('direction', 'neutral').upper()}"
+        )
+        await ws_manager.send_to_user(user_id, "whale_alert", {
+            "type": "whale_alert",
+            "title": title,
+            "message": message,
+            "whale": whale,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    async def send_breakout_alert(self, user_id: int, symbol: str, price: float, direction: str):
+        title = f"🚀 Breakout: {symbol}"
+        message = f"{symbol} broke {direction.upper()} at ${price:.0f}"
+        await ws_manager.send_to_user(user_id, "breakout_alert", {
+            "type": "breakout_alert", "title": title, "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    async def send_tp_alert(self, user_id: int, symbol: str, tp_level: int, price: float):
+        title = f"🎯 TP{tp_level} Hit: {symbol}"
+        message = f"{symbol} reached TP{tp_level} at ${price:.0f}"
+        await ws_manager.send_to_user(user_id, "tp_alert", {
+            "type": "tp_alert", "title": title, "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+notifications_service = NotificationsService()

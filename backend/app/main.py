@@ -9,6 +9,9 @@ from app.core.rate_limiter import RateLimitMiddleware
 from app.core.security import AuditMiddleware
 from app.core.websocket_manager import ws_manager
 from app.api.v1 import auth, market, analysis, signals, trading, news, admin, scanner, backtest, portfolio
+from app.api.v1 import signals as signals_v2_router
+from app.api.v1 import performance as performance_router
+from app.api.v1 import whales as whales_router
 from app.api.v1 import watchlists as watchlists_router
 from app.api.v1 import alerts as alerts_router
 from app.api.v1 import risk as risk_router
@@ -66,6 +69,9 @@ app.include_router(analysis.router, prefix="/api/v1")
 app.include_router(signals.router, prefix="/api/v1")
 app.include_router(trading.router, prefix="/api/v1")
 app.include_router(news.router, prefix="/api/v1")
+app.include_router(signals_v2_router.router, prefix="/api/v1")
+app.include_router(performance_router.router, prefix="/api/v1")
+app.include_router(whales_router.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(scanner.router, prefix="/api/v1")
 app.include_router(backtest.router, prefix="/api/v1")

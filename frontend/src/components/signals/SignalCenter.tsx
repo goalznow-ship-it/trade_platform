@@ -24,10 +24,10 @@ export function SignalCenter() {
   async function load() {
     setLoading(true)
     try {
-      const data = await api.scanAll("1h", highConfidenceOnly ? 80 : 0)
+      const data = await api.scanAllV2(highConfidenceOnly ? 80 : 0)
       setSignals(Array.isArray(data) ? data : [])
     } catch {
-      setSignals(getMockSignals())
+      setSignals([])
     } finally {
       setLoading(false)
     }
@@ -164,49 +164,4 @@ export function SignalCenter() {
   )
 }
 
-function getMockSignals() {
-  const symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT", "DOGE/USDT"]
-  return symbols.map((s) => {
-    const price = Math.random() * 50000 + 10
-    const isLong = Math.random() > 0.5
-    return {
-      symbol: s,
-      direction: isLong ? "long" : "short",
-      confidence: Math.floor(Math.random() * 35) + 55,
-      entry_price: price,
-      entry_zone_high: price * 1.003,
-      stop_loss: isLong ? price * 0.975 : price * 1.025,
-      take_profit: isLong ? price * 1.04 : price * 0.96,
-      take_profit_2: isLong ? price * 1.07 : price * 0.93,
-      take_profit_3: isLong ? price * 1.10 : price * 0.90,
-      risk_reward: (Math.random() * 3 + 1.5).toFixed(1),
-      reason: isLong ? "Bullish momentum + volume spike detected" : "Bearish divergence on RSI with resistance",
-      timeframe: "1h",
-      signal_type: isLong ? "Breakout" : "Breakdown",
-      technical: {
-        ema_alignment: isLong,
-        rsi: isLong ? 65 - Math.random() * 20 : 35 + Math.random() * 20,
-        macd: isLong ? Math.random() * 5 : -Math.random() * 5,
-        volume: isLong,
-      },
-      market_structure: {
-        bos: isLong,
-        choch: Math.random() > 0.3,
-        order_block: isLong,
-        liquidity: Math.random() > 0.4,
-        fvg: Math.random() > 0.5,
-      },
-      futures: {
-        funding: isLong ? "negative" : "positive",
-        open_interest: isLong ? "increasing" : "decreasing",
-        liquidation: isLong ? "below" : "above",
-        long_short_ratio: Math.random() * 2,
-      },
-      news: {
-        impact: isLong ? "positive" : "negative",
-        score: Math.floor(Math.random() * 60) + 30,
-        sentiment: isLong ? "bullish" : "bearish",
-      },
-    }
-  })
-}
+

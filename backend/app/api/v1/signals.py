@@ -1,32 +1,52 @@
-from fastapi import APIRouter, Depends
-from app.services.signals import signal_service
-from app.services.market import market_service
-from app.services.scanner import scanner_service
+"""Enhanced Signal API with lifecycle tracking"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
+from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
+from app.models.analysis import Signal
+from app.ai_engine.engine import ai_engine
+from app.core.logging import logger
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
+@router.get("/generate/{symbol}")
+async def generate_signal(
+    symbol: str, timeframe: str = "1h",
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    signal = await ai_engine.generate_signal(symbol, timeframe)
+    if not signal:
+        raise HTTPException(503, "Unable to generate signal - data unavailable")
+    return signal
 
-def _fix_symbol(symbol: str) -> str:
-    return symbol.replace("-", "/")
+@router.get("/scan")
+async def scan_all(
+    min_confidence: float = Query(50, ge=0, le=100),
+    user: User = Depends(get_current_user)
+):
+    signals = await ai_engine.scan_all(min_confidence=min_confidence)
+    return signals
 
-
-@router.get("/scanner/all")
-async def scan_all(timeframe: str = "1h", min_confidence: float = 70):
-    return await scanner_service.scan_top_signals(min_confidence)
-
-
-@router.get("/scanner/{symbol:path}")
-async def scan_symbol(symbol: str, timeframe: str = "1h"):
-    symbol = _fix_symbol(symbol)
-    return await scanner_service.scan_market([symbol], timeframe)
-
-
-@router.get("/{symbol:path}")
-async def get_signals(symbol: str, timeframe: str = "1h", exchange: str = "binance"):
-    symbol = _fix_symbol(symbol)
-    data = await market_service.get_ohlcv(symbol, exchange, timeframe, 200)
-    if not data:
-        return {"error": "No data available"}
-    return await signal_service.generate_signals(symbol, data, timeframe)
+@router.get("/history")
+async def signal_history(
+    symbol: Optional[str] = None,
+    limit: int = 50,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    q = select(Signal).where(Signal.symbol_id == user.id)
+    if symbol:
+        q = q.where(Signal.symbol == symbol)
+    q = q.order_by(Signal.created_at.desc()).limit(limit)
+    result = await db.execute(q)
+    signals = result.scalars().all()
+    return [{
+        "id": s.id, "symbol": s.symbol, "direction": s.direction,
+        "confidence": s.confidence, "entry_price": s.entry_price,
+        "stop_loss": s.stop_loss, "take_profit_1": s.take_profit_1,
+        "risk_reward": s.risk_reward, "reason": s.reason,
+        "result": getattr(s, 'result', None),
+        "created_at": str(s.created_at),
+    } for s in signals]

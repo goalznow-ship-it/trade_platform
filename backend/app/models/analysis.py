@@ -39,6 +39,7 @@ class Signal(Base):
     is_triggered = Column(Boolean, default=False)
     triggered_price = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    result = Column(String(20), nullable=True)  # new, active, tp1_hit, tp2_hit, tp3_hit, sl_hit
     expires_at = Column(DateTime, nullable=True)
 
 class AIAnalysis(Base):

@@ -15,10 +15,15 @@ export function FuturesDashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await request("/api/v1/enterprise/futures-dashboard")
-        setData(Array.isArray(res) ? res : [])
+        const signals = await api.scanAllV2(0)
+        setData(Array.isArray(signals) ? signals.map((s: any) => ({
+          ...s,
+          funding_rate: s.scores?.futures_score || 0,
+          long_probability: s.long_probability || 50,
+          short_probability: s.short_probability || 50,
+        })) : [])
       } catch {
-        setData(getMockData())
+        setData([])
       } finally {
         setLoading(false)
       }
@@ -230,26 +235,4 @@ export function FuturesDashboard() {
   )
 }
 
-async function request(url: string) {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
-  const headers: Record<string, string> = {}
-  if (token) headers["Authorization"] = `Bearer ${token}`
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-  const res = await fetch(`${base}${url}`, { headers })
-  if (!res.ok) throw new Error("Request failed")
-  return res.json()
-}
 
-function getMockData() {
-  const symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOGE/USDT"]
-  return symbols.map((s) => ({
-    symbol: s,
-    price: Math.random() * 50000 + 10,
-    direction: ["long", "short", "neutral"][Math.floor(Math.random() * 3)],
-    confidence: Math.floor(Math.random() * 40) + 50,
-    funding_rate: (Math.random() - 0.5) * 0.02,
-    funding_pressure: Math.random() > 0.5 ? "bullish" : "bearish",
-    long_probability: Math.floor(Math.random() * 60) + 20,
-    short_probability: Math.floor(Math.random() * 60) + 20,
-  }))
-}
