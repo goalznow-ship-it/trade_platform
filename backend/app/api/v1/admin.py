@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os, psutil
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from pydantic import BaseModel
 from typing import Optional
 from app.core.database import get_db
 from app.core.security import require_admin
+from app.core.websocket_manager import ws_manager
 from app.models.user import User
 from app.models.analysis import Signal, AIAnalysis
 from app.models.trade import Trade
@@ -22,6 +24,62 @@ class SymbolCreate(BaseModel):
     name: str
     exchange: str = "binance"
     asset_type: str = "crypto"
+
+# System Health
+@router.get("/health")
+async def system_health(admin: User = Depends(require_admin)):
+    from app.core.redis import redis_client
+    health = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "services": {},
+    }
+    try:
+        await redis_client.ping()
+        health["services"]["redis"] = "connected"
+    except Exception:
+        health["services"]["redis"] = "disconnected"
+        health["status"] = "degraded"
+    try:
+        async with get_db() as session:
+            await session.execute(text("SELECT 1"))
+            health["services"]["postgres"] = "connected"
+    except Exception:
+        health["services"]["postgres"] = "disconnected"
+        health["status"] = "degraded"
+    health["services"]["websocket"] = f"{ws_manager.stats['total_clients']} clients"
+    return health
+
+
+@router.get("/system")
+async def system_info(admin: User = Depends(require_admin)):
+    return {
+        "cpu_percent": psutil.cpu_percent(interval=0.1),
+        "memory": {
+            "total": psutil.virtual_memory().total,
+            "available": psutil.virtual_memory().available,
+            "percent": psutil.virtual_memory().percent,
+        },
+        "disk": {
+            "total": psutil.disk_usage("/").total,
+            "used": psutil.disk_usage("/").used,
+            "free": psutil.disk_usage("/").free,
+            "percent": psutil.disk_usage("/").percent,
+        },
+        "process": {
+            "pid": os.getpid(),
+            "memory_mb": psutil.Process().memory_info().rss / 1024 / 1024,
+            "cpu_percent": psutil.Process().cpu_percent(interval=0.1),
+        },
+        "python_version": __import__("sys").version,
+        "platform": os.uname().sysname,
+    }
+
+
+@router.get("/ws-clients")
+async def ws_clients(admin: User = Depends(require_admin)):
+    return ws_manager.stats
+
 
 # Dashboard Stats
 @router.get("/stats")

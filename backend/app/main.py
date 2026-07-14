@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import logger
 from app.core.rate_limiter import RateLimitMiddleware
+from app.core.security import AuditMiddleware
 from app.core.websocket_manager import ws_manager
 from app.api.v1 import auth, market, analysis, signals, trading, news, admin, scanner, backtest, portfolio
 from app.api.v1 import watchlists as watchlists_router
@@ -55,6 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(AuditMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=settings.RATE_LIMIT_MAX, window_seconds=settings.RATE_LIMIT_WINDOW)
 
 app.include_router(auth.router, prefix="/api/v1")

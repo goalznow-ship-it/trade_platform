@@ -85,4 +85,6 @@ class TradeHistory(Base):
     risk_reward = Column(Float)
     reason = Column(Text)
     exchange = Column(String(20))
+    notes = Column(Text, nullable=True)
+    tags = Column(JSON, nullable=True)
     closed_at = Column(DateTime(timezone=True), server_default=func.now())
