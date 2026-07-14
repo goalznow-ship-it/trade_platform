@@ -7,6 +7,8 @@ import { ActivePositions } from "@/components/dashboard/ActivePositions"
 import { SentimentWidget } from "@/components/dashboard/SentimentWidget"
 import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary"
 import { MarketSummary } from "@/components/dashboard/MarketSummary"
+import { AIConfidencePanel } from "@/components/dashboard/AIConfidencePanel"
+import { EngineStatus } from "@/components/dashboard/EngineStatus"
 
 export function DashboardOverview() {
   return (
@@ -18,20 +20,25 @@ export function DashboardOverview() {
         </div>
       </div>
 
-      <MarketSummary />
-
       <DashboardStats />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
+      <MarketSummary />
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div className="lg:col-span-3 space-y-4">
           <MarketOverview />
           <TopSignals />
         </div>
         <div className="space-y-4">
+          <AIConfidencePanel />
           <SentimentWidget />
-          <PortfolioSummary />
-          <ActivePositions />
+          <EngineStatus />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ActivePositions />
+        <PortfolioSummary />
       </div>
     </div>
   )

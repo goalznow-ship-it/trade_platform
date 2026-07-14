@@ -216,7 +216,7 @@ export const api = {
     request<any>(`/api/v1/signals/generate/${symbol}?timeframe=${timeframe}`),
 
   scanAllV2: (minConfidence = 50) =>
-    request<any[]>(`/api/v1/signals/scan?min_confidence=${minConfidence}`),
+    request<any>(`/api/v1/signals/scan?min_confidence=${minConfidence}`),
 
   // Performance
   getPerformanceStats: (days = 30) =>
@@ -249,4 +249,56 @@ export const api = {
   deleteSignal: (id: number) =>
     request(`/api/v1/admin/signals/${id}`, { method: "DELETE" }),
   getLogs: () => request<any[]>("/api/v1/admin/logs"),
+
+  // WebSocket Stats
+  getWsStats: () => request<any>("/ws/stats"),
+
+  // Institutional
+  getInstitutionalSignal: (symbol: string, timeframe = "1h", capital = 10000, riskPercent = 0.02) =>
+    request<any>(`/api/v1/institutional/signal/${symbol}?timeframe=${timeframe}&capital=${capital}&risk_percent=${riskPercent}`),
+
+  institutionalScan: (minScore = 70, limit = 10) =>
+    request<any>(`/api/v1/institutional/scan?min_score=${minScore}&limit=${limit}`),
+
+  getMultiTimeframe: (symbol: string) =>
+    request<any>(`/api/v1/institutional/multi-timeframe/${symbol}`),
+
+  getSMC: (symbol: string, timeframe = "1h") =>
+    request<any>(`/api/v1/institutional/smc/${symbol}?timeframe=${timeframe}`),
+
+  getInstitutionalScore: (symbol: string, timeframe = "1h") =>
+    request<any>(`/api/v1/institutional/score/${symbol}?timeframe=${timeframe}`),
+
+  calculatePositionSize: (entryPrice: number, stopLoss: number, capital = 10000, riskPercent = 0.02, leverage?: number) => {
+    let q = `entry_price=${entryPrice}&stop_loss=${stopLoss}&capital=${capital}&risk_percent=${riskPercent}`
+    if (leverage) q += `&leverage=${leverage}`
+    return request<any>(`/api/v1/institutional/risk/position-size?${q}`)
+  },
+
+  calculateKelly: (winRate: number, avgWin: number, avgLoss: number) =>
+    request<any>(`/api/v1/institutional/risk/kelly?win_rate=${winRate}&avg_win=${avgWin}&avg_loss=${avgLoss}`),
+
+  validateTrade: (symbol: string, direction: string, entryPrice: number, stopLoss: number, takeProfit: number, leverage = 1, balance = 10000) =>
+    request<any>(`/api/v1/institutional/risk/validate?symbol=${symbol}&direction=${direction}&entry_price=${entryPrice}&stop_loss=${stopLoss}&take_profit=${takeProfit}&leverage=${leverage}&balance=${balance}`),
+
+  getTopMarkets: (count = 30) =>
+    request<any>(`/api/v1/institutional/market/top?count=${count}`),
+
+  getMarketGainers: (count = 10) =>
+    request<any>(`/api/v1/institutional/market/gainers?count=${count}`),
+
+  getMarketLosers: (count = 10) =>
+    request<any>(`/api/v1/institutional/market/losers?count=${count}`),
+
+  getVolumeLeaders: (count = 10) =>
+    request<any>(`/api/v1/institutional/market/volume-leaders?count=${count}`),
+
+  getFundingRates: (count = 20) =>
+    request<any>(`/api/v1/institutional/market/funding?count=${count}`),
+
+  getOpenInterest: (count = 20) =>
+    request<any>(`/api/v1/institutional/market/open-interest?count=${count}`),
+
+  getTrendingCoins: (count = 10) =>
+    request<any>(`/api/v1/institutional/market/trending?count=${count}`),
 }

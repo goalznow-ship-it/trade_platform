@@ -1,23 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, Suspense } from "react"
 import { useRouter } from "next/navigation"
+import dynamic from "next/dynamic"
 import { Navbar } from "@/components/Navbar"
 import { DashboardOverview } from "@/components/dashboard/DashboardOverview"
-import { TradingChart } from "@/components/chart/TradingChart"
-import { TradingPanel } from "@/components/trading/TradingPanel"
-import { AnalysisPanel } from "@/components/trading/AnalysisPanel"
-import { NewsPanel } from "@/components/news/NewsPanel"
-import { WatchlistPanel } from "@/components/watchlist/WatchlistPanel"
-import { AlertPanel } from "@/components/alert/AlertPanel"
-import { RiskPanel } from "@/components/risk/RiskPanel"
-import { JournalPanel } from "@/components/journal/JournalPanel"
-import { PaperTradingPanel } from "@/components/paper/PaperTradingPanel"
-import { ScannerPanel } from "@/components/scanner/ScannerPanel"
-import { PortfolioPanel } from "@/components/portfolio/PortfolioPanel"
-import { BacktestPanel } from "@/components/backtest/BacktestPanel"
-import { NotificationsPanel } from "@/components/notifications/NotificationsPanel"
-import { AdminDashboard } from "@/components/admin/AdminDashboard"
 import { useAuth } from "@/hooks/useAuth"
 import { useMarketStore } from "@/store/market"
 import {
@@ -27,6 +14,32 @@ import {
   ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const TradingChart = dynamic(() => import("@/components/chart/TradingChart").then((m) => ({ default: m.TradingChart })), { ssr: false })
+const TradingPanel = dynamic(() => import("@/components/trading/TradingPanel").then((m) => ({ default: m.TradingPanel })), { ssr: false })
+const AnalysisPanel = dynamic(() => import("@/components/trading/AnalysisPanel").then((m) => ({ default: m.AnalysisPanel })), { ssr: false })
+const NewsPanel = dynamic(() => import("@/components/news/NewsPanel").then((m) => ({ default: m.NewsPanel })), { ssr: false })
+const WatchlistPanel = dynamic(() => import("@/components/watchlist/WatchlistPanel").then((m) => ({ default: m.WatchlistPanel })), { ssr: false })
+const AlertPanel = dynamic(() => import("@/components/alert/AlertPanel").then((m) => ({ default: m.AlertPanel })), { ssr: false })
+const RiskPanel = dynamic(() => import("@/components/risk/RiskPanel").then((m) => ({ default: m.RiskPanel })), { ssr: false })
+const JournalPanel = dynamic(() => import("@/components/journal/JournalPanel").then((m) => ({ default: m.JournalPanel })), { ssr: false })
+const PaperTradingPanel = dynamic(() => import("@/components/paper/PaperTradingPanel").then((m) => ({ default: m.PaperTradingPanel })), { ssr: false })
+const ScannerPanel = dynamic(() => import("@/components/scanner/ScannerPanel").then((m) => ({ default: m.ScannerPanel })), { ssr: false })
+const PortfolioPanel = dynamic(() => import("@/components/portfolio/PortfolioPanel").then((m) => ({ default: m.PortfolioPanel })), { ssr: false })
+const BacktestPanel = dynamic(() => import("@/components/backtest/BacktestPanel").then((m) => ({ default: m.BacktestPanel })), { ssr: false })
+const NotificationsPanel = dynamic(() => import("@/components/notifications/NotificationsPanel").then((m) => ({ default: m.NotificationsPanel })), { ssr: false })
+const AdminDashboard = dynamic(() => import("@/components/admin/AdminDashboard").then((m) => ({ default: m.AdminDashboard })), { ssr: false })
+
+function PanelFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-[#0d1117]">
+      <div className="animate-pulse space-y-3 w-64">
+        <div className="h-4 bg-gray-800 rounded w-3/4 mx-auto" />
+        <div className="h-32 bg-gray-800 rounded" />
+      </div>
+    </div>
+  )
+}
 
 type Tab = "dashboard" | "chart" | "analysis" | "scanner"
   | "watchlist" | "alerts" | "portfolio" | "journal"
@@ -114,20 +127,22 @@ export default function DashboardPage() {
         )}
 
         <div className={cn("flex-1 flex flex-col min-w-0", showRight ? "" : "w-full")}>
-          {activeTab === "dashboard" && <DashboardOverview />}
-          {activeTab === "chart" && <TradingChart />}
-          {activeTab === "analysis" && <div className="flex-1 p-4 overflow-auto"><AnalysisPanel /></div>}
-          {activeTab === "scanner" && <ScannerPanel />}
-          {activeTab === "watchlist" && <WatchlistPanel />}
-          {activeTab === "alerts" && <AlertPanel />}
-          {activeTab === "portfolio" && <PortfolioPanel />}
-          {activeTab === "journal" && <JournalPanel />}
-          {activeTab === "paper" && <PaperTradingPanel />}
-          {activeTab === "risk" && <RiskPanel />}
-          {activeTab === "backtest" && <BacktestPanel />}
-          {activeTab === "notifications" && <NotificationsPanel />}
-          {activeTab === "news" && <div className="flex-1 overflow-auto"><NewsPanel /></div>}
-          {activeTab === "admin" && <AdminDashboard />}
+          <Suspense fallback={<PanelFallback />}>
+            {activeTab === "dashboard" && <DashboardOverview />}
+            {activeTab === "chart" && <TradingChart />}
+            {activeTab === "analysis" && <div className="flex-1 p-4 overflow-auto"><AnalysisPanel /></div>}
+            {activeTab === "scanner" && <ScannerPanel />}
+            {activeTab === "watchlist" && <WatchlistPanel />}
+            {activeTab === "alerts" && <AlertPanel />}
+            {activeTab === "portfolio" && <PortfolioPanel />}
+            {activeTab === "journal" && <JournalPanel />}
+            {activeTab === "paper" && <PaperTradingPanel />}
+            {activeTab === "risk" && <RiskPanel />}
+            {activeTab === "backtest" && <BacktestPanel />}
+            {activeTab === "notifications" && <NotificationsPanel />}
+            {activeTab === "news" && <div className="flex-1 overflow-auto"><NewsPanel /></div>}
+            {activeTab === "admin" && <AdminDashboard />}
+          </Suspense>
         </div>
 
         {showRight && (

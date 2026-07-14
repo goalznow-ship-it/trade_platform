@@ -18,9 +18,11 @@ from app.api.v1 import journal as journal_router
 from app.api.v1 import paper_trading as paper_router
 from app.api.v1 import notifications as notifications_router
 from app.api.v1 import enterprise as enterprise_router
+from app.api.v1 import institutional as institutional_router
 from app.api.v1.websocket_v2 import router as ws_v2_router
 from app.services.alert import alert_service
 from app.services.binance_ws import binance_ws
+from app.services.market_coverage import market_coverage
 
 
 @asynccontextmanager
@@ -29,9 +31,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     await ws_manager.start()
     await binance_ws.start()
-    await binance_ws.subscribe_price(["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"])
-    await binance_ws.subscribe_klines(["BTC/USDT", "ETH/USDT"], "1m")
-    await binance_ws.subscribe_depth(["BTC/USDT", "ETH/USDT"])
+    top_symbols = await market_coverage.get_top_symbols(30)
+    await binance_ws.subscribe_price(top_symbols)
+    await binance_ws.subscribe_klines(top_symbols[:10], "1m")
+    await binance_ws.subscribe_depth(top_symbols[:5])
     await alert_service.start()
     try:
         await redis_client.ping()
@@ -88,6 +91,7 @@ app.include_router(journal_router.router, prefix="/api/v1")
 app.include_router(paper_router.router, prefix="/api/v1")
 app.include_router(notifications_router.router, prefix="/api/v1")
 app.include_router(enterprise_router.router, prefix="/api/v1")
+app.include_router(institutional_router.router, prefix="")
 app.include_router(ws_v2_router)
 
 

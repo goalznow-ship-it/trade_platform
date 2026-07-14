@@ -9,17 +9,25 @@ from app.core.logging import logger
 class EnterpriseScanner:
     def __init__(self):
         self.logger = logger
-        self.default_symbols = [
-            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-            "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
-            "MATIC/USDT", "ATOM/USDT", "UNI/USDT", "ARB/USDT", "OP/USDT",
-            "INJ/USDT", "TIA/USDT", "SEI/USDT", "APT/USDT", "SUI/USDT",
-            "PEPE/USDT", "FIL/USDT", "NEAR/USDT", "APT/USDT", "LDO/USDT",
-        ]
+        self._default_symbols = None
+
+    async def _get_symbols(self):
+        if self._default_symbols is None:
+            try:
+                from app.services.market_coverage import market_coverage
+                self._default_symbols = await market_coverage.get_top_symbols(30)
+            except Exception:
+                self._default_symbols = [
+                    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+                    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+                    "SUI/USDT", "ATOM/USDT", "UNI/USDT", "ARB/USDT", "OP/USDT",
+                    "INJ/USDT", "TIA/USDT", "SEI/USDT", "APT/USDT", "NEAR/USDT",
+                ]
+        return self._default_symbols
 
     async def scan_by_filter(self, filter_type: str, symbols: Optional[List[str]] = None,
                               timeframe: str = "1h", limit: int = 10) -> list:
-        symbols = symbols or self.default_symbols
+        symbols = symbols or await self._get_symbols()
         results = []
         for symbol in symbols:
             try:

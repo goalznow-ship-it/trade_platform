@@ -52,22 +52,11 @@ async def get_symbols():
     if cached is not None:
         return cached
 
+    from app.services.market_coverage import market_coverage
+    top_symbols = await market_coverage.get_top_symbols(30)
     symbols = [
-        {'symbol': 'BTC/USDT', 'name': 'Bitcoin', 'exchange': 'binance'},
-        {'symbol': 'ETH/USDT', 'name': 'Ethereum', 'exchange': 'binance'},
-        {'symbol': 'BNB/USDT', 'name': 'BNB', 'exchange': 'binance'},
-        {'symbol': 'SOL/USDT', 'name': 'Solana', 'exchange': 'binance'},
-        {'symbol': 'XRP/USDT', 'name': 'XRP', 'exchange': 'binance'},
-        {'symbol': 'DOGE/USDT', 'name': 'Dogecoin', 'exchange': 'binance'},
-        {'symbol': 'ADA/USDT', 'name': 'Cardano', 'exchange': 'binance'},
-        {'symbol': 'AVAX/USDT', 'name': 'Avalanche', 'exchange': 'binance'},
-        {'symbol': 'DOT/USDT', 'name': 'Polkadot', 'exchange': 'binance'},
-        {'symbol': 'LINK/USDT', 'name': 'Chainlink', 'exchange': 'binance'},
-        {'symbol': 'SUI/USDT', 'name': 'Sui', 'exchange': 'binance'},
-        {'symbol': 'ARB/USDT', 'name': 'Arbitrum', 'exchange': 'binance'},
-        {'symbol': 'OP/USDT', 'name': 'Optimism', 'exchange': 'binance'},
-        {'symbol': 'INJ/USDT', 'name': 'Injective', 'exchange': 'binance'},
-        {'symbol': 'TIA/USDT', 'name': 'Celestia', 'exchange': 'binance'},
+        {"symbol": s, "name": s.split("/")[0], "exchange": "binance"}
+        for s in top_symbols
     ]
     await cache_set(cache_key, symbols, ttl=3600)
     return symbols

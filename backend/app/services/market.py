@@ -108,18 +108,26 @@ class MarketService:
         if cached is not None:
             return cached
 
-        symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT']
+        try:
+            from app.services.market_coverage import market_coverage
+            symbols = await market_coverage.get_top_symbols(10)
+        except Exception:
+            symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT']
+
         tickers = await asyncio.gather(*[self.get_ticker(s) for s in symbols])
         btc = tickers[0] if tickers else {}
+
+        total_volume = sum(t.get('volume_24h', 0) or 0 for t in tickers if t)
 
         overview = {
             'btc_price': btc.get('price'),
             'btc_change': btc.get('change_percent'),
             'eth_price': tickers[1].get('price') if len(tickers) > 1 else None,
             'total_market_cap': None,
-            'total_volume_24h': None,
+            'total_volume_24h': total_volume if total_volume > 0 else None,
             'btc_dominance': None,
             'tickers': {s: t for s, t in zip(symbols, tickers)},
+            'symbols_count': len(symbols),
         }
         await cache_set(cache_key, overview, ttl=15)
         return overview

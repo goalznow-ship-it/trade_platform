@@ -75,10 +75,14 @@ class AIEngine:
 
     async def scan_all(self, symbols: Optional[List[str]] = None, min_confidence: float = 50) -> List[dict]:
         if symbols is None:
-            symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-                       'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'LINK/USDT',
-                       'MATIC/USDT', 'ATOM/USDT', 'UNI/USDT', 'ARB/USDT', 'OP/USDT',
-                       'INJ/USDT', 'TIA/USDT', 'SEI/USDT', 'APT/USDT', 'SUI/USDT']
+            from app.services.market_coverage import market_coverage
+            try:
+                symbols = await market_coverage.get_top_symbols(30)
+            except Exception:
+                symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
+                           'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'LINK/USDT',
+                           'SUI/USDT', 'ATOM/USDT', 'UNI/USDT', 'ARB/USDT', 'OP/USDT',
+                           'INJ/USDT', 'SEI/USDT', 'APT/USDT', 'NEAR/USDT', 'FIL/USDT']
 
         results = []
         for sym in symbols:

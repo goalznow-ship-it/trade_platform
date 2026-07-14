@@ -198,7 +198,9 @@ def collect_news(self):
 def update_market_data(self):
     try:
         symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-                    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT"]
+                    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+                    "SUI/USDT", "ATOM/USDT", "UNI/USDT", "ARB/USDT", "OP/USDT",
+                    "INJ/USDT", "SEI/USDT", "APT/USDT", "NEAR/USDT", "FIL/USDT"]
 
         async def update():
             async with async_session_factory() as session:

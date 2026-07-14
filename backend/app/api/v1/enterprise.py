@@ -58,7 +58,8 @@ async def predict_all(
     timeframe: str = "4h", min_confidence: float = 0,
     user: User = Depends(require_subscription("elite")),
 ):
-    symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"]
+    from app.services.market_coverage import market_coverage
+    symbols = await market_coverage.get_top_symbols(15)
     results = []
     for s in symbols:
         pred = await prediction_engine.predict(s, timeframe)
@@ -80,7 +81,8 @@ async def get_news_intelligence(
 async def get_futures_dashboard(
     user: User = Depends(require_subscription("pro")),
 ):
-    symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOGE/USDT"]
+    from app.services.market_coverage import market_coverage
+    symbols = await market_coverage.get_top_symbols(15)
     results = []
     for s in symbols:
         try:
@@ -115,7 +117,8 @@ async def top_opportunities(
     limit: int = Query(default=10, le=30),
     user: User = Depends(require_subscription("pro")),
 ):
-    symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOGE/USDT", "DOT/USDT", "LINK/USDT"]
+    from app.services.market_coverage import market_coverage
+    symbols = await market_coverage.get_top_symbols(20)
     results = []
     for s in symbols:
         try:
