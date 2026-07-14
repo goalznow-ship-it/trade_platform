@@ -6,6 +6,7 @@ import { TopSignals } from "@/components/dashboard/TopSignals"
 import { ActivePositions } from "@/components/dashboard/ActivePositions"
 import { SentimentWidget } from "@/components/dashboard/SentimentWidget"
 import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary"
+import { MarketSummary } from "@/components/dashboard/MarketSummary"
 
 export function DashboardOverview() {
   return (
@@ -16,6 +17,8 @@ export function DashboardOverview() {
           <p className="text-xs text-gray-500 mt-0.5">Real-time portfolio overview and market intelligence</p>
         </div>
       </div>
+
+      <MarketSummary />
 
       <DashboardStats />
 

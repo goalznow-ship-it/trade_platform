@@ -6,6 +6,7 @@ import { useMarketStore } from "@/store/market"
 import { AIChart } from "@/components/terminal/AIChart"
 import { AIPredictionPanel } from "@/components/terminal/AIPredictionPanel"
 import { TradeDecisionCard } from "@/components/terminal/TradeDecisionCard"
+import { AIForecastPanel } from "@/components/terminal/AIForecastPanel"
 
 export function TerminalPage() {
   const { selectedSymbol, selectedTimeframe } = useMarketStore()
@@ -38,23 +39,30 @@ export function TerminalPage() {
         {/* Chart Area */}
         <div className="flex-1 flex flex-col min-w-0">
           <AIChart analysis={analysis} explain={explain} />
+
+          {/* Bottom Panel - AI Forecast + Summary */}
+          <div className="border-t border-gray-800 bg-gray-950/80 p-3">
+            <div className="max-w-5xl">
+              <AIForecastPanel analysis={analysis} loading={loading} />
+            </div>
+          </div>
         </div>
 
         {/* Right Panel - AI Prediction + Decision */}
         <div className="w-80 lg:w-96 border-l border-gray-800 overflow-y-auto flex-shrink-0">
           <div className="border-b border-gray-800">
-            <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
+            <div className="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
               AI Prediction Engine
             </div>
           </div>
           <AIPredictionPanel analysis={analysis} loading={loading} />
 
           <div className="border-b border-gray-800">
-            <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
+            <div className="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
               Trade Decision
             </div>
           </div>
-          <div className="p-4">
+          <div className="p-3">
             <TradeDecisionCard analysis={analysis} explain={explain} loading={loading} />
           </div>
         </div>
