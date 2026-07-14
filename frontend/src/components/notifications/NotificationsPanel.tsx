@@ -11,7 +11,7 @@ import {
   Info, AlertTriangle, TrendingUp, TrendingDown, DollarSign,
 } from "lucide-react"
 
-const ICON_MAP: Record<string, any> = {
+const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   info: Info,
   warning: AlertTriangle,
   alert: Bell,
@@ -20,7 +20,7 @@ const ICON_MAP: Record<string, any> = {
 }
 
 export function NotificationsPanel() {
-  const [notifications, setNotifications] = useState<any[]>([])
+  const [notifications, setNotifications] = useState<Record<string, unknown>[]>([])
 
   async function load() {
     try {

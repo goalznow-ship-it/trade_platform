@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react"
+import React, { createContext, useContext, useEffect, useRef, useState } from "react"
 import { useWebSocketV2, type ConnectionQuality, type WSEventHandler } from "@/hooks/useWebSocket"
 import { useMarketStore } from "@/store/market"
 import { useAuth } from "@/hooks/useAuth"

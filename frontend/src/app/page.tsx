@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import {
   TrendingUp, BarChart3, Shield, Brain, Zap, Bell,
   Activity, Target, ArrowRight, Check, Menu, X,
-  ChevronRight, Star, Users, LineChart, Wallet,
+  ChevronRight, LineChart, Wallet,
 } from "lucide-react"
 
 export default function LandingPage() {

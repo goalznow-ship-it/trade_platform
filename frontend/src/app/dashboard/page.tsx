@@ -12,7 +12,7 @@ import { useMarketStore } from "@/store/market"
 import {
   LayoutDashboard, LineChart, Activity, FileText, Settings,
   List, Bell, Shield, BookOpen, Wallet, Search,
-  PieChart, BarChart3, BellRing, Wifi,
+  PieChart, BarChart3, BellRing,
   ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"

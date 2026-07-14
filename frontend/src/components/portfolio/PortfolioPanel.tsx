@@ -11,8 +11,8 @@ import {
 } from "lucide-react"
 
 export function PortfolioPanel() {
-  const [analytics, setAnalytics] = useState<any>(null)
-  const [dailyPnl, setDailyPnl] = useState<any[]>([])
+  const [analytics, setAnalytics] = useState<Record<string, unknown> | null>(null)
+  const [dailyPnl, setDailyPnl] = useState<Record<string, unknown>[]>([])
 
   async function load() {
     try {

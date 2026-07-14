@@ -11,7 +11,7 @@ import {
   Settings, LogOut, User, Clock,
   Brain, Radio, BarChart3, Newspaper,
   LayoutDashboard, TrendingUp, Activity,
-  Scan, Shield, ChevronDown, History, Radar,
+  Scan, Shield, ChevronDown, History,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 

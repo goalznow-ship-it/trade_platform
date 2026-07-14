@@ -12,9 +12,9 @@ import {
 } from "lucide-react"
 
 export function PaperTradingPanel() {
-  const [account, setAccount] = useState<any>(null)
-  const [positions, setPositions] = useState<any[]>([])
-  const [orders, setOrders] = useState<any[]>([])
+  const [account, setAccount] = useState<Record<string, unknown> | null>(null)
+  const [positions, setPositions] = useState<Record<string, unknown>[]>([])
+  const [orders, setOrders] = useState<Record<string, unknown>[]>([])
   const [showOrder, setShowOrder] = useState(false)
   const [form, setForm] = useState({
     symbol: "BTC/USDT", side: "buy", order_type: "market",
