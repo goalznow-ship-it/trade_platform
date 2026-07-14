@@ -1,0 +1,138 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from pydantic import BaseModel
+from typing import Optional
+from app.core.database import get_db
+from app.core.security import require_admin
+from app.models.user import User
+from app.models.analysis import Signal, AIAnalysis
+from app.models.trade import Trade
+from app.models.market import Symbol
+from app.models.admin import AuditLog
+
+router = APIRouter(prefix="/admin", tags=["Admin"])
+
+class UserUpdate(BaseModel):
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+    subscription_tier: Optional[str] = None
+
+class SymbolCreate(BaseModel):
+    name: str
+    exchange: str = "binance"
+    asset_type: str = "crypto"
+
+# Dashboard Stats
+@router.get("/stats")
+async def get_stats(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    total_users = await db.scalar(select(func.count(User.id)))
+    active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
+    total_signals = await db.scalar(select(func.count(Signal.id)))
+    active_signals = await db.scalar(select(func.count(Signal.id)).where(Signal.is_active == True))
+    total_symbols = await db.scalar(select(func.count(Symbol.id)))
+    total_trades = await db.scalar(select(func.count(Trade.id)))
+
+    return {
+        "total_users": total_users or 0,
+        "active_users": active_users or 0,
+        "total_signals": total_signals or 0,
+        "active_signals": active_signals or 0,
+        "total_symbols": total_symbols or 0,
+        "total_trades": total_trades or 0,
+    }
+
+# Users
+@router.get("/users")
+async def list_users(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    return [{
+        "id": u.id, "username": u.username, "email": u.email,
+        "is_admin": u.is_admin, "is_active": u.is_active,
+        "subscription_tier": u.subscription_tier,
+        "total_trades": u.total_trades, "win_rate": u.win_rate,
+        "created_at": str(u.created_at),
+    } for u in users]
+
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, update: UserUpdate,
+                      admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if update.is_admin is not None:
+        user.is_admin = update.is_admin
+    if update.is_active is not None:
+        user.is_active = update.is_active
+    if update.subscription_tier is not None:
+        user.subscription_tier = update.subscription_tier
+    await db.commit()
+    return {"message": "User updated"}
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    await db.delete(user)
+    await db.commit()
+    return {"message": "User deleted"}
+
+# Symbols
+@router.get("/symbols")
+async def list_symbols(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Symbol))
+    symbols = result.scalars().all()
+    return [{"id": s.id, "name": s.name, "exchange": s.exchange, "asset_type": s.asset_type, "is_active": s.is_active} for s in symbols]
+
+@router.post("/symbols")
+async def add_symbol(req: SymbolCreate, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(Symbol).where(Symbol.name == req.name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, "Symbol already exists")
+    symbol = Symbol(name=req.name, exchange=req.exchange, asset_type=req.asset_type)
+    db.add(symbol)
+    await db.commit()
+    return {"message": "Symbol added", "id": symbol.id}
+
+@router.delete("/symbols/{symbol_id}")
+async def delete_symbol(symbol_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Symbol).where(Symbol.id == symbol_id))
+    symbol = result.scalar_one_or_none()
+    if not symbol:
+        raise HTTPException(404, "Symbol not found")
+    await db.delete(symbol)
+    await db.commit()
+    return {"message": "Symbol deleted"}
+
+# Signals
+@router.get("/signals")
+async def list_signals(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Signal).order_by(Signal.created_at.desc()).limit(100))
+    signals = result.scalars().all()
+    return [{
+        "id": s.id, "symbol": s.symbol, "direction": s.direction,
+        "confidence": s.confidence, "entry_price": s.entry_price,
+        "reason": s.reason, "is_active": s.is_active,
+        "created_at": str(s.created_at),
+    } for s in signals]
+
+@router.delete("/signals/{signal_id}")
+async def delete_signal(signal_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Signal).where(Signal.id == signal_id))
+    signal = result.scalar_one_or_none()
+    if not signal:
+        raise HTTPException(404, "Signal not found")
+    await db.delete(signal)
+    await db.commit()
+    return {"message": "Signal deleted"}
+
+# Audit Logs
+@router.get("/logs")
+async def get_logs(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(100))
+    logs = result.scalars().all()
+    return [{"id": l.id, "user_id": l.user_id, "action": l.action, "resource": l.resource, "details": l.details, "ip_address": l.ip_address, "created_at": str(l.created_at)} for l in logs]
