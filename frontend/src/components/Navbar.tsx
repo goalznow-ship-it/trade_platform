@@ -20,6 +20,8 @@ import {
   TrendingUp,
   Activity,
   LayoutDashboard,
+  Brain,
+  Radio,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 
@@ -90,6 +92,20 @@ export function Navbar() {
               </div>
             )}
           </div>
+
+          {/* Quick Nav Links */}
+          {isDashboard && (
+            <div className="hidden md:flex items-center gap-1 mr-2">
+              <Link href="/terminal"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                <Brain className="w-3.5 h-3.5" /> Terminal
+              </Link>
+              <Link href="/signals"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                <Radio className="w-3.5 h-3.5" /> Signals
+              </Link>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             {isDashboard && (
@@ -183,15 +199,16 @@ export function Navbar() {
           <div className="grid grid-cols-2 gap-1 text-sm">
             {[
               { label: "Dashboard", href: "/dashboard" },
+              { label: "AI Terminal", href: "/terminal" },
+              { label: "Signals", href: "/signals" },
               { label: "Charts", href: "/dashboard" },
-              { label: "Analysis", href: "/dashboard" },
               { label: "Scanner", href: "/dashboard" },
               { label: "Watchlist", href: "/dashboard" },
               { label: "Alerts", href: "/dashboard" },
               { label: "Portfolio", href: "/dashboard" },
-              { label: "Journal", href: "/dashboard" },
-              { label: "Paper Trading", href: "/dashboard" },
               { label: "Risk", href: "/dashboard" },
+              { label: "Journal", href: "/dashboard" },
+              { label: "Paper", href: "/dashboard" },
               { label: "Backtest", href: "/dashboard" },
               { label: "Notifications", href: "/dashboard" },
               { label: "News", href: "/dashboard" },
