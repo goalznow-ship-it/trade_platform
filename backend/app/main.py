@@ -15,6 +15,7 @@ from app.api.v1 import risk as risk_router
 from app.api.v1 import journal as journal_router
 from app.api.v1 import paper_trading as paper_router
 from app.api.v1 import notifications as notifications_router
+from app.api.v1 import enterprise as enterprise_router
 from app.api.v1.websocket_v2 import router as ws_v2_router
 from app.services.alert import alert_service
 
@@ -75,6 +76,7 @@ app.include_router(risk_router.router, prefix="/api/v1")
 app.include_router(journal_router.router, prefix="/api/v1")
 app.include_router(paper_router.router, prefix="/api/v1")
 app.include_router(notifications_router.router, prefix="/api/v1")
+app.include_router(enterprise_router.router, prefix="/api/v1")
 app.include_router(ws_v2_router)
 
 

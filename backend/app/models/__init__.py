@@ -11,3 +11,4 @@ from app.models.risk import RiskProfile, RiskSnapshot
 from app.models.journal import TradeJournal
 from app.models.paper_trading import PaperAccount, PaperPosition, PaperOrder
 from app.models.exchange import ExchangeCredentials
+from app.models.enterprise import MarketEvent, PricePrediction, AISignalHistory, NewsEvent, Liquidation, WhaleActivity, FuturesMetrics

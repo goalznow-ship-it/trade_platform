@@ -22,6 +22,7 @@ import {
   LayoutDashboard,
   Brain,
   Radio,
+  BarChart3,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 
@@ -103,6 +104,10 @@ export function Navbar() {
               <Link href="/signals"
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
                 <Radio className="w-3.5 h-3.5" /> Signals
+              </Link>
+              <Link href="/futures"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                <BarChart3 className="w-3.5 h-3.5" /> Futures
               </Link>
             </div>
           )}
@@ -209,6 +214,7 @@ export function Navbar() {
               { label: "Risk", href: "/dashboard" },
               { label: "Journal", href: "/dashboard" },
               { label: "Paper", href: "/dashboard" },
+              { label: "Futures", href: "/futures" },
               { label: "Backtest", href: "/dashboard" },
               { label: "Notifications", href: "/dashboard" },
               { label: "News", href: "/dashboard" },
