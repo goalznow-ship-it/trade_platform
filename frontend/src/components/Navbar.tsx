@@ -10,12 +10,18 @@ import {
   X,
   Wallet,
   Bell,
+  BellRing,
   Settings,
   LogOut,
   User,
   Clock,
   TrendingUp,
   Activity,
+  List,
+  Shield,
+  BookOpen,
+  PieChart,
+  BarChart3,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 
@@ -107,9 +113,7 @@ export function Navbar() {
 
           {user ? (
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="hidden sm:flex">
-                <Bell className="w-4 h-4" />
-              </Button>
+              <NotificationBell />
               <div className="flex items-center gap-2 px-2 py-1 bg-gray-800/50 rounded">
                 <Wallet className="w-3.5 h-3.5 text-green-400" />
                 <span className="text-xs text-white font-mono">
@@ -163,17 +167,57 @@ export function Navbar() {
               className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200"
             />
           </div>
-          <div className="space-y-2 text-sm">
-            <button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-gray-800 rounded">Dashboard</button>
-            <button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-gray-800 rounded">Markets</button>
-            <button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-gray-800 rounded">Analysis</button>
-            <button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-gray-800 rounded">Portfolio</button>
+          <div className="grid grid-cols-2 gap-1 text-sm">
+            {[
+              "Dashboard", "Charts", "Analysis", "Scanner",
+              "Watchlist", "Alerts", "Portfolio", "Journal",
+              "Paper Trading", "Risk", "Backtest", "Notifications",
+              "News",
+            ].map((label) => (
+              <button key={label}
+                className="text-left px-3 py-2 text-gray-300 hover:bg-gray-800 rounded text-xs">
+                {label}
+              </button>
+            ))}
             {user?.is_admin && (
-              <button className="w-full text-left px-3 py-2 text-purple-400 hover:bg-gray-800 rounded">Admin</button>
+              <button className="text-left px-3 py-2 text-purple-400 hover:bg-gray-800 rounded text-xs">
+                Admin
+              </button>
             )}
           </div>
         </div>
       )}
     </header>
+  )
+}
+
+function NotificationBell() {
+  const [unread, setUnread] = useState(0)
+
+  useEffect(() => {
+    api.getNotifications().then((n) => {
+      const arr = Array.isArray(n) ? n : []
+      setUnread(arr.filter((x: any) => !x.is_read).length)
+    }).catch(() => {})
+    const interval = setInterval(() => {
+      api.getNotifications().then((n) => {
+        const arr = Array.isArray(n) ? n : []
+        setUnread(arr.filter((x: any) => !x.is_read).length)
+      }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <div className="relative">
+      <Button variant="ghost" size="sm" className="hidden sm:flex">
+        {unread > 0 ? <BellRing className="w-4 h-4 text-yellow-400" /> : <Bell className="w-4 h-4" />}
+        {unread > 0 && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center text-white font-medium">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </Button>
+    </div>
   )
 }

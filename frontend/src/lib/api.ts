@@ -63,6 +63,12 @@ export const api = {
   scanAll: (timeframe = "1h", minConfidence = 70) =>
     request<any[]>(`/api/v1/scanner/top-signals?min_confidence=${minConfidence}`),
 
+  // Enterprise Scanner
+  getScannerFilters: () => request<any[]>("/api/v1/scanner/filters"),
+
+  scanWithFilters: (filters: any) =>
+    request<any[]>("/api/v1/scanner/scan", { method: "POST", body: JSON.stringify(filters) }),
+
   // Trading
   createOrder: (data: any) =>
     request<any>("/api/v1/trade/order", { method: "POST", body: JSON.stringify(data) }),
@@ -74,18 +80,136 @@ export const api = {
   saveAPIKeys: (data: { exchange: string; api_key: string; secret_key: string }) =>
     request("/api/v1/trade/api-keys", { method: "POST", body: JSON.stringify(data) }),
 
+  getTradeHistory: (params?: { skip?: number; limit?: number; symbol?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.skip) q.set("skip", String(params.skip))
+    if (params?.limit) q.set("limit", String(params.limit))
+    if (params?.symbol) q.set("symbol", params.symbol)
+    return request<any[]>("/api/v1/trade/history?" + q.toString())
+  },
+
+  deleteTrade: (id: number) => request(`/api/v1/trade/history/${id}`, { method: "DELETE" }),
+
+  exportTradeHistory: () => {
+    const token = localStorage.getItem("token")
+    const url = `${API_URL}/api/v1/trade/history/export`
+    return fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.blob())
+  },
+
   // Portfolio
   getPortfolio: () => request<any>("/api/v1/portfolio/summary"),
+
+  getPortfolioAnalytics: () => request<any>("/api/v1/portfolio/analytics"),
+
+  getDailyPnL: () => request<any[]>("/api/v1/portfolio/daily-pnl"),
 
   // Backtest
   runBacktest: (symbol: string, timeframe = "1h", limit = 500, initialBalance = 10000) =>
     request<any>(`/api/v1/backtest/run?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}&initial_balance=${initialBalance}`),
 
+  saveBacktest: (data: any) =>
+    request("/api/v1/backtest/save", { method: "POST", body: JSON.stringify(data) }),
+
+  getBacktestHistory: () => request<any[]>("/api/v1/backtest/history"),
+
+  deleteBacktest: (id: number) => request(`/api/v1/backtest/history/${id}`, { method: "DELETE" }),
+
   // News
   getNews: () => request<any[]>("/api/v1/news/latest"),
 
+  getNewsIntelligence: (symbol?: string) => {
+    const q = symbol ? `?symbol=${symbol}` : ""
+    return request<any>("/api/v1/news/intelligence" + q)
+  },
+
+  // Watchlist
+  getWatchlists: () => request<any[]>("/api/v1/watchlists"),
+
+  createWatchlist: (name: string) =>
+    request("/api/v1/watchlists", { method: "POST", body: JSON.stringify({ name }) }),
+
+  deleteWatchlist: (id: number) =>
+    request(`/api/v1/watchlists/${id}`, { method: "DELETE" }),
+
+  addWatchlistSymbol: (watchlistId: number, symbol: string) =>
+    request(`/api/v1/watchlists/${watchlistId}/symbols`, {
+      method: "POST", body: JSON.stringify({ symbol }),
+    }),
+
+  removeWatchlistSymbol: (watchlistId: number, symbolId: number) =>
+    request(`/api/v1/watchlists/${watchlistId}/symbols/${symbolId}`, { method: "DELETE" }),
+
+  reorderWatchlistSymbols: (watchlistId: number, symbolIds: number[]) =>
+    request(`/api/v1/watchlists/${watchlistId}/reorder`, {
+      method: "PUT", body: JSON.stringify({ symbol_ids: symbolIds }),
+    }),
+
+  // Alerts
+  getAlerts: () => request<any[]>("/api/v1/alerts"),
+
+  createAlert: (data: any) =>
+    request("/api/v1/alerts", { method: "POST", body: JSON.stringify(data) }),
+
+  updateAlert: (id: number, data: any) =>
+    request(`/api/v1/alerts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  deleteAlert: (id: number) => request(`/api/v1/alerts/${id}`, { method: "DELETE" }),
+
+  // Risk Management
+  getRiskDashboard: () => request<any>("/api/v1/risk/dashboard"),
+
+  getRiskProfile: () => request<any>("/api/v1/risk/profile"),
+
+  updateRiskProfile: (data: any) =>
+    request("/api/v1/risk/profile", { method: "PUT", body: JSON.stringify(data) }),
+
+  // Trading Journal
+  getJournal: (page = 1, perPage = 20) =>
+    request<any>(`/api/v1/journal?page=${page}&per_page=${perPage}`),
+
+  createJournalEntry: (data: any) =>
+    request("/api/v1/journal", { method: "POST", body: JSON.stringify(data) }),
+
+  updateJournalEntry: (id: number, data: any) =>
+    request(`/api/v1/journal/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  deleteJournalEntry: (id: number) => request(`/api/v1/journal/${id}`, { method: "DELETE" }),
+
+  // Paper Trading
+  getPaperAccount: () => request<any>("/api/v1/paper/account"),
+
+  getPaperPositions: () => request<any[]>("/api/v1/paper/positions"),
+
+  getPaperOrders: () => request<any[]>("/api/v1/paper/orders"),
+
+  createPaperOrder: (data: any) =>
+    request("/api/v1/paper/orders", { method: "POST", body: JSON.stringify(data) }),
+
+  closePaperPosition: (id: number) =>
+    request(`/api/v1/paper/positions/${id}/close`, { method: "POST" }),
+
+  resetPaperAccount: () =>
+    request("/api/v1/paper/account/reset", { method: "POST" }),
+
+  // AI Explainability
+  getAIExplainability: (symbol: string, timeframe = "1h") =>
+    request<any>(`/api/v1/analysis/explain/${symbol}?timeframe=${timeframe}`),
+
+  // Notifications
+  getNotifications: () => request<any[]>("/api/v1/notifications"),
+
+  markNotificationRead: (id: number) =>
+    request(`/api/v1/notifications/${id}/read`, { method: "PUT" }),
+
+  markAllNotificationsRead: () =>
+    request("/api/v1/notifications/read-all", { method: "PUT" }),
+
+  archiveNotification: (id: number) =>
+    request(`/api/v1/notifications/${id}/archive`, { method: "PUT" }),
+
   // Admin
   getAdminStats: () => request<any>("/api/v1/admin/stats"),
+  getAdminHealth: () => request<any>("/api/v1/admin/health"),
   getAdminUsers: () => request<any[]>("/api/v1/admin/users"),
   updateUser: (id: number, data: any) =>
     request(`/api/v1/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
