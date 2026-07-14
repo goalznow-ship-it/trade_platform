@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Navbar } from "@/components/Navbar"
+import { DashboardOverview } from "@/components/dashboard/DashboardOverview"
 import { TradingChart } from "@/components/chart/TradingChart"
 import { TradingPanel } from "@/components/trading/TradingPanel"
 import { AnalysisPanel } from "@/components/trading/AnalysisPanel"
@@ -113,7 +114,8 @@ export default function DashboardPage() {
         )}
 
         <div className={cn("flex-1 flex flex-col min-w-0", showRight ? "" : "w-full")}>
-          {(activeTab === "chart" || activeTab === "dashboard") && <TradingChart />}
+          {activeTab === "dashboard" && <DashboardOverview />}
+          {activeTab === "chart" && <TradingChart />}
           {activeTab === "analysis" && <div className="flex-1 p-4 overflow-auto"><AnalysisPanel /></div>}
           {activeTab === "scanner" && <ScannerPanel />}
           {activeTab === "watchlist" && <WatchlistPanel />}
