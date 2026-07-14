@@ -1,4 +1,5 @@
 import os, psutil
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
@@ -11,7 +12,7 @@ from app.models.user import User
 from app.models.analysis import Signal, AIAnalysis
 from app.models.trade import Trade
 from app.models.market import Symbol
-from app.models.admin import AuditLog
+from app.models.admin import AuditLog, Subscription, Subscription
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -187,6 +188,39 @@ async def delete_signal(signal_id: int, admin: User = Depends(require_admin), db
     await db.delete(signal)
     await db.commit()
     return {"message": "Signal deleted"}
+
+# Subscriptions
+@router.get("/subscriptions")
+async def list_subscriptions(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Subscription))
+    subs = result.scalars().all()
+    return [{
+        "id": s.id, "user_id": s.user_id, "tier": s.tier, "price": s.price,
+        "signals_per_day": s.signals_per_day, "max_watchlist": s.max_watchlist,
+        "has_backtest": s.has_backtest, "has_api_access": s.has_api_access,
+        "start_date": str(s.start_date) if s.start_date else None,
+        "end_date": str(s.end_date) if s.end_date else None,
+        "is_active": s.is_active,
+    } for s in subs]
+
+@router.get("/revenue")
+async def revenue_stats(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(func.sum(Subscription.price)).where(Subscription.is_active == True))
+    total_revenue = result.scalar() or 0
+    result = await db.execute(
+        select(func.count(Subscription.id)).where(Subscription.is_active == True, Subscription.tier != "free")
+    )
+    paid_subs = result.scalar() or 0
+    result = await db.execute(
+        select(Subscription.tier, func.count(Subscription.id)).where(Subscription.is_active == True).group_by(Subscription.tier)
+    )
+    tier_breakdown = {row[0]: row[1] for row in result.all()}
+    return {
+        "total_revenue": total_revenue,
+        "paid_subscriptions": paid_subs,
+        "tier_breakdown": tier_breakdown,
+        "monthly_recurring": paid_subs * 29 if paid_subs > 0 else 0,
+    }
 
 # Audit Logs
 @router.get("/logs")

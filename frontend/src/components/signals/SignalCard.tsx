@@ -5,11 +5,36 @@ import { cn, formatPrice } from "@/lib/utils"
 import {
   TrendingUp, TrendingDown, Target, Check, X as XIcon,
   ChevronDown, ChevronUp, BarChart3, Activity,
-  Volume2, Shield, AlertTriangle, Zap,
+  Volume2, Shield, AlertTriangle, Zap, Flame,
 } from "lucide-react"
 
 interface SignalCardProps {
   signal: any
+}
+
+function getScoreLabel(score: number): { label: string; color: string; icon: any } {
+  if (score >= 90) return { label: "Strong Signal", color: "text-orange-400 bg-orange-900/30 border-orange-500/30", icon: Flame }
+  if (score >= 80) return { label: "High Probability", color: "text-green-400 bg-green-900/30 border-green-500/30", icon: Check }
+  if (score >= 70) return { label: "Watch", color: "text-yellow-400 bg-yellow-900/30 border-yellow-500/30", icon: AlertTriangle }
+  return { label: "Ignore", color: "text-gray-500 bg-gray-800 border-gray-700", icon: XIcon }
+}
+
+function calcWeightedScore(signal: any): { total: number; technical: number; structure: number; futures: number; news: number; sentiment: number } {
+  const tech = signal.technical || {}
+  const structure = signal.market_structure || signal.structure || {}
+  const futures = signal.futures || {}
+  const news = signal.news || {}
+
+  const sc = (v: any) => typeof v === "boolean" ? (v ? 1 : -1) : typeof v === "number" ? Math.min(v / 100, 1) : 0
+
+  const technicalScore = (sc(tech.ema_alignment ?? tech.ema) * 0.25 + sc(tech.rsi) * 0.25 + sc(tech.macd) * 0.25 + sc(tech.volume) * 0.25) * 100
+  const structureScore = (sc(structure.bos) * 0.25 + sc(structure.choch) * 0.25 + sc(structure.order_block ?? structure.ob) * 0.25 + sc(structure.liquidity) * 0.25) * 100
+  const futuresScore = (sc(futures.funding) * 0.34 + sc(futures.open_interest ?? futures.oi) * 0.33 + sc(futures.liquidation ?? futures.liq) * 0.33) * 100
+  const newsScore = typeof news.score === "number" ? news.score : (news.impact === "positive" ? 80 : news.impact === "negative" ? 30 : 50)
+  const sentimentScore = signal.sentiment_score || 50
+
+  const total = technicalScore * 0.25 + structureScore * 0.25 + futuresScore * 0.20 + newsScore * 0.15 + sentimentScore * 0.15
+  return { total: Math.round(total), technical: Math.round(technicalScore), structure: Math.round(structureScore), futures: Math.round(futuresScore), news: Math.round(newsScore), sentiment: Math.round(sentimentScore) }
 }
 
 export function SignalCard({ signal }: SignalCardProps) {
@@ -17,7 +42,6 @@ export function SignalCard({ signal }: SignalCardProps) {
   const dir = signal.direction || signal.signal || "neutral"
   const isLong = dir === "long" || dir === "bullish" || dir === "buy"
   const isShort = dir === "short" || dir === "bearish" || dir === "sell"
-  const conf = signal.confidence || signal.score || 0
   const rr = signal.risk_reward || signal.risk_reward_ratio || 0
   const entry = signal.entry_price || signal.price || 0
   const entryZoneHigh = signal.entry_zone_high || entry * 1.002
@@ -25,6 +49,9 @@ export function SignalCard({ signal }: SignalCardProps) {
   const tp1 = signal.take_profit || signal.take_profit_1 || 0
   const tp2 = signal.take_profit_2 || tp1 * 1.025 || 0
   const tp3 = signal.take_profit_3 || tp1 * 1.05 || 0
+
+  const scores = calcWeightedScore(signal)
+  const scoreInfo = getScoreLabel(scores.total)
 
   const tech = signal.technical || {}
   const structure = signal.market_structure || signal.structure || {}
@@ -90,11 +117,16 @@ export function SignalCard({ signal }: SignalCardProps) {
           <div className="text-right">
             <div className={cn(
               "text-lg font-bold font-mono",
-              isLong ? "text-green-400" : isShort ? "text-red-400" : "text-yellow-400"
+              scores.total >= 80 ? "text-green-400" : scores.total >= 70 ? "text-yellow-400" : "text-gray-400"
             )}>
-              {conf}%
+              {scores.total}%
             </div>
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider">Confidence</div>
+            <div className={cn(
+              "inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 rounded border mt-0.5",
+              scoreInfo.color
+            )}>
+              {scoreInfo.label}
+            </div>
           </div>
         </div>
 
@@ -155,6 +187,23 @@ export function SignalCard({ signal }: SignalCardProps) {
       {/* Expanded Analysis */}
       {expanded && (
         <div className="border-t border-gray-800/60 px-3.5 py-3 bg-gray-900/40">
+          {/* Weighted Score Bar */}
+          <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-gray-800/40 border border-gray-700/30">
+            <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">Score:</span>
+            <div className="flex-1 flex gap-0.5 h-4 rounded overflow-hidden">
+              <div className="bg-blue-500/70 h-full" style={{ width: `${scores.technical * 0.25}%` }} title="Technical" />
+              <div className="bg-purple-500/70 h-full" style={{ width: `${scores.structure * 0.25}%` }} title="Market Structure" />
+              <div className="bg-orange-500/70 h-full" style={{ width: `${scores.futures * 0.20}%` }} title="Futures" />
+              <div className="bg-yellow-500/70 h-full" style={{ width: `${scores.news * 0.15}%` }} title="News" />
+              <div className="bg-green-500/70 h-full" style={{ width: `${scores.sentiment * 0.15}%` }} title="Sentiment" />
+            </div>
+            <div className="flex items-center gap-1.5 text-[9px] text-gray-500">
+              <span className="w-2 h-2 rounded-sm bg-blue-500/70" />T <span className="w-2 h-2 rounded-sm bg-purple-500/70" />S <span className="w-2 h-2 rounded-sm bg-orange-500/70" />F <span className="w-2 h-2 rounded-sm bg-yellow-500/70" />N <span className="w-2 h-2 rounded-sm bg-green-500/70" />S
+            </div>
+            <span className={cn("text-xs font-bold font-mono", scores.total >= 80 ? "text-green-400" : scores.total >= 70 ? "text-yellow-400" : "text-gray-400")}>
+              {scores.total}
+            </span>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Technical */}
             <div className="p-2.5 rounded bg-gray-800/30 border border-gray-700/20">

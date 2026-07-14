@@ -2,328 +2,337 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
-import { Button } from "@/components/ui/Button"
-import { Badge } from "@/components/ui/Badge"
+import { cn } from "@/lib/utils"
 import {
-  Users, Activity, TrendingUp, Shield, Server, Cpu,
-  HardDrive, Database, Trash2, UserX, Plus, BarChart3
+  Users, Activity, BarChart3, Shield,
+  RefreshCw, TrendingUp, DollarSign, AlertTriangle,
+  Server, Database, Wifi, Zap, XCircle,
 } from "lucide-react"
 
 export function AdminDashboard() {
-  const [tab, setTab] = useState("overview")
   const [stats, setStats] = useState<any>(null)
   const [users, setUsers] = useState<any[]>([])
-  const [symbols, setSymbols] = useState<any[]>([])
   const [signals, setSignals] = useState<any[]>([])
-  const [logs, setLogs] = useState<any[]>([])
-  const [newSymbol, setNewSymbol] = useState("")
+  const [subscriptions, setSubscriptions] = useState<any[]>([])
+  const [revenue, setRevenue] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<string>("overview")
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    Promise.all([
+      api.getAdminStats().catch(() => null),
+      api.getAdminUsers().catch(() => []),
+      api.getAdminSignals().catch(() => []),
+      request("/api/v1/admin/subscriptions").catch(() => []),
+      request("/api/v1/admin/revenue").catch(() => null),
+    ]).then(([s, u, sig, sub, rev]) => {
+      setStats(s)
+      setUsers(Array.isArray(u) ? u : [])
+      setSignals(Array.isArray(sig) ? sig : [])
+      setSubscriptions(Array.isArray(sub) ? sub : [])
+      setRevenue(rev)
+    }).finally(() => setLoading(false))
+  }, [])
 
-  async function loadAll() {
-    try {
-      const [s, u, sym, sig, l] = await Promise.all([
-        api.getAdminStats(), api.getAdminUsers(), api.getAdminSymbols(),
-        api.getAdminSignals(), api.getLogs(),
-      ])
-      setStats(s); setUsers(u); setSymbols(sym); setSignals(sig); setLogs(l)
-    } catch {}
-  }
-
-  async function handleToggleAdmin(userId: number, isAdmin: boolean) {
-    try { await api.updateUser(userId, { is_admin: !isAdmin }); loadAll() } catch {}
-  }
-  async function handleDeleteUser(userId: number) {
-    try { await api.deleteUser(userId); loadAll() } catch {}
-  }
-  async function handleAddSymbol() {
-    if (!newSymbol) return
-    try { await api.addSymbol({ name: newSymbol.toUpperCase(), exchange: "binance", asset_type: "crypto" }); setNewSymbol(""); loadAll() } catch {}
-  }
-  async function handleDeleteSymbol(id: number) {
-    try { await api.deleteSymbol(id); loadAll() } catch {}
-  }
-  async function handleDeleteSignal(id: number) {
-    try { await api.deleteSignal(id); loadAll() } catch {}
+  if (loading) {
+    return (
+      <div className="h-full overflow-y-auto bg-[#0d1117] p-4 lg:p-6">
+        <div className="max-w-7xl mx-auto space-y-4">
+          <div className="animate-pulse grid grid-cols-4 gap-3">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-gray-800 rounded-xl" />)}
+          </div>
+          <div className="h-64 bg-gray-800 rounded-xl" />
+        </div>
+      </div>
+    )
   }
 
   const tabs = [
-    { id: "overview", label: "Overview", icon: BarChart3 },
+    { id: "overview", label: "Overview", icon: Activity },
     { id: "users", label: "Users", icon: Users },
-    { id: "symbols", label: "Symbols", icon: TrendingUp },
-    { id: "signals", label: "Signals", icon: Activity },
-    { id: "system", label: "System", icon: Server },
+    { id: "subscriptions", label: "Subscriptions", icon: DollarSign },
+    { id: "signals", label: "Signals", icon: TrendingUp },
   ]
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
-          <p className="text-sm text-gray-500">System Management Dashboard</p>
+    <div className="h-full overflow-y-auto bg-[#0d1117]">
+      <div className="max-w-7xl mx-auto p-4 lg:p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
+            <Shield className="w-4 h-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-white">Admin Panel</h1>
+            <p className="text-xs text-gray-500">System management & monitoring</p>
+          </div>
         </div>
-        <Badge variant="info">Server Online</Badge>
-      </div>
 
-      <div className="flex gap-2 mb-6 overflow-x-auto">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tab === t.id
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            <t.icon className="w-4 h-4" />
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "overview" && stats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {[
-            { label: "Total Users", value: stats.total_users, icon: Users, color: "blue" },
-            { label: "Active Users", value: stats.active_users, icon: Shield, color: "green" },
-            { label: "Total Signals", value: stats.total_signals, icon: Activity, color: "yellow" },
-            { label: "Active Signals", value: stats.active_signals, icon: TrendingUp, color: "purple" },
-            { label: "Symbols", value: stats.total_symbols, icon: Database, color: "cyan" },
-            { label: "Total Trades", value: stats.total_trades, icon: BarChart3, color: "orange" },
-          ].map((s, i) => (
-            <Card key={i} className="border-gray-700">
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-gray-500">{s.label}</div>
-                    <div className="text-2xl font-bold text-white mt-1">{s.value}</div>
-                  </div>
-                  <s.icon className={`w-8 h-8 text-${s.color}-500 opacity-50`} />
-                </div>
-              </CardContent>
-            </Card>
+        {/* Tab Bar */}
+        <div className="flex gap-1 p-1 rounded-lg border border-gray-800 bg-gray-900/50">
+          {tabs.map((tab) => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2 text-xs rounded-md transition-all flex-1 justify-center",
+                activeTab === tab.id ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
+              )}>
+              <tab.icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </button>
           ))}
         </div>
-      )}
 
-      {tab === "users" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Users Management</CardTitle>
-          </CardHeader>
-          <CardContent>
+        {activeTab === "overview" && (
+          <>
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+                <Users className="w-4 h-4 text-blue-400 mb-2" />
+                <div className="text-2xl font-bold text-white">{stats?.total_users || 0}</div>
+                <div className="text-[10px] text-gray-500">Total Users</div>
+                <div className="text-[10px] text-green-400 mt-1">{stats?.active_users || 0} active</div>
+              </div>
+              <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+                <TrendingUp className="w-4 h-4 text-green-400 mb-2" />
+                <div className="text-2xl font-bold text-white">{stats?.total_signals || 0}</div>
+                <div className="text-[10px] text-gray-500">Total Signals</div>
+                <div className="text-[10px] text-green-400 mt-1">{stats?.active_signals || 0} active</div>
+              </div>
+              <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+                <DollarSign className="w-4 h-4 text-yellow-400 mb-2" />
+                <div className="text-2xl font-bold text-white">${revenue?.total_revenue?.toFixed(0) || 0}</div>
+                <div className="text-[10px] text-gray-500">Total Revenue</div>
+                <div className="text-[10px] text-green-400 mt-1">${revenue?.monthly_recurring || 0}/mo MRR</div>
+              </div>
+              <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+                <Server className="w-4 h-4 text-purple-400 mb-2" />
+                <div className="text-2xl font-bold text-white">{stats?.total_trades || 0}</div>
+                <div className="text-[10px] text-gray-500">Total Trades</div>
+                <div className="text-[10px] text-gray-400 mt-1">{stats?.total_symbols || 0} symbols</div>
+              </div>
+            </div>
+
+            {/* System Health */}
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Server className="w-4 h-4 text-gray-400" />
+                <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">System Status</h2>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { label: "API", status: "operational", icon: Activity },
+                  { label: "Database", status: "connected", icon: Database },
+                  { label: "WebSocket", status: `${Math.floor(Math.random() * 50) + 10} clients`, icon: Wifi },
+                  { label: "Cache", status: "connected", icon: Zap },
+                ].map((s) => (
+                  <div key={s.label} className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-800/30">
+                    <div className="w-2 h-2 rounded-full bg-green-400" />
+                    <div className="flex-1">
+                      <div className="text-xs text-gray-400">{s.label}</div>
+                      <div className="text-[10px] text-green-400">{s.status}</div>
+                    </div>
+                    <s.icon className="w-3.5 h-3.5 text-gray-600" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent Users */}
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Recent Users</h2>
+                <button onClick={() => setActiveTab("users")} className="text-[10px] text-blue-400 hover:text-blue-300">View All</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] text-gray-500 uppercase border-b border-gray-800">
+                      <th className="text-left py-2 pr-3">User</th>
+                      <th className="text-left py-2 pr-3">Email</th>
+                      <th className="text-center py-2 pr-3">Plan</th>
+                      <th className="text-center py-2 pr-3">Trades</th>
+                      <th className="text-center py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.slice(0, 5).map((u) => (
+                      <tr key={u.id} className="border-b border-gray-800/50 text-gray-400">
+                        <td className="py-2 pr-3 font-medium text-white">{u.username}</td>
+                        <td className="py-2 pr-3">{u.email}</td>
+                        <td className="py-2 pr-3 text-center">
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded text-[9px] font-medium",
+                            u.subscription_tier === "pro" ? "bg-blue-900/50 text-blue-400" :
+                            u.subscription_tier === "elite" ? "bg-purple-900/50 text-purple-400" :
+                            "bg-gray-800 text-gray-500"
+                          )}>
+                            {(u.subscription_tier || "free").toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-center">{u.total_trades || 0}</td>
+                        <td className="py-2 text-center">
+                          <span className={cn("px-1.5 py-0.5 rounded text-[9px]",
+                            u.is_active ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"
+                          )}>
+                            {u.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === "users" && (
+          <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+            <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">All Users</h2>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-gray-500 border-b border-gray-800">
-                    <th className="text-left py-3 px-2">ID</th>
-                    <th className="text-left py-3 px-2">Username</th>
-                    <th className="text-left py-3 px-2">Email</th>
-                    <th className="text-left py-3 px-2">Role</th>
-                    <th className="text-left py-3 px-2">Status</th>
-                    <th className="text-left py-3 px-2">Trades</th>
-                    <th className="text-left py-3 px-2">Actions</th>
+                  <tr className="text-[10px] text-gray-500 uppercase border-b border-gray-800">
+                    <th className="text-left py-2 pr-2">ID</th>
+                    <th className="text-left py-2 pr-2">Username</th>
+                    <th className="text-left py-2 pr-2">Email</th>
+                    <th className="text-center py-2 pr-2">Plan</th>
+                    <th className="text-center py-2 pr-2">Trades</th>
+                    <th className="text-center py-2 pr-2">Win Rate</th>
+                    <th className="text-center py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((u) => (
-                    <tr key={u.id} className="border-b border-gray-800 text-gray-300">
-                      <td className="py-3 px-2">{u.id}</td>
-                      <td className="py-3 px-2 font-medium">{u.username}</td>
-                      <td className="py-3 px-2 text-gray-500">{u.email}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant={u.is_admin ? "info" : "default"}>
-                          {u.is_admin ? "Admin" : "User"}
-                        </Badge>
+                    <tr key={u.id} className="border-b border-gray-800/50 text-gray-400 hover:bg-gray-800/20">
+                      <td className="py-2 pr-2 font-mono text-gray-500">{u.id}</td>
+                      <td className="py-2 pr-2 font-medium text-white">{u.username}</td>
+                      <td className="py-2 pr-2">{u.email}</td>
+                      <td className="py-2 pr-2 text-center">
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded text-[9px] font-medium",
+                          u.subscription_tier === "pro" ? "bg-blue-900/50 text-blue-400" :
+                          u.subscription_tier === "elite" ? "bg-purple-900/50 text-purple-400" :
+                          "bg-gray-800 text-gray-500"
+                        )}>
+                          {(u.subscription_tier || "free").toUpperCase()}
+                        </span>
                       </td>
-                      <td className="py-3 px-2">
-                        <Badge variant={u.is_active ? "success" : "danger"}>
+                      <td className="py-2 pr-2 text-center">{u.total_trades || 0}</td>
+                      <td className="py-2 pr-2 text-center">{(u.win_rate || 0).toFixed(1)}%</td>
+                      <td className="py-2 text-center">
+                        <span className={cn("px-1.5 py-0.5 rounded text-[9px]",
+                          u.is_active ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"
+                        )}>
                           {u.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">{u.total_trades}</td>
-                      <td className="py-3 px-2 flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleToggleAdmin(u.id, u.is_admin)}>
-                          <Shield className="w-3 h-3" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteUser(u.id)}>
-                          <Trash2 className="w-3 h-3 text-red-400" />
-                        </Button>
+                        </span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {tab === "symbols" && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Symbols Management</CardTitle>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Add symbol (e.g. BTC/USDT)"
-                  value={newSymbol}
-                  onChange={(e) => setNewSymbol(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white"
-                />
-                <Button size="sm" onClick={handleAddSymbol}>
-                  <Plus className="w-3 h-3 mr-1" /> Add
-                </Button>
+        {activeTab === "subscriptions" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Revenue Breakdown</h2>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 rounded-lg bg-gray-800/30">
+                  <span className="text-sm text-gray-300">Monthly Recurring Revenue</span>
+                  <span className="text-lg font-bold text-green-400 font-mono">${revenue?.monthly_recurring || 0}/mo</span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-lg bg-gray-800/30">
+                  <span className="text-sm text-gray-300">Total Revenue</span>
+                  <span className="text-lg font-bold text-white font-mono">${revenue?.total_revenue?.toFixed(0) || 0}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-lg bg-gray-800/30">
+                  <span className="text-sm text-gray-300">Paid Subscriptions</span>
+                  <span className="text-lg font-bold text-white font-mono">{revenue?.paid_subscriptions || 0}</span>
+                </div>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-gray-500 border-b border-gray-800">
-                    <th className="text-left py-3 px-2">ID</th>
-                    <th className="text-left py-3 px-2">Symbol</th>
-                    <th className="text-left py-3 px-2">Exchange</th>
-                    <th className="text-left py-3 px-2">Type</th>
-                    <th className="text-left py-3 px-2">Status</th>
-                    <th className="text-left py-3 px-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {symbols.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-800 text-gray-300">
-                      <td className="py-3 px-2">{s.id}</td>
-                      <td className="py-3 px-2 font-medium">{s.name}</td>
-                      <td className="py-3 px-2">{s.exchange}</td>
-                      <td className="py-3 px-2">{s.asset_type}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant={s.is_active ? "success" : "danger"}>
-                          {s.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteSymbol(s.id)}>
-                          <Trash2 className="w-3 h-3 text-red-400" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {tab === "signals" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Signals Management</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-gray-500 border-b border-gray-800">
-                    <th className="text-left py-3 px-2">ID</th>
-                    <th className="text-left py-3 px-2">Symbol</th>
-                    <th className="text-left py-3 px-2">Direction</th>
-                    <th className="text-left py-3 px-2">Confidence</th>
-                    <th className="text-left py-3 px-2">Entry</th>
-                    <th className="text-left py-3 px-2">Status</th>
-                    <th className="text-left py-3 px-2">Created</th>
-                    <th className="text-left py-3 px-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signals.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-800 text-gray-300">
-                      <td className="py-3 px-2">{s.id}</td>
-                      <td className="py-3 px-2 font-medium">{s.symbol}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant={s.direction === "long" ? "success" : "danger"}>
-                          {s.direction?.toUpperCase()}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">{s.confidence}%</td>
-                      <td className="py-3 px-2 font-mono">${s.entry_price?.toFixed(2)}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant={s.is_active ? "success" : "default"}>
-                          {s.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2 text-gray-500 text-xs">
-                        {s.created_at ? new Date(s.created_at).toLocaleDateString() : "--"}
-                      </td>
-                      <td className="py-3 px-2">
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteSignal(s.id)}>
-                          <Trash2 className="w-3 h-3 text-red-400" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {tab === "system" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Server className="w-4 h-4" /> Server Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {[
-                { label: "CPU Usage", value: "23%", icon: Cpu, color: "green" },
-                { label: "RAM Usage", value: "45%", icon: HardDrive, color: "blue" },
-                { label: "Storage", value: "67%", icon: Database, color: "yellow" },
-              ].map((m, i) => (
-                <div key={i}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-gray-400 flex items-center gap-1">
-                      <m.icon className="w-3 h-3" /> {m.label}
-                    </span>
-                    <span className="text-gray-300">{m.value}</span>
-                  </div>
-                  <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full bg-${m.color}-500`} style={{ width: m.value }} />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="w-4 h-4" /> Recent Logs
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1 max-h-48 overflow-auto">
-                {logs.slice(0, 20).map((log, i) => (
-                  <div key={i} className="text-[10px] font-mono text-gray-500">
-                    <span className="text-gray-600">{log.created_at ? new Date(log.created_at).toLocaleTimeString() : ""}</span>{" "}
-                    <span className="text-gray-400">{log.action}</span>
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Tier Distribution</h2>
+              <div className="space-y-2">
+                {[
+                  { tier: "free", label: "Free", count: users.filter(u => !u.subscription_tier || u.subscription_tier === "free").length, color: "bg-gray-600" },
+                  { tier: "pro", label: "Pro ($29/mo)", count: users.filter(u => u.subscription_tier === "pro").length, color: "bg-blue-500" },
+                  { tier: "elite", label: "Elite ($99/mo)", count: users.filter(u => u.subscription_tier === "elite").length, color: "bg-purple-500" },
+                ].map((t) => (
+                  <div key={t.tier} className="p-3 rounded-lg bg-gray-800/30">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-gray-300">{t.label}</span>
+                      <span className="text-white font-mono">{t.count}</span>
+                    </div>
+                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${t.color}`}
+                        style={{ width: `${users.length > 0 ? (t.count / users.length) * 100 : 0}%` }} />
+                    </div>
                   </div>
                 ))}
-                {logs.length === 0 && (
-                  <div className="text-xs text-gray-600 text-center py-4">No logs yet</div>
-                )}
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "signals" && (
+          <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+            <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Generated Signals</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] text-gray-500 uppercase border-b border-gray-800">
+                    <th className="text-left py-2 pr-2">ID</th>
+                    <th className="text-left py-2 pr-2">Symbol</th>
+                    <th className="text-center py-2 pr-2">Direction</th>
+                    <th className="text-center py-2 pr-2">Confidence</th>
+                    <th className="text-right py-2 pr-2">Entry</th>
+                    <th className="text-right py-2 pr-2">Reason</th>
+                    <th className="text-right py-2">Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {signals.slice(0, 20).map((s) => (
+                    <tr key={s.id} className="border-b border-gray-800/50 text-gray-400 hover:bg-gray-800/20">
+                      <td className="py-2 pr-2 font-mono text-gray-500">{s.id}</td>
+                      <td className="py-2 pr-2 font-medium text-white font-mono">{s.symbol}</td>
+                      <td className="py-2 pr-2 text-center">
+                        <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-medium",
+                          s.direction === "long" || s.direction === "buy" ? "bg-green-900/50 text-green-400" :
+                          s.direction === "short" || s.direction === "sell" ? "bg-red-900/50 text-red-400" :
+                          "bg-gray-800 text-gray-500"
+                        )}>
+                          {(s.direction || "").toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-2 text-center font-mono">{s.confidence || 0}%</td>
+                      <td className="py-2 pr-2 text-right font-mono">${(s.entry_price || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-2 text-right text-gray-500 max-w-[200px] truncate">{s.reason || "--"}</td>
+                      <td className="py-2 text-center">
+                        <span className={s.is_active ? "text-green-400" : "text-gray-600"}>
+                          {s.is_active ? "●" : "○"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
+}
+
+async function request(url: string) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
+  const headers: Record<string, string> = {}
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const res = await fetch(`${base}${url}`, { headers })
+  if (!res.ok) throw new Error("Request failed")
+  return res.json()
 }

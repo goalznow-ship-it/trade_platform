@@ -38,18 +38,18 @@ export default function LandingPage() {
   const plans = [
     {
       name: "Free", price: "$0", period: "/month",
-      features: ["Basic market data", "5 technical indicators", "3 alerts max", "1 watchlist", "Paper trading"],
+      features: ["3 AI signals/day", "Basic market data", "5 technical indicators", "3 alerts", "1 watchlist", "Paper trading"],
       cta: "Get Started", popular: false,
     },
     {
       name: "Pro", price: "$29", period: "/month",
-      features: ["All indicators & AI analysis", "Unlimited alerts & watchlists", "Signal scanner", "Backtesting engine", "Risk management", "Trading journal"],
+      features: ["Unlimited AI signals", "AI prediction engine", "Futures intelligence", "Backtesting engine", "News intelligence", "Risk management"],
       cta: "Start Free Trial", popular: true,
     },
     {
-      name: "Enterprise", price: "$99", period: "/month",
-      features: ["Everything in Pro", "Multi-exchange support", "Portfolio analytics", "Admin dashboard", "Priority support", "API access", "Team accounts"],
-      cta: "Contact Sales", popular: false,
+      name: "Elite", price: "$99", period: "/month",
+      features: ["Whale tracking", "Advanced AI predictions", "API access (100 req/min)", "Multi-exchange support", "Dedicated support 24/7", "Team accounts (up to 5)"],
+      cta: "Go Elite", popular: false,
     },
   ]
 

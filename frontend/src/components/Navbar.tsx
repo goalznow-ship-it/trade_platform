@@ -11,17 +11,19 @@ import {
   Settings, LogOut, User, Clock,
   Brain, Radio, BarChart3, Newspaper,
   LayoutDashboard, TrendingUp, Activity,
-  Scan, Shield, ChevronDown,
+  Scan, Shield, ChevronDown, History, Radar,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 
 const MODULES = [
   { href: "/terminal", label: "AI Terminal", icon: Brain, color: "text-blue-400" },
   { href: "/signals", label: "AI Signals", icon: Radio, color: "text-green-400" },
+  { href: "/radar", label: "Market Radar", icon: Activity, color: "text-purple-400" },
+  { href: "/scanner", label: "Scanner", icon: Scan, color: "text-cyan-400" },
   { href: "/futures", label: "Futures Intel", icon: BarChart3, color: "text-orange-400" },
-  { href: "/scanner", label: "Scanner", icon: Scan, color: "text-purple-400" },
   { href: "/news", label: "News Intel", icon: Newspaper, color: "text-yellow-400" },
-  { href: "/dashboard", label: "Portfolio", icon: Shield, color: "text-cyan-400" },
+  { href: "/backtest", label: "Backtest", icon: History, color: "text-green-400" },
+  { href: "/dashboard", label: "Portfolio", icon: Shield, color: "text-gray-400" },
 ]
 
 export function Navbar() {
@@ -33,7 +35,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/admin" || pathname === "/pricing"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
@@ -216,13 +218,13 @@ export function Navbar() {
               { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
               { label: "AI Terminal", href: "/terminal", icon: Brain },
               { label: "AI Signals", href: "/signals", icon: Radio },
+              { label: "Market Radar", href: "/radar", icon: Activity },
               { label: "Market Scanner", href: "/scanner", icon: Scan },
               { label: "Futures Intel", href: "/futures", icon: BarChart3 },
               { label: "News Intel", href: "/news", icon: Newspaper },
-              { label: "Watchlist", href: "/dashboard", icon: TrendingUp },
-              { label: "Portfolio", href: "/dashboard", icon: Shield },
-              { label: "Backtesting", href: "/dashboard", icon: Activity },
-              { label: "Admin", href: "/dashboard", icon: Settings },
+              { label: "Backtesting", href: "/backtest", icon: History },
+              { label: "Pricing", href: "/pricing", icon: TrendingUp },
+              { label: "Admin", href: "/admin", icon: Settings },
             ].map((item) => (
               <Link key={item.label} href={item.href}
                 className="flex items-center gap-2 px-3 py-2 text-gray-300 hover:bg-gray-800 rounded text-xs"
