@@ -20,6 +20,7 @@ from app.api.v1 import notifications as notifications_router
 from app.api.v1 import enterprise as enterprise_router
 from app.api.v1.websocket_v2 import router as ws_v2_router
 from app.services.alert import alert_service
+from app.services.binance_ws import binance_ws
 
 
 @asynccontextmanager
@@ -27,6 +28,10 @@ async def lifespan(app: FastAPI):
     from app.core.redis import redis_client
     await init_db()
     await ws_manager.start()
+    await binance_ws.start()
+    await binance_ws.subscribe_price(["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"])
+    await binance_ws.subscribe_klines(["BTC/USDT", "ETH/USDT"], "1m")
+    await binance_ws.subscribe_depth(["BTC/USDT", "ETH/USDT"])
     await alert_service.start()
     try:
         await redis_client.ping()
@@ -37,6 +42,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Server starting on port {settings.PORT}")
     yield
     await alert_service.stop()
+    await binance_ws.stop()
     await ws_manager.stop()
     logger.info(f"Server shutting down")
 

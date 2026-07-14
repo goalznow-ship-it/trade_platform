@@ -46,6 +46,7 @@ class RiskSnapshot(Base):
     kelly_percent = Column(Float, default=0.0)
     var_95 = Column(Float, default=0.0)
     cvar_95 = Column(Float, default=0.0)
+    win_rate = Column(Float, default=0.0)
     total_balance = Column(Float, default=0.0)
     open_position_count = Column(Integer, default=0)
     margin_used = Column(Float, default=0.0)

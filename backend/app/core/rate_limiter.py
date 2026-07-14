@@ -3,6 +3,7 @@ from typing import Dict, Tuple
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from datetime import datetime, timezone
 
 
 class InMemoryRateLimiter:
@@ -25,6 +26,44 @@ class InMemoryRateLimiter:
 
 
 rate_limiter = InMemoryRateLimiter()
+
+
+class DailyUsageTracker:
+    """Tracks daily API usage per user for subscription limits."""
+
+    def __init__(self):
+        self._data: Dict[int, list] = {}
+
+    def _today_key(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def check(self, user_id: int, max_daily: int) -> Tuple[bool, int]:
+        key = self._today_key()
+        user_key = f"{user_id}:{key}"
+
+        now = time.time()
+        if user_key not in self._data:
+            self._data[user_key] = []
+
+        today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        self._data[user_key] = [t for t in self._data[user_key] if t >= today_ts]
+
+        used = len(self._data[user_key])
+        if used >= max_daily:
+            return False, 0
+
+        self._data[user_key].append(now)
+        return True, max_daily - used - 1
+
+    def daily_usage(self, user_id: int) -> int:
+        key = self._today_key()
+        user_key = f"{user_id}:{key}"
+        today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        self._data[user_key] = [t for t in self._data.get(user_key, []) if t >= today_ts]
+        return len(self._data.get(user_key, []))
+
+
+daily_tracker = DailyUsageTracker()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

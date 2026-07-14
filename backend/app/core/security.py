@@ -102,6 +102,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(401, "User not found or inactive")
+    if user.subscription_expires and user.subscription_expires < datetime.now(timezone.utc):
+        if user.subscription_tier != "free":
+            user.subscription_tier = "free"
+            user.subscription_expires = None
+            await db.commit()
     return user
 
 
@@ -109,6 +114,18 @@ async def require_admin(user = Depends(get_current_user)):
     if not user.is_admin:
         raise HTTPException(403, "Admin access required")
     return user
+
+def require_subscription(min_tier: str = "pro"):
+    """Subscription permission check dependency factory."""
+    async def _check(user = Depends(get_current_user)):
+        tier = user.subscription_tier or "free"
+        tiers = {"free": 0, "pro": 1, "elite": 2}
+        required = tiers.get(min_tier, 0)
+        actual = tiers.get(tier, 0)
+        if actual < required:
+            raise HTTPException(403, f"Subscription required: {min_tier} tier or higher")
+        return user
+    return _check
 
 
 class AuditMiddleware(BaseHTTPMiddleware):

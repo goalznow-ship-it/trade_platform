@@ -66,7 +66,7 @@ class Alert(Base):
     cooldown_until = Column(DateTime(timezone=True), nullable=True)
     trigger_count = Column(Integer, default=0)
     last_triggered_at = Column(DateTime(timezone=True), nullable=True)
-    metadata = Column(JSON, nullable=True)
+    alert_metadata = Column("metadata", JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

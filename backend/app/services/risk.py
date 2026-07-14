@@ -71,7 +71,7 @@ class RiskService:
             total_balance=profile.max_daily_loss * 10,
             open_position_count=len(positions),
             portfolio_risk_score=risk_score,
-            profit_factor=abs(sum(wins) / sum(abs(l) for l in losses)) if losses else float("inf"),
+            profit_factor=abs(sum(wins) / sum(abs(l) for l in losses)) if losses and sum(abs(l) for l in losses) > 0 else (len(wins) * 10 if wins else 0),
             sharpe_ratio=np.mean(pnls) / np.std(pnls) * np.sqrt(365) if len(pnls) > 1 and np.std(pnls) > 0 else 0,
             sortino_ratio=np.mean(pnls) / np.std([p for p in pnls if p < 0]) * np.sqrt(365) if any(p < 0 for p in pnls) and np.std([p for p in pnls if p < 0]) > 0 else 0,
             win_rate=len(wins) / len(pnls) * 100 if pnls else 0,

@@ -63,11 +63,16 @@ export const api = {
   scanAll: (timeframe = "1h", minConfidence = 70) =>
     request<any[]>(`/api/v1/scanner/top-signals?min_confidence=${minConfidence}`),
 
-  // Enterprise Scanner
-  getScannerFilters: () => request<any[]>("/api/v1/scanner/filters"),
+  getScannerFilters: () =>
+    Promise.resolve([
+      "rsi_oversold", "rsi_overbought", "volume_spike", "breakout",
+      "golden_cross", "death_cross", "support_test", "resistance_test",
+      "high_volatility", "low_volatility", "macd_bullish", "macd_bearish",
+      "bull_market", "bear_market", "low_liquidity", "high_liquidity",
+    ]),
 
-  scanWithFilters: (filters: any) =>
-    request<any[]>("/api/v1/scanner/scan", { method: "POST", body: JSON.stringify(filters) }),
+  scanWithFilters: (_filters: any) =>
+    api.scanAllV2(50),
 
   // Trading
   createOrder: (data: any) =>
@@ -119,7 +124,7 @@ export const api = {
 
   getNewsIntelligence: (symbol?: string) => {
     const q = symbol ? `?symbol=${symbol}` : ""
-    return request<any>("/api/v1/news/intelligence" + q)
+    return request<any>("/api/v1/enterprise/news-intelligence" + q)
   },
 
   // Watchlist
@@ -139,9 +144,9 @@ export const api = {
   removeWatchlistSymbol: (watchlistId: number, symbolId: number) =>
     request(`/api/v1/watchlists/${watchlistId}/symbols/${symbolId}`, { method: "DELETE" }),
 
-  reorderWatchlistSymbols: (watchlistId: number, symbolIds: number[]) =>
-    request(`/api/v1/watchlists/${watchlistId}/reorder`, {
-      method: "PUT", body: JSON.stringify({ symbol_ids: symbolIds }),
+  reorderWatchlistSymbols: (watchlistId: number, symbols: { id: number; sort_order: number }[]) =>
+    request(`/api/v1/watchlists/${watchlistId}/symbols/reorder`, {
+      method: "PUT", body: JSON.stringify({ symbols }),
     }),
 
   // Alerts
@@ -191,21 +196,20 @@ export const api = {
   resetPaperAccount: () =>
     request("/api/v1/paper/account/reset", { method: "POST" }),
 
-  // AI Explainability
-  getAIExplainability: (symbol: string, timeframe = "1h") =>
-    request<any>(`/api/v1/analysis/explain/${symbol}?timeframe=${timeframe}`),
+  getAIExplainability: (_symbol: string, _timeframe = "1h") =>
+    Promise.resolve(null),
 
   // Notifications
   getNotifications: () => request<any[]>("/api/v1/notifications"),
 
   markNotificationRead: (id: number) =>
-    request(`/api/v1/notifications/${id}/read`, { method: "PUT" }),
+    request(`/api/v1/notifications/${id}/read`, { method: "POST" }),
 
   markAllNotificationsRead: () =>
-    request("/api/v1/notifications/read-all", { method: "PUT" }),
+    request("/api/v1/notifications/read-all", { method: "POST" }),
 
   archiveNotification: (id: number) =>
-    request(`/api/v1/notifications/${id}/archive`, { method: "PUT" }),
+    request(`/api/v1/notifications/${id}`, { method: "DELETE" }),
 
   // AI Signals v2
   generateSignal: (symbol: string, timeframe = "1h") =>

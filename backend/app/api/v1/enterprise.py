@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from app.core.security import get_current_user, require_subscription
+from app.models.user import User
 from app.services.enterprise_signals import enterprise_signal_engine
 from app.services.prediction import prediction_engine
 from app.services.news_intelligence_v2 import news_intelligence_engine
@@ -13,13 +15,19 @@ def _fix_symbol(symbol: str) -> str:
 
 
 @router.get("/signal/{symbol:path}")
-async def get_enterprise_signal(symbol: str, timeframe: str = "1h"):
+async def get_enterprise_signal(
+    symbol: str, timeframe: str = "1h",
+    user: User = Depends(require_subscription("pro")),
+):
     symbol = _fix_symbol(symbol)
     return await enterprise_signal_engine.generate_enterprise_signal(symbol, timeframe)
 
 
 @router.get("/market-structure/{symbol:path}")
-async def get_market_structure(symbol: str, timeframe: str = "1h"):
+async def get_market_structure(
+    symbol: str, timeframe: str = "1h",
+    user: User = Depends(require_subscription("pro")),
+):
     symbol = _fix_symbol(symbol)
     data = await market_service.get_ohlcv(symbol, "binance", timeframe, 200)
     if not data:
@@ -28,19 +36,28 @@ async def get_market_structure(symbol: str, timeframe: str = "1h"):
 
 
 @router.get("/futures/{symbol:path}")
-async def get_futures_analysis(symbol: str):
+async def get_futures_analysis(
+    symbol: str,
+    user: User = Depends(require_subscription("pro")),
+):
     symbol = _fix_symbol(symbol)
     return await enterprise_signal_engine.analyze_futures(symbol)
 
 
 @router.get("/predict/{symbol:path}")
-async def get_price_prediction(symbol: str, timeframe: str = "4h"):
+async def get_price_prediction(
+    symbol: str, timeframe: str = "4h",
+    user: User = Depends(require_subscription("elite")),
+):
     symbol = _fix_symbol(symbol)
     return await prediction_engine.predict(symbol, timeframe)
 
 
 @router.get("/predict")
-async def predict_all(timeframe: str = "4h", min_confidence: float = 0):
+async def predict_all(
+    timeframe: str = "4h", min_confidence: float = 0,
+    user: User = Depends(require_subscription("elite")),
+):
     symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"]
     results = []
     for s in symbols:
@@ -52,12 +69,17 @@ async def predict_all(timeframe: str = "4h", min_confidence: float = 0):
 
 
 @router.get("/news-intelligence")
-async def get_news_intelligence(limit: int = Query(default=20, le=50)):
+async def get_news_intelligence(
+    limit: int = Query(default=20, le=50),
+    user: User = Depends(require_subscription("pro")),
+):
     return await news_intelligence_engine.scan_all_news(limit)
 
 
 @router.get("/futures-dashboard")
-async def get_futures_dashboard():
+async def get_futures_dashboard(
+    user: User = Depends(require_subscription("pro")),
+):
     symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOGE/USDT"]
     results = []
     for s in symbols:
@@ -81,12 +103,18 @@ async def get_futures_dashboard():
 
 
 @router.get("/market-scan")
-async def scan_market(timeframe: str = "1h"):
+async def scan_market(
+    timeframe: str = "1h",
+    user: User = Depends(require_subscription("pro")),
+):
     return await scanner_service.scan_market(timeframe=timeframe)
 
 
 @router.get("/top-opportunities")
-async def top_opportunities(limit: int = Query(default=10, le=30)):
+async def top_opportunities(
+    limit: int = Query(default=10, le=30),
+    user: User = Depends(require_subscription("pro")),
+):
     symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOGE/USDT", "DOT/USDT", "LINK/USDT"]
     results = []
     for s in symbols:
