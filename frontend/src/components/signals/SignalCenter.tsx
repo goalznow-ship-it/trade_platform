@@ -1,27 +1,48 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
 import { SignalCard } from "@/components/signals/SignalCard"
 import { Button } from "@/components/ui/Button"
 import { cn } from "@/lib/utils"
 import {
-  Zap, Filter, ArrowUpDown, Search, RefreshCw, SlidersHorizontal,
+  Filter, ArrowUpDown, Search, RefreshCw,
 } from "lucide-react"
+
+interface Signal {
+  direction?: string
+  signal?: string
+  symbol: string
+  reason?: string
+  entry_price?: number
+  price?: number
+  stop_loss?: number
+  take_profit?: number
+  take_profit_1?: number
+  take_profit_2?: number
+  take_profit_3?: number
+  risk_reward?: number
+  risk_reward_ratio?: number
+  timeframe?: string
+  confidence?: number
+  score?: number
+  funding_rate?: number
+  sentiment_score?: number
+}
 
 type SortKey = "confidence" | "risk_reward" | "opportunity"
 type FilterDir = "all" | "long" | "short"
 type FilterType = "all" | "futures" | "top"
 
 export function SignalCenter() {
-  const [signals, setSignals] = useState<any[]>([])
+  const [signals, setSignals] = useState<Signal[]>([])
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<SortKey>("confidence")
   const [filterDir, setFilterDir] = useState<FilterDir>("all")
   const [filterType, setFilterType] = useState<FilterType>("all")
   const [highConfidenceOnly, setHighConfidenceOnly] = useState(false)
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const data = await api.scanAllV2(highConfidenceOnly ? 80 : 0)
@@ -31,9 +52,10 @@ export function SignalCenter() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [highConfidenceOnly])
 
-  useEffect(() => { load() }, [highConfidenceOnly])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
 
   let filtered = [...signals]
   if (filterDir === "long") {
@@ -43,7 +65,7 @@ export function SignalCenter() {
     filtered = filtered.filter((s) => (s.direction || s.signal) === "short" || (s.direction || s.signal) === "bearish" || (s.direction || s.signal) === "sell")
   }
   if (filterType === "futures") {
-    filtered = filtered.filter((s) => s.futures || s.funding_rate !== undefined)
+    filtered = filtered.filter((s) => s.funding_rate !== undefined)
   }
   if (filterType === "top") {
     filtered = filtered.filter((s) => (s.confidence || 0) >= 75 && (s.risk_reward || 0) >= 2)

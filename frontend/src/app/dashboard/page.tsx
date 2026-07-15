@@ -8,7 +8,6 @@ import { DashboardOverview } from "@/components/dashboard/DashboardOverview"
 import { WSProvider } from "@/components/WSProvider"
 import { ConnectionQualityIndicator } from "@/components/dashboard/ConnectionQuality"
 import { useAuth } from "@/hooks/useAuth"
-import { useMarketStore } from "@/store/market"
 import {
   LayoutDashboard, LineChart, Activity, FileText, Settings,
   List, Bell, Shield, BookOpen, Wallet, Search,
@@ -60,7 +59,7 @@ export default function DashboardPage() {
     loadUser()
     const token = localStorage.getItem("token")
     if (!token) router.push("/login")
-  }, [])
+  }, [loadUser, router])
 
   const sidebarItems = [
     { id: "dashboard" as Tab, label: "Dashboard", icon: LayoutDashboard },

@@ -8,10 +8,31 @@ import { AIPredictionPanel } from "@/components/terminal/AIPredictionPanel"
 import { TradeDecisionCard } from "@/components/terminal/TradeDecisionCard"
 import { AIForecastPanel } from "@/components/terminal/AIForecastPanel"
 
+interface AnalysisData {
+  prediction?: string
+  confidence?: number
+  long_probability?: number
+  short_probability?: number
+  risk_level?: string
+  scores?: Record<string, number>
+  details?: Record<string, unknown>
+  summary?: string
+  current_price?: number
+  [key: string]: unknown
+}
+
+interface ExplainData {
+  reasons?: string[]
+  warnings?: string[]
+  suggestions?: Record<string, unknown>
+  key_levels?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export function TerminalPage() {
   const { selectedSymbol, selectedTimeframe } = useMarketStore()
-  const [analysis, setAnalysis] = useState<any>(null)
-  const [explain, setExplain] = useState<any>(null)
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
+  const [explain, setExplain] = useState<ExplainData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -20,7 +41,7 @@ export function TerminalPage() {
       try {
         const [ai, ex] = await Promise.all([
           api.getAIAnalysis(selectedSymbol, selectedTimeframe).catch(() => null),
-          api.getAIExplainability(selectedSymbol, selectedTimeframe).catch(() => null),
+          api.getAIExplainability().catch(() => null),
         ])
         setAnalysis(ai)
         setExplain(ex)

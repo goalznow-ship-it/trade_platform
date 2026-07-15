@@ -1,31 +1,53 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
-import { Badge } from "@/components/ui/Badge"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn, formatPrice } from "@/lib/utils"
 import {
-  PieChart, TrendingUp, TrendingDown, DollarSign,
-  BarChart3, Target, Clock, Award,
+  PieChart, TrendingUp, TrendingDown,
+  BarChart3, Clock, Award,
 } from "lucide-react"
 
-export function PortfolioPanel() {
-  const [analytics, setAnalytics] = useState<Record<string, unknown> | null>(null)
-  const [dailyPnl, setDailyPnl] = useState<Record<string, unknown>[]>([])
+interface PortfolioAnalytics {
+  win_rate: number;
+  profit_factor: number;
+  total_trades: number;
+  best_trade: number;
+  worst_trade: number;
+  winning_trades: number;
+  losing_trades: number;
+  avg_holding_time: string;
+  monthly_breakdown?: {
+    month?: string;
+    label?: string;
+    pnl: number;
+  }[];
+}
 
-  async function load() {
+interface DailyPnLEntry {
+  date?: string;
+  day?: string;
+  pnl: number;
+}
+
+export function PortfolioPanel() {
+  const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null)
+  const [dailyPnl, setDailyPnl] = useState<DailyPnLEntry[]>([])
+
+  const load = useCallback(async () => {
     try {
       const [a, d] = await Promise.all([
         api.getPortfolioAnalytics(),
         api.getDailyPnL(),
       ])
-      setAnalytics(a)
-      setDailyPnl(Array.isArray(d) ? d : [])
+      setAnalytics(a as PortfolioAnalytics)
+      setDailyPnl(Array.isArray(d) ? (d as DailyPnLEntry[]) : [])
     } catch {}
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
 
   if (!analytics) {
     return <div className="p-4 text-center text-gray-500 text-sm">Loading portfolio...</div>
@@ -75,7 +97,7 @@ export function PortfolioPanel() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-4 gap-1">
-              {analytics.monthly_breakdown.map((m: any, i: number) => (
+              {analytics.monthly_breakdown.map((m, i) => (
                 <div
                   key={i}
                   className={cn(

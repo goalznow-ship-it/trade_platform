@@ -3,17 +3,37 @@
 import { useMarketStore } from "@/store/market"
 import { cn, formatPrice } from "@/lib/utils"
 import {
-  TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight,
-  Target, Clock, AlertTriangle,
+  ArrowUpRight, ArrowDownRight,
 } from "lucide-react"
 
+interface AnalysisDetails {
+  rsi?: number
+  macd?: number
+  support?: number
+  resistance?: number
+  [key: string]: unknown
+}
+
+interface AnalysisData {
+  prediction?: string
+  confidence?: number
+  long_probability?: number
+  short_probability?: number
+  risk_level?: string
+  scores?: Record<string, number>
+  details?: AnalysisDetails
+  summary?: string
+  current_price?: number
+  [key: string]: unknown
+}
+
 interface AIForecastPanelProps {
-  analysis?: any
+  analysis?: AnalysisData | null
   loading?: boolean
 }
 
 export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
-  const { selectedSymbol, selectedTimeframe } = useMarketStore()
+  const { selectedTimeframe } = useMarketStore()
 
   if (loading) {
     return (

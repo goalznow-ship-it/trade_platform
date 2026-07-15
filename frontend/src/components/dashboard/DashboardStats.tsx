@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState, useMemo, memo } from "react"
+import { useEffect, useState, useMemo, memo, useCallback } from "react"
 import { api } from "@/lib/api"
+import { useMarketStore } from "@/store/market"
 import { cn, formatPrice, getChangeColor, nowISO } from "@/lib/utils"
 import {
   DollarSign, TrendingUp, TrendingDown, BarChart3,
@@ -98,28 +99,30 @@ export function DashboardStats() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const liveTs = useLiveTimestamp()
+  const isLive = useMarketStore((s) => s.isLive)
+
+  const load = useCallback(async () => {
+    try {
+      const [portfolio, analytics, positions, balance] = await Promise.all([
+        api.getPortfolio().catch(() => null),
+        api.getPortfolioAnalytics().catch(() => null),
+        api.getPositions().catch(() => []),
+        api.getBalance().catch(() => null),
+      ])
+      setData({ portfolio, analytics, positions: Array.isArray(positions) ? positions : [], balance })
+    } catch {} finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    async function load() {
-      try {
-        const [portfolio, analytics, positions, balance] = await Promise.all([
-          api.getPortfolio().catch(() => null),
-          api.getPortfolioAnalytics().catch(() => null),
-          api.getPositions().catch(() => []),
-          api.getBalance().catch(() => null),
-        ])
-        setData({ portfolio, analytics, positions: Array.isArray(positions) ? positions : [], balance })
-      } catch {} finally {
-        setLoading(false)
-      }
-    }
     const timer = setTimeout(load, 0)
-    const interval = setInterval(load, 30000)
+    const interval = setInterval(load, isLive ? 60000 : 30000)
     return () => {
       clearTimeout(timer)
       clearInterval(interval)
     }
-  }, [])
+  }, [load, isLive])
 
   const positions = useMemo(() => data?.positions || [], [data])
   const unrealizedPnl = useMemo(

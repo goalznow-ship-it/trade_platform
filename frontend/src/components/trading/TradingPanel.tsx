@@ -4,10 +4,9 @@ import { useState } from "react"
 import { useMarketStore } from "@/store/market"
 import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/Button"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
 import { cn, formatPrice } from "@/lib/utils"
-import { ArrowUp, ArrowDown, Settings2, Calculator, Store } from "lucide-react"
+import { ArrowUp, ArrowDown, Settings2, Store } from "lucide-react"
 
 const ORDER_TYPES = ["Market", "Limit", "Stop", "Stop Limit"]
 const LEVERAGE_OPTIONS = [1, 2, 3, 5, 10, 20, 50, 100]

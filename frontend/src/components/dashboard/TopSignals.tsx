@@ -153,7 +153,7 @@ export function TopSignals() {
   const wsInitialized = useRef(false)
 
   useEffect(() => {
-    const unsub = on("signal_update", (msg: { data?: unknown }) => {
+    const unsub = on("signal_update", (msg) => {
       const raw = msg?.data as { data?: SignalData[] } | SignalData[] | undefined
       const list = Array.isArray(raw) ? raw : (raw as { data?: SignalData[] })?.data || []
       if (Array.isArray(list) && list.length > 0) {
@@ -185,7 +185,7 @@ export function TopSignals() {
     }
     const interval = setInterval(() => {
       if (!isLive || signals.length === 0) loadFallback()
-    }, 60000)
+    }, isLive ? 120000 : 60000)
     return () => clearInterval(interval)
   }, [isLive, signals.length, loadFallback])
 

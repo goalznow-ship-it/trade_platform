@@ -2,22 +2,22 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { useMarketStore } from "@/store/market"
 import {
   Star, Plus, Trash2, GripVertical, List,
 } from "lucide-react"
+import type { Watchlist, WatchlistSymbol } from "@/types"
 
 export function WatchlistPanel() {
   const { setSymbol } = useMarketStore()
-  const [watchlists, setWatchlists] = useState<any[]>([])
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [newName, setNewName] = useState("")
   const [newSymbol, setNewSymbol] = useState("")
 
-  async function load() {
+  async function loadWatchlists() {
     try {
       const data = await api.getWatchlists()
       setWatchlists(data)
@@ -25,32 +25,41 @@ export function WatchlistPanel() {
     } catch {}
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const initialLoad = async () => {
+      try {
+        const data = await api.getWatchlists()
+        setWatchlists(data)
+        if (data.length > 0) setActiveId(data[0].id)
+      } catch {}
+    }
+    initialLoad()
+  }, [])
 
   async function handleCreate() {
     if (!newName) return
     await api.createWatchlist(newName)
     setNewName("")
-    load()
+    loadWatchlists()
   }
 
   async function handleDelete(id: number) {
     await api.deleteWatchlist(id)
     if (activeId === id) setActiveId(null)
-    load()
+    loadWatchlists()
   }
 
   async function handleAddSymbol() {
     if (!activeId || !newSymbol) return
     await api.addWatchlistSymbol(activeId, newSymbol.toUpperCase())
     setNewSymbol("")
-    load()
+    loadWatchlists()
   }
 
   async function handleRemoveSymbol(symbolId: number) {
     if (!activeId) return
     await api.removeWatchlistSymbol(activeId, symbolId)
-    load()
+    loadWatchlists()
   }
 
   const active = watchlists.find((w) => w.id === activeId)
@@ -115,7 +124,7 @@ export function WatchlistPanel() {
         {active?.symbols?.length === 0 && (
           <div className="p-4 text-center text-gray-600 text-xs">No symbols yet</div>
         )}
-        {active?.symbols?.map((s: any) => (
+        {active?.symbols?.map((s: WatchlistSymbol) => (
           <div
             key={s.id}
             className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 hover:bg-gray-800/50 group cursor-pointer"

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/useAuth"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import type { Overview } from "@/lib/types"
 import {
   TrendingUp, BarChart3, Shield, Brain, Zap, Bell,
   Activity, Target, ArrowRight, Check, Menu, X,
@@ -16,12 +17,12 @@ export default function LandingPage() {
   const { user } = useAuth()
   const router = useRouter()
   const [mobileMenu, setMobileMenu] = useState(false)
-  const [overview, setOverview] = useState<any>(null)
+  const [overview, setOverview] = useState<Overview | null>(null)
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
     if (user) router.push("/dashboard")
-  }, [user])
+  }, [user, router])
 
   const features = [
     { icon: Brain, title: "AI Analysis", desc: "Multi-factor AI engine analyzing trend, momentum, volume, volatility, and market structure for actionable trade signals." },
@@ -305,7 +306,7 @@ export default function LandingPage() {
               </h2>
               <p className="text-gray-400 mb-6 leading-relaxed">
                 Combine any of 16 technical and fundamental filters to find exactly the setups
-                you're looking for. From simple RSI oversold scans to complex multi-filter
+                you&apos;re looking for. From simple RSI oversold scans to complex multi-filter
                 strategies, the scanner delivers results in real-time.
               </p>
               <ul className="space-y-3">
@@ -419,7 +420,7 @@ export default function LandingPage() {
             Ready to Transform Your Trading?
           </h2>
           <p className="text-gray-400 max-w-xl mx-auto mb-8">
-            Join thousands of traders using TradeAnalyst Pro to make data-driven decisions.
+            Join thousands of traders using TradeAnalyst Pro to make data-driven decisions and improve their trading strategies.
             Start with a free account — no credit card required.
           </p>
           <Link href="/register"

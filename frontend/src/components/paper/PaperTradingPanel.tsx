@@ -1,38 +1,59 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { cn, formatPrice } from "@/lib/utils"
 import {
-  Wallet, Plus, RotateCcw, X, TrendingUp, TrendingDown,
+  Wallet, Plus, RotateCcw, X,
   ArrowUp, ArrowDown, Clock,
 } from "lucide-react"
 
+interface PaperAccount {
+  balance: number;
+}
+interface PaperPosition {
+  id: number;
+  symbol: string;
+  side: string;
+  quantity: number;
+  entry_price: number;
+  leverage: number;
+  pnl: number;
+}
+interface PaperOrder {
+  id: number;
+  symbol: string;
+  side: string;
+  status: string;
+  quantity: number;
+  price: number;
+}
+
 export function PaperTradingPanel() {
-  const [account, setAccount] = useState<Record<string, unknown> | null>(null)
-  const [positions, setPositions] = useState<Record<string, unknown>[]>([])
-  const [orders, setOrders] = useState<Record<string, unknown>[]>([])
+  const [account, setAccount] = useState<PaperAccount | null>(null)
+  const [positions, setPositions] = useState<PaperPosition[]>([])
+  const [orders, setOrders] = useState<PaperOrder[]>([])
   const [showOrder, setShowOrder] = useState(false)
   const [form, setForm] = useState({
     symbol: "BTC/USDT", side: "buy", order_type: "market",
     quantity: 0.01, price: 50000, leverage: 1,
   })
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const [a, p, o] = await Promise.all([
         api.getPaperAccount(), api.getPaperPositions(), api.getPaperOrders(),
       ])
-      setAccount(a)
-      setPositions(p || [])
-      setOrders(o || [])
+      setAccount(a as PaperAccount)
+      setPositions((p || []) as PaperPosition[])
+      setOrders((o || []) as PaperOrder[])
     } catch {}
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
 
   async function handlePlaceOrder() {
     await api.createPaperOrder(form)
@@ -50,8 +71,8 @@ export function PaperTradingPanel() {
     load()
   }
 
-  const pnl = account ? account.balance - 100000 : 0
-  const pnlPct = ((account?.balance || 100000) / 100000 - 1) * 100
+  const pnl = account ? (account.balance ?? 0) - 100000 : 0
+  const pnlPct = (((account?.balance ?? 0) || 100000) / 100000 - 1) * 100
 
   return (
     <div className="flex flex-col h-full">
@@ -159,10 +180,10 @@ export function PaperTradingPanel() {
           </>
         )}
 
-        {orders.filter((o: any) => o.status === "pending" || o.status === "open").length > 0 && (
+        {orders.filter((o: PaperOrder) => o.status === "pending" || o.status === "open").length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[10px] font-medium text-gray-500 bg-gray-900/50">Open Orders</div>
-            {orders.filter((o: any) => o.status === "pending" || o.status === "open").map((o) => (
+            {orders.filter((o: PaperOrder) => o.status === "pending" || o.status === "open").map((o) => (
               <div key={o.id} className="flex items-center gap-2 px-3 py-2 border-b border-gray-800">
                 <Clock className="w-3 h-3 text-yellow-500" />
                 <span className="text-xs text-gray-200 font-mono">{o.symbol}</span>

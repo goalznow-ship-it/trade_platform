@@ -14,7 +14,7 @@ export default function AdminRoute() {
     loadUser()
     const token = localStorage.getItem("token")
     if (!token) router.push("/login")
-  }, [])
+  }, [loadUser, router])
 
   if (!user?.is_admin) {
     return (

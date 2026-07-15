@@ -1,38 +1,78 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
-  Users, Activity, BarChart3, Shield,
-  RefreshCw, TrendingUp, DollarSign, AlertTriangle,
-  Server, Database, Wifi, Zap, XCircle,
+  Users, Activity, Shield,
+  TrendingUp, DollarSign,
+  Server, Database, Wifi, Zap,
 } from "lucide-react"
 
+interface AdminStats {
+  total_users?: number
+  active_users?: number
+  total_signals?: number
+  active_signals?: number
+  total_trades?: number
+  total_symbols?: number
+}
+
+interface AdminUser {
+  id: number
+  username: string
+  email: string
+  subscription_tier?: string
+  total_trades?: number
+  win_rate?: number
+  is_active: boolean
+}
+
+interface AdminSignal {
+  id: number
+  symbol: string
+  direction?: string
+  confidence?: number
+  entry_price?: number
+  reason?: string
+  is_active?: boolean
+}
+
+interface AdminRevenue {
+  total_revenue?: number
+  monthly_recurring?: number
+  paid_subscriptions?: number
+}
+
 export function AdminDashboard() {
-  const [stats, setStats] = useState<any>(null)
-  const [users, setUsers] = useState<any[]>([])
-  const [signals, setSignals] = useState<any[]>([])
-  const [subscriptions, setSubscriptions] = useState<any[]>([])
-  const [revenue, setRevenue] = useState<any>(null)
+  const [stats, setStats] = useState<AdminStats | null>(null)
+  const [users, setUsers] = useState<AdminUser[]>([])
+  const [signals, setSignals] = useState<AdminSignal[]>([])
+  const [, setSubscriptions] = useState<AdminUser[]>([])
+  const [revenue, setRevenue] = useState<AdminRevenue | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<string>("overview")
 
-  useEffect(() => {
-    Promise.all([
-      api.getAdminStats().catch(() => null),
-      api.getAdminUsers().catch(() => []),
-      api.getAdminSignals().catch(() => []),
-      request("/api/v1/admin/subscriptions").catch(() => []),
-      request("/api/v1/admin/revenue").catch(() => null),
-    ]).then(([s, u, sig, sub, rev]) => {
+  const load = useCallback(async () => {
+    try {
+      const [s, u, sig, sub, rev] = await Promise.all([
+        api.getAdminStats().catch(() => null),
+        api.getAdminUsers().catch(() => []),
+        api.getAdminSignals().catch(() => []),
+        request("/api/v1/admin/subscriptions").catch(() => []),
+        request("/api/v1/admin/revenue").catch(() => null),
+      ])
       setStats(s)
       setUsers(Array.isArray(u) ? u : [])
       setSignals(Array.isArray(sig) ? sig : [])
       setSubscriptions(Array.isArray(sub) ? sub : [])
       setRevenue(rev)
-    }).finally(() => setLoading(false))
+    } finally {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => { load() }, [load])
 
   if (loading) {
     return (
@@ -121,7 +161,7 @@ export function AdminDashboard() {
                 {[
                   { label: "API", status: "operational", icon: Activity },
                   { label: "Database", status: "connected", icon: Database },
-                  { label: "WebSocket", status: `${Math.floor(Math.random() * 50) + 10} clients`, icon: Wifi },
+                  { label: "WebSocket", status: `${10} clients`, icon: Wifi },
                   { label: "Cache", status: "connected", icon: Zap },
                 ].map((s) => (
                   <div key={s.label} className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-800/30">

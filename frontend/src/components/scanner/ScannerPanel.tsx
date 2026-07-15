@@ -1,14 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn, formatPrice } from "@/lib/utils"
 import {
-  Search, Filter, TrendingUp, TrendingDown,
-  Activity, Zap, BarChart3, Sliders,
+  Search, Zap,
 } from "lucide-react"
 
 const FILTER_NAMES: Record<string, string> = {
@@ -30,30 +28,44 @@ const FILTER_NAMES: Record<string, string> = {
   high_liquidity: "High Liquidity",
 }
 
+interface ScanResult {
+  symbol: string
+  direction?: string
+  signal?: string
+  price?: number
+  current_price?: number
+  volume?: number
+  confidence?: number
+  score?: number
+  reasons?: string[]
+  filters_matched?: string[]
+}
+
 export function ScannerPanel() {
-  const [results, setResults] = useState<any[]>([])
-  const [filters, setFilters] = useState<any[]>([])
+  const [results, setResults] = useState<ScanResult[]>([])
+  const [filters, setFilters] = useState<string[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [scanning, setScanning] = useState(false)
 
-  async function loadFilters() {
+  const loadFilters = useCallback(async () => {
     try {
       const f = await api.getScannerFilters()
       setFilters(Array.isArray(f) ? f : [])
     } catch {
       setFilters(Object.keys(FILTER_NAMES))
     }
-  }
+  }, [])
 
-  useEffect(() => { loadFilters() }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadFilters() }, [loadFilters])
 
   async function handleScan() {
     setScanning(true)
     try {
-      const res = await api.scanWithFilters({ filters: selected })
-      setResults(Array.isArray(res) ? res : [])
+      const res = await api.scanWithFilters()
+      setResults(Array.isArray(res) ? (res as ScanResult[]) : [])
     } catch {
-      setResults(getMockResults())
+      setResults([])
     } finally {
       setScanning(false)
     }
@@ -142,14 +154,4 @@ export function ScannerPanel() {
   )
 }
 
-function getMockResults() {
-  const symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"]
-  return symbols.map((s) => ({
-    symbol: s,
-    direction: Math.random() > 0.5 ? "long" : "short",
-    price: Math.random() * 50000 + 10,
-    volume: Math.random() * 1000000,
-    confidence: Math.floor(Math.random() * 30) + 60,
-    reasons: ["Volume Spike", "RSI Oversold", "Support Test"].slice(0, Math.floor(Math.random() * 3) + 1),
-  }))
-}
+

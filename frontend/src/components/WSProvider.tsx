@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useEffect, useRef, useState } from "react"
+import React, { createContext, useContext, useEffect, useRef } from "react"
 import { useWebSocketV2, type ConnectionQuality, type WSEventHandler } from "@/hooks/useWebSocket"
 import { useMarketStore } from "@/store/market"
 import { useAuth } from "@/hooks/useAuth"
@@ -21,10 +21,20 @@ export function useWS() {
   return ctx
 }
 
+interface WSMsgData {
+  symbol?: string
+  data?: unknown
+  [key: string]: unknown
+}
+
+interface WSMsg {
+  data?: WSMsgData
+  [key: string]: unknown
+}
+
 export function WSProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
   const { quality, connect, subscribe, unsubscribe, on, isConnected } = useWebSocketV2(token || undefined)
-  const [ready, setReady] = useState(false)
   const initialized = useRef(false)
 
   const updateTicker = useMarketStore((s) => s.updateTicker)
@@ -49,11 +59,9 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isConnected) {
       setLive(false)
-      setReady(false)
       return
     }
     setLive(true)
-    setReady(true)
 
     subscribe("ticker")
     subscribe("orderflow")
@@ -69,57 +77,64 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   }, [isConnected, subscribe, setLive])
 
   useEffect(() => {
-    if (!ready) return
+    if (!isConnected) return
 
     const unsubs: (() => void)[] = []
 
-    unsubs.push(on("price_update", (msg: any) => {
-      if (msg.data?.symbol) updateTicker(msg.data.symbol, msg.data)
+    unsubs.push(on("price_update", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol) updateTicker(d.symbol, d as never)
     }))
 
-    unsubs.push(on("ticker", (msg: any) => {
-      if (msg.data?.symbol) updateTicker(msg.data.symbol, msg.data)
+    unsubs.push(on("ticker", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol) updateTicker(d.symbol, d as never)
     }))
 
-    unsubs.push(on("orderflow_update", (msg: any) => {
-      if (msg.data?.symbol && msg.data?.data) updateOrderFlow(msg.data.symbol, msg.data.data)
+    unsubs.push(on("orderflow_update", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol && d?.data) updateOrderFlow(d.symbol, d.data as never)
     }))
 
-    unsubs.push(on("derivatives_update", (msg: any) => {
-      if (msg.data?.symbol && msg.data?.data) updateDerivatives(msg.data.symbol, msg.data.data)
+    unsubs.push(on("derivatives_update", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol && d?.data) updateDerivatives(d.symbol, d.data as never)
     }))
 
-    unsubs.push(on("news_article", (msg: any) => {
-      if (msg.data) addNews(msg.data)
+    unsubs.push(on("news_article", (msg: WSMsg) => {
+      if (msg.data) addNews(msg.data as never)
     }))
 
-    unsubs.push(on("sentiment_update", (msg: any) => {
-      if (msg.data?.symbol && msg.data?.data) updateSentiment(msg.data.symbol, msg.data.data)
+    unsubs.push(on("sentiment_update", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol && d?.data) updateSentiment(d.symbol, d.data as never)
     }))
 
-    unsubs.push(on("onchain_update", (msg: any) => {
-      if (msg.data?.symbol && msg.data?.data) updateOnchain(msg.data.symbol, msg.data.data)
+    unsubs.push(on("onchain_update", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol && d?.data) updateOnchain(d.symbol, d.data as never)
     }))
 
-    unsubs.push(on("macro_update", (msg: any) => {
-      if (msg.data?.data) updateMacro(msg.data.data)
+    unsubs.push(on("macro_update", (msg: WSMsg) => {
+      if (msg.data?.data) updateMacro(msg.data.data as never)
     }))
 
-    unsubs.push(on("brain_assessment", (msg: any) => {
-      if (msg.data?.symbol && msg.data?.data) updateBrain(msg.data.symbol, msg.data.data)
+    unsubs.push(on("brain_assessment", (msg: WSMsg) => {
+      const d = msg.data
+      if (d?.symbol && d?.data) updateBrain(d.symbol, d.data as never)
     }))
 
-    unsubs.push(on("fear_greed_update", (msg: any) => {
-      if (msg.data?.data) updateFearGreed(msg.data.data)
+    unsubs.push(on("fear_greed_update", (msg: WSMsg) => {
+      if (msg.data?.data) updateFearGreed(msg.data.data as never)
     }))
 
-    unsubs.push(on("breadth_update", (msg: any) => {
-      if (msg.data?.data) updateBreadth(msg.data.data)
+    unsubs.push(on("breadth_update", (msg: WSMsg) => {
+      if (msg.data?.data) updateBreadth(msg.data.data as never)
     }))
 
     return () => unsubs.forEach((u) => u())
   }, [
-    ready, on, updateTicker, updateOrderFlow, updateDerivatives,
+    isConnected, on, updateTicker, updateOrderFlow, updateDerivatives,
     addNews, updateSentiment, updateOnchain, updateMacro,
     updateBrain, updateFearGreed, updateBreadth,
   ])

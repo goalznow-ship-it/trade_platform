@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import {
   createChart, ColorType, CrosshairMode, LineStyle,
   CandlestickSeries, LineSeries, createSeriesMarkers,
-  type IChartApi, type ISeriesApi, type Time,
+  type IChartApi, type ISeriesApi, type Time, type SeriesMarker,
 } from "lightweight-charts"
 
 const TIMEFRAMES = [
@@ -19,9 +19,71 @@ const TIMEFRAMES = [
   { id: "1d", label: "1D" },
 ]
 
+interface RawOHLCVItem {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+interface OHLCVItem {
+  time: Time
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+interface AnalysisDetails {
+  rsi?: number
+  macd?: number
+  support?: number
+  resistance?: number
+  [key: string]: unknown
+}
+
+interface AnalysisData {
+  prediction?: string
+  confidence?: number
+  long_probability?: number
+  short_probability?: number
+  risk_level?: string
+  scores?: Record<string, number>
+  details?: AnalysisDetails
+  summary?: string
+  current_price?: number
+  [key: string]: unknown
+}
+
+interface ExplainSuggestions {
+  entry?: number
+  stop_loss?: number
+  take_profit?: number
+  suggested_leverage?: number
+  position_size?: number
+  [key: string]: unknown
+}
+
+interface ExplainKeyLevels {
+  support?: number
+  resistance?: number
+  [key: string]: unknown
+}
+
+interface ExplainData {
+  reasons?: string[]
+  warnings?: string[]
+  suggestions?: ExplainSuggestions
+  key_levels?: ExplainKeyLevels
+  [key: string]: unknown
+}
+
 interface AIChartProps {
-  analysis?: any
-  explain?: any
+  analysis?: AnalysisData | null
+  explain?: ExplainData | null
 }
 
 export function AIChart({ analysis, explain }: AIChartProps) {
@@ -31,7 +93,9 @@ export function AIChart({ analysis, explain }: AIChartProps) {
   const forecastBullRef = useRef<ISeriesApi<"Line"> | null>(null)
   const forecastBearRef = useRef<ISeriesApi<"Line"> | null>(null)
   const { selectedSymbol, selectedTimeframe, setSymbol, setTimeframe } = useMarketStore()
-  const [candleData, setCandleData] = useState<any[]>([])
+  const [candleData, setCandleData] = useState<OHLCVItem[]>([])
+  // state setter only — loading value not used in render
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loading, setLoading] = useState(true)
   const [price, setPrice] = useState<string>("")
 
@@ -40,7 +104,7 @@ export function AIChart({ analysis, explain }: AIChartProps) {
     try {
       const data = await api.getOHLCV(selectedSymbol, selectedTimeframe, 200)
       if (Array.isArray(data)) {
-        const formatted = data.map((d: any) => ({
+        const formatted = (data as RawOHLCVItem[]).map((d: RawOHLCVItem) => ({
           time: (d.time as number) as Time,
           open: d.open,
           high: d.high,
@@ -58,7 +122,7 @@ export function AIChart({ analysis, explain }: AIChartProps) {
     }
   }, [selectedSymbol, selectedTimeframe])
 
-  useEffect(() => { loadChartData() }, [loadChartData])
+  useEffect(() => { queueMicrotask(() => loadChartData()) }, [loadChartData])
 
   useEffect(() => {
     if (!containerRef.current || !candleData.length) return
@@ -115,8 +179,6 @@ export function AIChart({ analysis, explain }: AIChartProps) {
       const lastTime = lastCandle.time
       const lastClose = lastCandle.close
       const move = lastClose * 0.02
-      const forecastTarget = isBullish ? lastClose + move : lastClose - move
-      const altTarget = isBullish ? lastClose - move * 0.5 : lastClose + move * 0.5
 
       // Bullish path (always show both, but one is primary)
       const bullSteps = 4
@@ -152,7 +214,7 @@ export function AIChart({ analysis, explain }: AIChartProps) {
 
       // Entry/Exit Markers
       if (candleSeriesRef.current) {
-        const markers: any[] = []
+        const markers: SeriesMarker<Time>[] = []
         if (explain?.suggestions?.entry || explain?.key_levels?.support) {
           markers.push({
             time: lastTime,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, memo } from "react"
 import { api } from "@/lib/api"
+import { useMarketStore } from "@/store/market"
 import { cn, formatPrice, formatPercent, formatDuration } from "@/lib/utils"
 import {
   TrendingUp, AlertCircle, Copy,
@@ -165,6 +166,7 @@ export function ActivePositions() {
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const isLive = useMarketStore((s) => s.isLive)
 
   const load = useCallback(async () => {
     try {
@@ -180,12 +182,12 @@ export function ActivePositions() {
 
   useEffect(() => {
     const timer = setTimeout(load, 0)
-    const interval = setInterval(load, 15000)
+    const interval = setInterval(load, isLive ? 60000 : 15000)
     return () => {
       clearTimeout(timer)
       clearInterval(interval)
     }
-  }, [load])
+  }, [load, isLive])
 
   if (loading) {
     return (

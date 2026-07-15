@@ -2,20 +2,49 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
-  BarChart3, TrendingUp, TrendingDown, Activity,
-  RefreshCw, Play, History, Target, Clock,
-  ArrowUpRight, ArrowDownRight,
+  BarChart3, Play, History,
 } from "lucide-react"
+
+interface BacktestTrade {
+  direction: string
+  entry: number
+  exit: number
+  pnl: number
+  risk_reward: number
+}
+
+interface BacktestResult {
+  win_rate: number
+  profit_factor: number
+  max_drawdown: number
+  total_return: number
+  total_trades: number
+  sharpe_ratio: number
+  avg_risk_reward: number
+  final_balance: number
+  trades: BacktestTrade[]
+}
+
+interface BacktestHistoryItem {
+  id: number
+  symbol: string
+  timeframe: string
+  total_trades: number
+  win_rate: number
+  profit_factor: number
+  max_drawdown: number
+  total_return: number
+}
 
 export function BacktestPage() {
   const [symbol, setSymbol] = useState("BTC/USDT")
   const [timeframe, setTimeframe] = useState("1h")
   const [balance, setBalance] = useState(10000)
   const [leverage, setLeverage] = useState(1)
-  const [result, setResult] = useState<any>(null)
-  const [history, setHistory] = useState<any[]>([])
+  const [result, setResult] = useState<BacktestResult | null>(null)
+  const [history, setHistory] = useState<BacktestHistoryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<"backtest" | "history">("backtest")
 
@@ -28,7 +57,7 @@ export function BacktestPage() {
     try {
       const res = await api.runBacktest(symbol, timeframe, 500, balance)
       setResult(res)
-    } catch (e) {
+    } catch {
       setResult(null)
     } finally {
       setLoading(false)
@@ -174,7 +203,7 @@ export function BacktestPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {result.trades.slice(0, 20).map((t: any, i: number) => (
+                          {result.trades.slice(0, 20).map((t: BacktestTrade, i: number) => (
                             <tr key={i} className="border-b border-gray-800/50 text-gray-400">
                               <td className="py-1.5 pr-2 text-gray-600">{i + 1}</td>
                               <td className="py-1.5 pr-2 text-center">
@@ -231,7 +260,7 @@ export function BacktestPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((h: any) => (
+                    {history.map((h: BacktestHistoryItem) => (
                       <tr key={h.id} className="border-b border-gray-800/50 text-gray-400 hover:bg-gray-800/20">
                         <td className="py-2 pr-2 font-medium text-white font-mono">{h.symbol}</td>
                         <td className="py-2 pr-2 text-center">{h.timeframe}</td>

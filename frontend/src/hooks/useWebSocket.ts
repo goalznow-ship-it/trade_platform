@@ -7,7 +7,7 @@ const PING_INTERVAL = 15_000
 const MAX_BACKOFF = 30_000
 const INITIAL_BACKOFF = 1_000
 
-export type WSEventHandler = (data: any) => void
+export type WSEventHandler = (data: Record<string, unknown>) => void
 
 export interface ConnectionQuality {
   latency: number
@@ -20,7 +20,7 @@ export interface ConnectionQuality {
 
 interface PendingMessage {
   channel: string
-  payload: any
+  payload: Record<string, unknown>
   priority: number
   timestamp: number
 }
@@ -62,6 +62,8 @@ export function useWebSocketV2(token?: string) {
     }
   }, [])
 
+  const connectRef = useRef<(() => void) | null>(null)
+
   const cleanup = useCallback(() => {
     if (pingTimerRef.current) {
       clearInterval(pingTimerRef.current)
@@ -79,7 +81,7 @@ export function useWebSocketV2(token?: string) {
     backoffRef.current = Math.min(backoff * 2, MAX_BACKOFF)
     reconnectCountRef.current += 1
     updateQuality({ status: "reconnecting", reconnects: reconnectCountRef.current })
-    reconnectTimerRef.current = setTimeout(() => connect(), backoff)
+    reconnectTimerRef.current = setTimeout(() => connectRef.current?.(), backoff)
   }, [cleanup, updateQuality])
 
   const connect = useCallback(() => {
@@ -157,7 +159,11 @@ export function useWebSocketV2(token?: string) {
     }
   }, [token, cleanup, flushQueue, updateQuality, doReconnect])
 
-  const send = useCallback((message: any, priority = 0) => {
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
+
+  const send = useCallback((message: Record<string, unknown>, priority = 0) => {
     const ws = wsRef.current
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message))
@@ -220,7 +226,7 @@ export function useWebSocketV2(token?: string) {
 }
 
 export function useWebSocket(symbol: string) {
-  const [data, setData] = useState<any>(null)
+  const [data, setData] = useState<Record<string, unknown> | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)

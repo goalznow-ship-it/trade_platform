@@ -2,15 +2,31 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
-  Radar, TrendingUp, TrendingDown, Activity,
-  Zap, BarChart3, Flame, DollarSign, ArrowUpDown,
+  Radar, Activity,
+  BarChart3, Flame, DollarSign, ArrowUpDown,
   RefreshCw, Wallet, AlertTriangle, ArrowUpRight, ArrowDownRight,
 } from "lucide-react"
 
+interface MarketOverview {
+  btc_dominance?: number
+  eth_btc_ratio?: number
+  funding_sentiment?: string
+  funding_change?: string
+  long_short_ratio?: number
+  btc_change?: number
+}
+
+interface WhaleTransaction {
+  amount: string
+  symbol: string
+  direction: string
+  impact: number
+}
+
 export function MarketRadar() {
-  const [data, setData] = useState<any>(null)
+  const [data, setData] = useState<MarketOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [alerts, setAlerts] = useState<string[]>([])
 
@@ -28,7 +44,7 @@ export function MarketRadar() {
           alerts.push(`BTC moved ${overview.btc_change > 0 ? "+" : ""}${overview.btc_change.toFixed(1)}% — high volatility`)
         }
         if (Array.isArray(whales) && whales.length > 0) {
-          whales.slice(0, 3).forEach((w: any) => {
+          whales.slice(0, 3).forEach((w: WhaleTransaction) => {
             alerts.push(`Whale: ${w.amount} ${w.symbol} moved — ${w.direction} impact ${w.impact}%`)
           })
         }
@@ -119,7 +135,7 @@ export function MarketRadar() {
                 <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 mt-1.5 flex-shrink-0" />
                 <div>
                   <p className="text-xs text-gray-300">{alert}</p>
-                  <span className="text-[10px] text-gray-600">{Math.floor(Math.random() * 5) + 1}m ago</span>
+                  <span className="text-[10px] text-gray-600">{(i % 5) + 1}m ago</span>
                 </div>
               </div>
             ))}

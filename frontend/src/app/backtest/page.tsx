@@ -14,7 +14,7 @@ export default function BacktestRoute() {
     loadUser()
     const token = localStorage.getItem("token")
     if (!token) router.push("/login")
-  }, [])
+  }, [loadUser, router])
 
   return (
     <div className="h-screen flex flex-col bg-[#0d1117]">

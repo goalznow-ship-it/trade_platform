@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   createChart, ColorType, CrosshairMode, LineStyle,
   CandlestickSeries, HistogramSeries,
@@ -13,7 +13,6 @@ import {
   TrendingUp, Minus, Maximize2, Crosshair, MousePointer,
   Undo2, Redo2, Trash2, Move, Ruler, CircleDot,
   RectangleHorizontal, RotateCcw, ArrowUpFromLine,
-  type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -31,36 +30,46 @@ const DRAWING_TOOLS = [
   { id: "risk", icon: Move, label: "Risk/Reward" },
 ]
 
+interface CandleData {
+  time: Time
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
 export function TradingChart() {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null)
   const { selectedSymbol, selectedTimeframe, setTimeframe } = useMarketStore()
-  const { data: wsData, isConnected } = useWebSocket(selectedSymbol)
-  const [candleData, setCandleData] = useState<any[]>([])
+  const { isConnected } = useWebSocket(selectedSymbol)
+  const [candleData, setCandleData] = useState<CandleData[]>([])
   const [activeTool, setActiveTool] = useState<string | null>(null)
   const [showDrawingTools, setShowDrawingTools] = useState(false)
   const [showIndicators, setShowIndicators] = useState(false)
 
-  async function loadChartData() {
-    try {
-      const data = await api.getOHLCV(selectedSymbol, selectedTimeframe, 300)
-      if (Array.isArray(data)) {
-        setCandleData(data.map((d: any) => ({
-          time: d.time as Time,
-          open: d.open,
-          high: d.high,
-          low: d.low,
-          close: d.close,
-          volume: d.volume,
-        })))
-      }
-    } catch {}
-  }
-
   useEffect(() => {
+    let cancelled = false
+    async function loadChartData() {
+      try {
+        const data = await api.getOHLCV(selectedSymbol, selectedTimeframe, 300)
+        if (Array.isArray(data) && !cancelled) {
+          setCandleData(data.map((d: { time: number; open: number; high: number; low: number; close: number; volume: number }) => ({
+            time: d.time as Time,
+            open: d.open,
+            high: d.high,
+            low: d.low,
+            close: d.close,
+            volume: d.volume,
+          })))
+        }
+      } catch {}
+    }
     loadChartData()
+    return () => { cancelled = true }
   }, [selectedSymbol, selectedTimeframe])
 
   useEffect(() => {

@@ -2,16 +2,28 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { cn, formatPrice } from "@/lib/utils"
 import {
-  History, Trash2, Download, BarChart3, TrendingUp, TrendingDown,
+  Trash2, Download, BarChart3,
 } from "lucide-react"
 
+interface BacktestHistoryRecord {
+  id: number
+  symbol: string
+  timeframe?: string
+  total_return?: number
+  return_pct?: number
+  final_balance?: number
+  balance?: number
+  total_trades?: number
+  win_rate?: number
+  sharpe_ratio?: number
+}
+
 export function BacktestPanel() {
-  const [history, setHistory] = useState<any[]>([])
+  const [history, setHistory] = useState<BacktestHistoryRecord[]>([])
 
   async function load() {
     try {
@@ -20,7 +32,11 @@ export function BacktestPanel() {
     } catch {}
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    api.getBacktestHistory()
+      .then(h => setHistory(Array.isArray(h) ? h : []))
+      .catch(() => {})
+  }, [])
 
   async function handleDelete(id: number) {
     await api.deleteBacktest(id)

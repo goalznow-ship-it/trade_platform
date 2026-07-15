@@ -2,13 +2,43 @@
 
 import { cn } from "@/lib/utils"
 import {
-  TrendingUp, TrendingDown, AlertTriangle,
+  AlertTriangle,
   ArrowUpRight, ArrowDownRight, Minus,
 } from "lucide-react"
 
+interface SuggestionsData {
+  entry?: number
+  stop_loss?: number
+  take_profit?: number
+  suggested_leverage?: number
+  position_size?: number
+  [key: string]: unknown
+}
+
+interface ExplainData {
+  reasons?: string[]
+  warnings?: string[]
+  suggestions?: SuggestionsData
+  key_levels?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+interface AnalysisData {
+  prediction?: string
+  confidence?: number
+  long_probability?: number
+  short_probability?: number
+  risk_level?: string
+  scores?: Record<string, number>
+  details?: Record<string, unknown>
+  summary?: string
+  current_price?: number
+  [key: string]: unknown
+}
+
 interface TradeDecisionCardProps {
-  analysis?: any
-  explain?: any
+  analysis?: AnalysisData | null
+  explain?: ExplainData | null
   loading?: boolean
 }
 
@@ -36,7 +66,6 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
 
   const isBullish = analysis.prediction === "long"
   const isBearish = analysis.prediction === "short"
-  const isNeutral = analysis.prediction === "neutral"
   const conf = analysis.confidence || 0
   const reasons = explain?.reasons || []
   const warnings = explain?.warnings || []
@@ -84,7 +113,7 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
           <div className="p-2.5 rounded-lg bg-gray-800/30">
             <div className="text-[10px] text-gray-500 mb-0.5">Suggested Entry</div>
             <div className="text-sm font-bold text-white font-mono">
-              ${(explain?.key_levels?.support || analysis.details?.support || 0).toFixed(2)}
+              ${Number(explain?.key_levels?.support || analysis.details?.support || 0).toFixed(2)}
             </div>
           </div>
           <div className="p-2.5 rounded-lg bg-red-900/20 border border-red-900/30">
@@ -125,7 +154,7 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
             <div className="text-gray-500">Risk/Reward</div>
             <div className="text-white font-bold">
               {suggestions.stop_loss && suggestions.take_profit
-                ? `1:${((suggestions.take_profit - (explain?.key_levels?.support || 0)) / ((explain?.key_levels?.support || 0) - suggestions.stop_loss)).toFixed(1)}`
+                ? `1:${((suggestions.take_profit - Number(explain?.key_levels?.support || 0)) / (Number(explain?.key_levels?.support || 0) - suggestions.stop_loss)).toFixed(1)}`
                 : "--"}
             </div>
           </div>

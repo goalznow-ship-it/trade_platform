@@ -2,23 +2,32 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
   TrendingUp, TrendingDown, Activity, Zap,
-  DollarSign, BarChart3, Flame, AlertTriangle,
+  Flame,
 } from "lucide-react"
 
+interface SignalItem {
+  symbol: string
+  direction?: string
+  confidence?: number
+  funding_rate?: number
+  long_probability?: number
+  short_probability?: number
+}
+
 export function FuturesDashboard() {
-  const [data, setData] = useState<any[]>([])
+  const [data, setData] = useState<SignalItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
       try {
         const signals = await api.scanAllV2(0)
-        setData(Array.isArray(signals) ? signals.map((s: any) => ({
+        setData(Array.isArray(signals) ? (signals as SignalItem[]).map((s) => ({
           ...s,
-          funding_rate: s.scores?.futures_score || 0,
+          funding_rate: s.funding_rate || 0,
           long_probability: s.long_probability || 50,
           short_probability: s.short_probability || 50,
         })) : [])

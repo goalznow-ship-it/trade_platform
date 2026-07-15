@@ -29,20 +29,12 @@ export function EngineStatus() {
   const { quality, isConnected } = useWS()
   const isLive = useMarketStore((s) => s.isLive)
   const lastPerChannel = useMarketStore((s) => s.lastPerChannel)
-  const [health, setHealth] = useState<string>("checking")
   const [now, setNow] = useState(Date.now)
+  const health = isConnected ? "operational" : "checking"
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/health`)
-      .then(r => r.json())
-      .then(d => setHealth(d.status === "ok" ? "running" : "error"))
-      .catch(() => setHealth("error"))
     const interval = setInterval(() => {
       setNow(Date.now())
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/health`)
-        .then(r => r.json())
-        .then(d => setHealth(d.status === "ok" ? "running" : "error"))
-        .catch(() => setHealth("error"))
     }, 30000)
     return () => clearInterval(interval)
   }, [])
@@ -63,10 +55,10 @@ export function EngineStatus() {
     },
     {
       label: "API Server",
-      value: health === "running" ? "Running" : health === "error" ? "Error" : "Checking",
+      value: health === "operational" ? "Operational" : "Checking",
       icon: Server,
-      status: health === "running" ? "text-green-400" : "text-yellow-400",
-      dot: health === "running" ? "bg-green-400" : "bg-yellow-400",
+      status: health === "operational" ? "text-green-400" : "text-yellow-400",
+      dot: health === "operational" ? "bg-green-400" : "bg-yellow-400",
     },
     {
       label: "Active Streams",

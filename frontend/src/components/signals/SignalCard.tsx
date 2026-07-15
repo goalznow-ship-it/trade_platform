@@ -1,31 +1,100 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ElementType } from "react"
 import { cn, formatPrice } from "@/lib/utils"
 import {
-  TrendingUp, TrendingDown, Target, Check, X as XIcon,
+  Target, Check, X as XIcon,
   ChevronDown, ChevronUp, BarChart3, Activity,
-  Volume2, Shield, AlertTriangle, Zap, Flame,
+  Shield, AlertTriangle, Zap, Flame,
 } from "lucide-react"
 
-interface SignalCardProps {
-  signal: any
+interface SignalTechnical {
+  ema_alignment?: boolean | number
+  ema?: boolean | number
+  rsi?: boolean | number
+  macd?: boolean | number
+  volume?: boolean | number
+  atr?: boolean | number
+  support?: boolean | number
 }
 
-function getScoreLabel(score: number): { label: string; color: string; icon: any } {
+interface SignalStructure {
+  bos?: boolean | number
+  choch?: boolean | number
+  order_block?: boolean | number
+  ob?: boolean | number
+  liquidity?: boolean | number
+  fvg?: boolean | number
+}
+
+interface SignalFutures {
+  funding?: boolean | number
+  open_interest?: boolean | number
+  oi?: boolean | number
+  liquidation?: boolean | number
+  liq?: boolean | number
+  long_short_ratio?: boolean | number
+  ls_ratio?: boolean | number
+}
+
+interface SignalNews {
+  impact?: string
+  sentiment?: string
+  score?: number
+}
+
+interface Signal {
+  direction?: string
+  signal?: string
+  symbol: string
+  reason?: string
+  entry_price?: number
+  price?: number
+  entry_zone_high?: number
+  stop_loss?: number
+  take_profit?: number
+  take_profit_1?: number
+  take_profit_2?: number
+  take_profit_3?: number
+  risk_reward?: number
+  risk_reward_ratio?: number
+  timeframe?: string
+  signal_type?: string
+  sentiment_score?: number
+  technical?: SignalTechnical
+  market_structure?: SignalStructure
+  structure?: SignalStructure
+  futures?: SignalFutures
+  news?: SignalNews
+}
+
+interface SignalCardProps {
+  signal: Signal
+}
+
+function getScoreLabel(score: number): { label: string; color: string; icon: ElementType } {
   if (score >= 90) return { label: "Strong Signal", color: "text-orange-400 bg-orange-900/30 border-orange-500/30", icon: Flame }
   if (score >= 80) return { label: "High Probability", color: "text-green-400 bg-green-900/30 border-green-500/30", icon: Check }
   if (score >= 70) return { label: "Watch", color: "text-yellow-400 bg-yellow-900/30 border-yellow-500/30", icon: AlertTriangle }
   return { label: "Ignore", color: "text-gray-500 bg-gray-800 border-gray-700", icon: XIcon }
 }
 
-function calcWeightedScore(signal: any): { total: number; technical: number; structure: number; futures: number; news: number; sentiment: number } {
+interface WeightedScores {
+  total: number
+  technical: number
+  structure: number
+  futures: number
+  news: number
+  sentiment: number
+}
+
+function calcWeightedScore(signal: Signal): WeightedScores {
   const tech = signal.technical || {}
   const structure = signal.market_structure || signal.structure || {}
   const futures = signal.futures || {}
   const news = signal.news || {}
 
-  const sc = (v: any) => typeof v === "boolean" ? (v ? 1 : -1) : typeof v === "number" ? Math.min(v / 100, 1) : 0
+  const sc = (v: boolean | number | undefined | null) => typeof v === "boolean" ? (v ? 1 : -1) : typeof v === "number" ? Math.min(v / 100, 1) : 0
 
   const technicalScore = (sc(tech.ema_alignment ?? tech.ema) * 0.25 + sc(tech.rsi) * 0.25 + sc(tech.macd) * 0.25 + sc(tech.volume) * 0.25) * 100
   const structureScore = (sc(structure.bos) * 0.25 + sc(structure.choch) * 0.25 + sc(structure.order_block ?? structure.ob) * 0.25 + sc(structure.liquidity) * 0.25) * 100

@@ -1,16 +1,34 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useMarketStore } from "@/store/market"
-import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
   Brain, TrendingUp, TrendingDown, Activity,
-  BarChart3, Volume2, Shield, AlertTriangle,
+  BarChart3, Volume2, Shield,
 } from "lucide-react"
 
+interface AnalysisDetails {
+  rsi?: number
+  macd?: number
+  support?: number
+  resistance?: number
+  [key: string]: unknown
+}
+
+interface AnalysisData {
+  prediction?: string
+  confidence?: number
+  long_probability?: number
+  short_probability?: number
+  risk_level?: string
+  scores?: Record<string, number>
+  details?: AnalysisDetails
+  summary?: string
+  current_price?: number
+  [key: string]: unknown
+}
+
 interface AIPredictionPanelProps {
-  analysis?: any
+  analysis?: AnalysisData | null
   loading?: boolean
 }
 

@@ -4,20 +4,32 @@ import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 import {
-  Scan, TrendingUp, TrendingDown, Activity,
-  Zap, BarChart3, Flame, ArrowUpRight, ArrowDownRight,
+  TrendingUp, TrendingDown, Activity,
+  Zap, BarChart3, Flame,
   RefreshCw, Search,
 } from "lucide-react"
 
 interface ScannerResult {
   symbol: string
-  direction: string
-  confidence: number
-  price: number
+  direction?: string
+  signal?: string
+  confidence?: number
+  score?: number
+  price?: number
   change?: number
   volume?: number
   volatility?: number
   reason?: string
+  signal_type?: string
+  details?: {
+    atr?: number
+  }
+  scores?: {
+    volume?: number
+  }
+  futures?: {
+    liquidation?: unknown
+  }
 }
 
 export function MarketScanner() {
@@ -37,19 +49,19 @@ export function MarketScanner() {
       setLoading(true)
       try {
         const data = await api.scanAllV2(0)
-        const signals = Array.isArray(data) ? data : []
-        const long = signals.filter((s: any) => (s.direction || s.signal) === "long" || (s.direction || s.signal) === "bullish" || (s.direction || s.signal) === "buy")
-          .sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
+        const signals: ScannerResult[] = Array.isArray(data) ? data : []
+        const long = signals.filter((s: ScannerResult) => (s.direction || s.signal) === "long" || (s.direction || s.signal) === "bullish" || (s.direction || s.signal) === "buy")
+          .sort((a: ScannerResult, b: ScannerResult) => (b.confidence || 0) - (a.confidence || 0))
           .slice(0, 10)
-        const short = signals.filter((s: any) => (s.direction || s.signal) === "short" || (s.direction || s.signal) === "bearish" || (s.direction || s.signal) === "sell")
-          .sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
+        const short = signals.filter((s: ScannerResult) => (s.direction || s.signal) === "short" || (s.direction || s.signal) === "bearish" || (s.direction || s.signal) === "sell")
+          .sort((a: ScannerResult, b: ScannerResult) => (b.confidence || 0) - (a.confidence || 0))
           .slice(0, 10)
         setResults({
           long, short,
-          volatility: signals.filter((s: any) => s.details?.atr && s.details.atr > 2).slice(0, 5),
-          volume: signals.filter((s: any) => (s.scores?.volume || 0) > 0.3).slice(0, 5),
-          liquidation: signals.filter((s: any) => s.futures?.liquidation).slice(0, 5),
-          whale: signals.filter((s: any) => (s.confidence || 0) > 80).slice(0, 5),
+          volatility: signals.filter((s: ScannerResult) => s.details?.atr && s.details.atr > 2).slice(0, 5),
+          volume: signals.filter((s: ScannerResult) => (s.scores?.volume || 0) > 0.3).slice(0, 5),
+          liquidation: signals.filter((s: ScannerResult) => s.futures?.liquidation).slice(0, 5),
+          whale: signals.filter((s: ScannerResult) => (s.confidence || 0) > 80).slice(0, 5),
         })
       } catch {
         setResults({ long: [], short: [], volatility: [], volume: [], liquidation: [], whale: [] })
@@ -134,7 +146,7 @@ export function MarketScanner() {
               <span className="w-20 text-right">Change</span>
               <span className="flex-1 text-right">Reason</span>
             </div>
-            {currentData.map((item: any, i: number) => {
+            {currentData.map((item: ScannerResult, i: number) => {
               const isLong = (item.direction || item.signal) === "long" || (item.direction || item.signal) === "bullish"
               const isShort = (item.direction || item.signal) === "short" || (item.direction || item.signal) === "bearish"
               return (

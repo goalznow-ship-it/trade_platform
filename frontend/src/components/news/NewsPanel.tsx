@@ -5,23 +5,28 @@ import { api } from "@/lib/api"
 import { Badge } from "@/components/ui/Badge"
 import { Newspaper, ExternalLink } from "lucide-react"
 
+interface NewsArticle {
+  url?: string
+  title?: string
+  source?: string
+  sentiment?: string
+  impact_score?: number
+}
+
 export function NewsPanel() {
-  const [news, setNews] = useState<any[]>([])
+  const [news, setNews] = useState<NewsArticle[]>([])
   const [loading, setLoading] = useState(true)
 
-  async function loadNews() {
-    try {
-      const data = await api.getNews()
-      setNews(data)
-    } catch {
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    loadNews()
-    const interval = setInterval(loadNews, 120000)
+    api.getNews()
+      .then(data => setNews(data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+    const interval = setInterval(() => {
+      api.getNews()
+        .then(data => setNews(data))
+        .catch(() => {})
+    }, 120000)
     return () => clearInterval(interval)
   }, [])
 

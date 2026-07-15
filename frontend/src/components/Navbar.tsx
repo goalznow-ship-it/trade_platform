@@ -14,6 +14,7 @@ import {
   Scan, Shield, ChevronDown, History,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import type { Overview, Notification } from "@/lib/types"
 
 const MODULES = [
   { href: "/terminal", label: "AI Terminal", icon: Brain, color: "text-blue-400" },
@@ -30,10 +31,10 @@ export function Navbar() {
   const { user, logout } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
-  const [overview, setOverview] = useState<any>(null)
+  const [overview, setOverview] = useState<Overview | null>(null)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
   const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/admin" || pathname === "/pricing"
 
@@ -48,9 +49,13 @@ export function Navbar() {
 
   useEffect(() => {
     if (searchQuery.length >= 1) {
-      api.searchSymbols(searchQuery).then(setSearchResults).catch(() => setSearchResults([]))
-    } else {
-      setSearchResults([])
+      api.searchSymbols(searchQuery).then((results) => {
+        if (searchQuery.length >= 1) {
+          setSearchResults(Array.isArray(results) ? results as { symbol: string }[] : [])
+        }
+      }).catch(() => {
+        if (searchQuery.length >= 1) setSearchResults([])
+      })
     }
   }, [searchQuery])
 
@@ -101,8 +106,8 @@ export function Navbar() {
                 <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-800/40 rounded border border-gray-700/30">
                   <span className="text-orange-400 font-semibold">BTC</span>
                   <span className="text-white font-mono font-medium">{formatPrice(overview.btc_price, 0)}</span>
-                  <span className={cn("font-mono", overview.btc_change >= 0 ? "text-green-400" : "text-red-400")}>
-                    {formatPercent(overview.btc_change)}
+                  <span className={cn("font-mono", (overview.btc_change ?? 0) >= 0 ? "text-green-400" : "text-red-400")}>
+                    {formatPercent(overview.btc_change ?? 0)}
                   </span>
                 </div>
               )}
@@ -246,12 +251,14 @@ function NotificationBell() {
   useEffect(() => {
     api.getNotifications().then((n) => {
       const arr = Array.isArray(n) ? n : []
-      setUnread(arr.filter((x: any) => !x.is_read).length)
+      const unreadArr = arr as Notification[]
+      setUnread(unreadArr.filter((x) => !x.is_read).length)
     }).catch(() => {})
     const interval = setInterval(() => {
       api.getNotifications().then((n) => {
         const arr = Array.isArray(n) ? n : []
-        setUnread(arr.filter((x: any) => !x.is_read).length)
+        const unreadArr = arr as Notification[]
+        setUnread(unreadArr.filter((x) => !x.is_read).length)
       }).catch(() => {})
     }, 30000)
     return () => clearInterval(interval)

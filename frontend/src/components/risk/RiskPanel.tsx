@@ -4,32 +4,47 @@ import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
-import { Badge } from "@/components/ui/Badge"
-import { cn, formatPercent } from "@/lib/utils"
-import {
-  Shield, AlertTriangle, TrendingUp, TrendingDown,
-  DollarSign, Target, BarChart3, Edit3,
-} from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Shield, Edit3 } from "lucide-react"
+import type { RiskDashboard, RiskProfile } from "@/types"
+
+const DEFAULT_PROFILE: RiskProfile = {
+  max_daily_loss: 0,
+  max_leverage: 0,
+  max_open_positions: 0,
+  risk_per_trade: 0,
+  max_drawdown: 0,
+  max_position_size: 0,
+}
 
 export function RiskPanel() {
-  const [dashboard, setDashboard] = useState<any>(null)
+  const [dashboard, setDashboard] = useState<RiskDashboard | null>(null)
   const [editMode, setEditMode] = useState(false)
-  const [profile, setProfile] = useState<any>({})
+  const [profile, setProfile] = useState<RiskProfile>(DEFAULT_PROFILE)
 
-  async function load() {
+  async function loadDashboard() {
     try {
       const d = await api.getRiskDashboard()
       setDashboard(d)
-      setProfile(d.profile || {})
+      setProfile(d.profile || DEFAULT_PROFILE)
     } catch {}
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const initialLoad = async () => {
+      try {
+        const d = await api.getRiskDashboard()
+        setDashboard(d)
+        setProfile(d.profile || DEFAULT_PROFILE)
+      } catch {}
+    }
+    initialLoad()
+  }, [])
 
   async function handleSave() {
     await api.updateRiskProfile(profile)
     setEditMode(false)
-    load()
+    loadDashboard()
   }
 
   if (!dashboard) {
@@ -76,7 +91,7 @@ export function RiskPanel() {
                 <label className="text-[10px] text-gray-500">{f.label}</label>
                 <input
                   type={f.type}
-                  value={(profile as any)[f.key] ?? ""}
+                  value={profile[f.key as keyof RiskProfile]}
                   onChange={(e) => setProfile({ ...profile, [f.key]: parseFloat(e.target.value) || 0 })}
                   step={f.step}
                   className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono"

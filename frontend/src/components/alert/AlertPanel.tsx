@@ -2,46 +2,53 @@
 
 import { useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import {
-  Bell, BellOff, Plus, Trash2, Settings, AlertTriangle,
+  Bell, BellOff, Plus, Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { Alert } from "@/types"
 
 const ALERT_TYPES = ["price", "volume", "rsi", "macd", "ma_cross", "signal", "news", "volatility"]
 const CONDITIONS = ["above", "below", "crosses_above", "crosses_below", "inside", "outside"]
 
-export function AlertPanel() {
-  const [alerts, setAlerts] = useState<any[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({
-    name: "", alert_type: "price", symbol: "BTC/USDT",
-    condition: "above", value: 0, channels: ["in_app"],
-  })
+const DEFAULT_FORM = {
+  name: "", alert_type: "price", symbol: "BTC/USDT",
+  condition: "above", value: 0, channels: ["in_app"],
+}
 
-  async function load() {
+export function AlertPanel() {
+  const [alerts, setAlerts] = useState<Alert[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ ...DEFAULT_FORM })
+
+  async function loadAlerts() {
     try { setAlerts(await api.getAlerts()) } catch {}
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const initialLoad = async () => {
+      try { setAlerts(await api.getAlerts()) } catch {}
+    }
+    initialLoad()
+  }, [])
 
   async function handleCreate() {
     await api.createAlert(form)
     setShowForm(false)
-    setForm({ name: "", alert_type: "price", symbol: "BTC/USDT", condition: "above", value: 0, channels: ["in_app"] })
-    load()
+    setForm({ ...DEFAULT_FORM })
+    loadAlerts()
   }
 
-  async function handleToggle(a: any) {
+  async function handleToggle(a: Alert) {
     await api.updateAlert(a.id, { is_active: !a.is_active })
-    load()
+    loadAlerts()
   }
 
   async function handleDelete(id: number) {
     await api.deleteAlert(id)
-    load()
+    loadAlerts()
   }
 
   return (

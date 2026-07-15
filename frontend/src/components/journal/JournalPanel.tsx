@@ -1,22 +1,33 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { cn } from "@/lib/utils"
 import {
   BookOpen, Plus, Trash2, TrendingUp, TrendingDown,
-  Smile, Frown, Meh, Star, Edit3,
+  Star,
 } from "lucide-react"
 
 const SIDES = ["long", "short"]
 const RATINGS = ["excellent", "good", "average", "poor", "terrible"]
 const EMOTIONS = ["confident", "anxious", "neutral", "excited", "fearful", "greedy", "regretful"]
 
+interface JournalEntry {
+  id: number;
+  symbol: string;
+  side: string;
+  rating: string;
+  emotion: string;
+  notes?: string;
+  mistakes?: string;
+  lessons?: string;
+  created_at: string;
+}
+
 export function JournalPanel() {
-  const [entries, setEntries] = useState<any[]>([])
+  const [entries, setEntries] = useState<JournalEntry[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [showForm, setShowForm] = useState(false)
@@ -25,15 +36,16 @@ export function JournalPanel() {
     rating: "good", mistakes: "", lessons: "",
   })
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const res = await api.getJournal(page, 20)
       setEntries(res.items || res.data || res || [])
       setTotal(res.total || 0)
     } catch {}
-  }
+  }, [page])
 
-  useEffect(() => { load() }, [page])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
 
   async function handleCreate() {
     await api.createJournalEntry(form)

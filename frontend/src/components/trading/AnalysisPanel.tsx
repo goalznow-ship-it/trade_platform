@@ -3,46 +3,76 @@
 import { useEffect, useState } from "react"
 import { useMarketStore } from "@/store/market"
 import { api } from "@/lib/api"
-import { Card } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
-import { cn, formatPrice, formatPercent } from "@/lib/utils"
+import { cn, formatPrice } from "@/lib/utils"
 import {
   Brain,
   TrendingUp,
   TrendingDown,
-  Activity,
-  BarChart3,
-  AlertTriangle,
-  Zap,
-  Shield,
 } from "lucide-react"
+
+interface AnalysisData {
+  confidence?: number
+  prediction?: string
+  risk_level?: string
+  long_probability?: number
+  short_probability?: number
+  summary?: string
+  scores?: Record<string, number>
+  details?: {
+    rsi?: number
+    macd?: number
+    support?: number
+    resistance?: number
+  }
+}
+
+interface SignalItem {
+  direction: string
+  signal_type: string
+  confidence: number
+  entry_price: number
+  stop_loss: number
+  take_profit_1: number
+  reason: string
+}
+
+interface SignalsData {
+  signals?: SignalItem[]
+  confidence?: Record<string, number>
+}
 
 export function AnalysisPanel() {
   const { selectedSymbol } = useMarketStore()
-  const [analysis, setAnalysis] = useState<any>(null)
-  const [signals, setSignals] = useState<any>(null)
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
+  const [signals, setSignals] = useState<SignalsData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function loadAnalysis() {
-    setLoading(true)
-    try {
-      const [a, s] = await Promise.all([
-        api.getAIAnalysis(selectedSymbol),
-        api.getSignals(selectedSymbol),
-      ])
-      setAnalysis(a)
-      setSignals(s)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
+    let cancelled = false
+    async function loadAnalysis() {
+      setLoading(true)
+      try {
+        const [a, s] = await Promise.all([
+          api.getAIAnalysis(selectedSymbol),
+          api.getSignals(selectedSymbol),
+        ])
+        if (!cancelled) {
+          setAnalysis(a)
+          setSignals(s)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
     loadAnalysis()
     const interval = setInterval(loadAnalysis, 30000)
-    return () => clearInterval(interval)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [selectedSymbol])
 
   if (loading) {
@@ -56,7 +86,6 @@ export function AnalysisPanel() {
 
   const ai = analysis || {}
   const sigs = signals?.signals || []
-  const conf = signals?.confidence || {}
 
   return (
     <div className="p-3 space-y-3 overflow-auto h-full">
@@ -124,7 +153,7 @@ export function AnalysisPanel() {
       {sigs.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-medium text-gray-400">Active Signals</div>
-          {sigs.slice(0, 3).map((sig: any, i: number) => (
+          {sigs.slice(0, 3).map((sig: SignalItem, i: number) => (
             <div
               key={i}
               className={cn(

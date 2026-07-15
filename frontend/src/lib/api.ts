@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -60,7 +62,7 @@ export const api = {
   getSignals: (symbol: string, timeframe = "1h") =>
     request<any>(`/api/v1/signals/${symbol}?timeframe=${timeframe}`),
 
-  scanAll: (timeframe = "1h", minConfidence = 70) =>
+  scanAll: (minConfidence = 70) =>
     request<any[]>(`/api/v1/scanner/top-signals?min_confidence=${minConfidence}`),
 
   getScannerFilters: () =>
@@ -71,7 +73,7 @@ export const api = {
       "bull_market", "bear_market", "low_liquidity", "high_liquidity",
     ]),
 
-  scanWithFilters: (_filters: any) =>
+  scanWithFilters: () =>
     api.scanAllV2(50),
 
   // Trading
@@ -196,7 +198,7 @@ export const api = {
   resetPaperAccount: () =>
     request("/api/v1/paper/account/reset", { method: "POST" }),
 
-  getAIExplainability: (_symbol: string, _timeframe = "1h") =>
+  getAIExplainability: () =>
     Promise.resolve(null),
 
   // Notifications

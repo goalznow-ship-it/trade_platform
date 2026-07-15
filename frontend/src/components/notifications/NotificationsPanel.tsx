@@ -1,15 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { cn } from "@/lib/utils"
 import {
-  Bell, BellRing, CheckCheck, Archive, Trash2,
-  Info, AlertTriangle, TrendingUp, TrendingDown, DollarSign,
+  Bell, BellRing, CheckCheck, Archive,
+  Info, AlertTriangle, TrendingUp, DollarSign,
 } from "lucide-react"
+import type { Notification } from "@/lib/types"
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   info: Info,
@@ -20,16 +20,17 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 }
 
 export function NotificationsPanel() {
-  const [notifications, setNotifications] = useState<Record<string, unknown>[]>([])
+  const [notifications, setNotifications] = useState<Notification[]>([])
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const n = await api.getNotifications()
-      setNotifications(Array.isArray(n) ? n : [])
+      setNotifications(Array.isArray(n) ? (n as Notification[]) : [])
     } catch {}
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
 
   async function handleMarkRead(id: number) {
     await api.markNotificationRead(id)

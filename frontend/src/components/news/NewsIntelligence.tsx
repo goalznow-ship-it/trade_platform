@@ -5,12 +5,28 @@ import { api } from "@/lib/api"
 import { cn, formatTime } from "@/lib/utils"
 import {
   Newspaper, TrendingUp, TrendingDown, Shield,
-  AlertTriangle, ExternalLink, RefreshCw,
+  ExternalLink, RefreshCw,
   Globe, Building2, DollarSign, Activity,
 } from "lucide-react"
 
+interface NewsItem {
+  title?: string
+  headline?: string
+  source?: string
+  timestamp?: number | string
+  impact?: string
+  sentiment?: string
+  score?: number
+  impact_score?: number
+  category?: string
+  type?: string
+  summary?: string
+  assets?: string[]
+  url?: string
+}
+
 export function NewsIntelligence() {
-  const [news, setNews] = useState<any[]>([])
+  const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>("all")
 

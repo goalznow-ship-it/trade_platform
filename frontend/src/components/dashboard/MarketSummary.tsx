@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useState, memo } from "react"
-import { api } from "@/lib/api"
+import { memo } from "react"
 import { useMarketStore } from "@/store/market"
 import { cn, formatPrice, formatPercent, formatVolume, getChangeColor } from "@/lib/utils"
 import {
@@ -37,13 +36,13 @@ export function MarketSummary() {
   const tickers = useMarketStore((s) => s.tickers)
   const fearGreed = useMarketStore((s) => s.fearGreed)
   const isLive = useMarketStore((s) => s.isLive)
-  const [overview, setOverview] = useState<{ total_volume_24h?: number; btc_dominance?: number; total_market_cap?: number } | null>(null)
+  const breadth = useMarketStore((s) => s.breadth)
 
-  useEffect(() => {
-    api.getOverview().then(setOverview).catch(() => {})
-    const interval = setInterval(() => api.getOverview().then(setOverview).catch(() => {}), 60000)
-    return () => clearInterval(interval)
-  }, [])
+  const btc = tickers["BTC/USDT"]
+  const totalVolume = btc?.volume_24h ? btc.volume_24h * 50 : null
+  const altSeasonPct = breadth
+    ? ((breadth.advancing / (breadth.advancing + breadth.declining + breadth.unchanged)) * 100)
+    : null
 
   return (
     <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
@@ -69,42 +68,42 @@ export function MarketSummary() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <div className="p-2.5 rounded-lg bg-gray-800/20">
-          <div className="flex items-center gap-1 mb-0.5">
-            <BarChart3 className="w-3 h-3 text-gray-500" />
-            <span className="text-[10px] text-gray-500">24h Volume</span>
+          <div className="p-2.5 rounded-lg bg-gray-800/20">
+            <div className="flex items-center gap-1 mb-0.5">
+              <BarChart3 className="w-3 h-3 text-gray-500" />
+              <span className="text-[10px] text-gray-500">Est. 24h Vol.</span>
+            </div>
+            <div className="text-sm font-bold text-white font-mono">
+              {totalVolume != null ? formatVolume(totalVolume) : "--"}
+            </div>
           </div>
-          <div className="text-sm font-bold text-white font-mono">
-            {overview?.total_volume_24h != null ? formatVolume(overview.total_volume_24h) : "--"}
+          <div className="p-2.5 rounded-lg bg-gray-800/20">
+            <div className="flex items-center gap-1 mb-0.5">
+              <Globe className="w-3 h-3 text-gray-500" />
+              <span className="text-[10px] text-gray-500">BTC 24h Chg</span>
+            </div>
+            <div className="text-sm font-bold text-white font-mono">
+              {btc?.change != null ? formatPercent(btc.change) : "--"}
+            </div>
           </div>
-        </div>
-        <div className="p-2.5 rounded-lg bg-gray-800/20">
-          <div className="flex items-center gap-1 mb-0.5">
-            <Globe className="w-3 h-3 text-gray-500" />
-            <span className="text-[10px] text-gray-500">BTC Dom.</span>
+          <div className="p-2.5 rounded-lg bg-gray-800/20">
+            <div className="flex items-center gap-1 mb-0.5">
+              <Coins className="w-3 h-3 text-gray-500" />
+              <span className="text-[10px] text-gray-500">BTC Volume</span>
+            </div>
+            <div className="text-sm font-bold text-white font-mono">
+              {btc?.volume_24h != null ? formatVolume(btc.volume_24h) : "--"}
+            </div>
           </div>
-          <div className="text-sm font-bold text-white font-mono">
-            {overview?.btc_dominance != null ? `${overview.btc_dominance.toFixed(1)}%` : "--"}
+          <div className="p-2.5 rounded-lg bg-gray-800/20">
+            <div className="flex items-center gap-1 mb-0.5">
+              <Activity className="w-3 h-3 text-gray-500" />
+              <span className="text-[10px] text-gray-500">Breadth</span>
+            </div>
+            <div className="text-sm font-bold text-white font-mono">
+              {altSeasonPct != null ? `${altSeasonPct.toFixed(1)}%` : "--"}
+            </div>
           </div>
-        </div>
-        <div className="p-2.5 rounded-lg bg-gray-800/20">
-          <div className="flex items-center gap-1 mb-0.5">
-            <Coins className="w-3 h-3 text-gray-500" />
-            <span className="text-[10px] text-gray-500">Market Cap</span>
-          </div>
-          <div className="text-sm font-bold text-white font-mono">
-            {overview?.total_market_cap != null ? formatPrice(overview.total_market_cap, 0) : "--"}
-          </div>
-        </div>
-        <div className="p-2.5 rounded-lg bg-gray-800/20">
-          <div className="flex items-center gap-1 mb-0.5">
-            <Activity className="w-3 h-3 text-gray-500" />
-            <span className="text-[10px] text-gray-500">Alt Season</span>
-          </div>
-          <div className="text-sm font-bold text-white font-mono">
-            {overview?.btc_dominance != null ? `${(100 - overview.btc_dominance).toFixed(1)}%` : "--"}
-          </div>
-        </div>
       </div>
     </div>
   )
