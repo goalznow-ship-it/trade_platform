@@ -105,6 +105,19 @@ class InstitutionalSignalEngine:
             data=data,
         )
 
+        trade_request = {
+            "symbol": symbol,
+            "direction": direction,
+            "entry_price": entry_zone["mid"],
+            "stop_loss": stop_loss,
+            "take_profit": tp1,
+            "leverage": risk_result.get("leverage", 1),
+            "balance": capital,
+            "quantity": risk_result.get("position_size", 0),
+            "current_price": current_price,
+        }
+        execution = await self._get_execution_approval(trade_request)
+
         return {
             "symbol": symbol,
             "timeframe": timeframe,
@@ -140,6 +153,7 @@ class InstitutionalSignalEngine:
             "futures": futures_data,
             "position_sizing": risk_result,
             "validation": validation,
+            "execution": execution,
             "indicators": {
                 key: details.get(key) for key in
                 ["rsi", "macd_histogram", "adx", "supertrend", "atr", "volume_ratio"]
@@ -313,18 +327,17 @@ class InstitutionalSignalEngine:
         }
         return mapping.get(timeframe, "1-24 hours")
 
-    def _get_futures_data(self, symbol: str) -> Optional[dict]:
+    async def _get_futures_data(self, symbol: str) -> Optional[dict]:
         try:
-            import asyncio
             from app.services.market import market_service
 
-            async def fetch():
-                funding = await market_service.get_funding_rate(symbol)
-                oi = await market_service.get_open_interest(symbol)
-                ticker = await market_service.get_ticker(symbol)
-                return {"funding": funding, "oi": oi, "ticker": ticker}
-
-            result = asyncio.run(fetch())
+            funding, oi, ticker = await asyncio.gather(
+                market_service.get_funding_rate(symbol),
+                market_service.get_open_interest(symbol),
+                market_service.get_ticker(symbol),
+                return_exceptions=True,
+            )
+            result = {"funding": funding, "oi": oi, "ticker": ticker}
         except Exception:
             return None
 
@@ -356,6 +369,34 @@ class InstitutionalSignalEngine:
             "classification": "reject",
             "reasons": [reason],
         }
+
+
+    async def _get_execution_approval(self, trade_request: dict) -> dict:
+        try:
+            from app.services.execution_engine import execution_engine
+            approval = await execution_engine.get_trade_approval(trade_request)
+            plan = await execution_engine.get_execution_plan(trade_request)
+            slippage = await execution_engine.estimate_slippage(
+                trade_request["symbol"],
+                trade_request.get("quantity", 0),
+                trade_request["direction"],
+            )
+            return {
+                "approved": approval.get("approved", False),
+                "risk_score": approval.get("risk_score", 0),
+                "risk_label": approval.get("risk_label", "unknown"),
+                "rejection_reasons": approval.get("rejection_reasons", []),
+                "execution_plan": plan,
+                "estimated_slippage": slippage,
+            }
+        except Exception as e:
+            return {
+                "approved": True,
+                "risk_score": 50,
+                "risk_label": "unvalidated",
+                "rejection_reasons": [],
+                "note": f"Execution gate unavailable: {e}",
+            }
 
 
 institutional_signal_engine = InstitutionalSignalEngine()

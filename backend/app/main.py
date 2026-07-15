@@ -24,6 +24,7 @@ from app.services.alert import alert_service
 from app.services.binance_ws import binance_ws
 from app.services.market_coverage import market_coverage
 from app.services.streaming import streaming_service
+from app.services.exchange.manager import exchange_manager
 
 
 @asynccontextmanager
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     await binance_ws.subscribe_depth(top_symbols[:5])
     await alert_service.start()
     await streaming_service.start()
+    await exchange_manager.start_reconnect_loop("binance")
     try:
         await redis_client.ping()
         logger.info("Redis connected")

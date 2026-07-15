@@ -6,11 +6,14 @@ from sqlalchemy import select, delete
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.trade import TradeHistory, Trade
-from app.services.trading import trading_service
+from app.models.trade import TradeHistory, Trade, Order, Position
+from app.services.exchange.manager import exchange_manager
+from app.services.exchange.base import OrderRequest as ExchangeOrderRequest
+from datetime import datetime, timezone
 import csv, io
 
 router = APIRouter(prefix="/trade", tags=["Trading"])
+
 
 class OrderRequest(BaseModel):
     exchange: str = "binance"
@@ -21,69 +24,241 @@ class OrderRequest(BaseModel):
     price: Optional[float] = None
     stop_price: Optional[float] = None
     leverage: int = 1
+    reduce_only: bool = False
+    margin_mode: str = "isolated"
+
 
 class APIKeyRequest(BaseModel):
     exchange: str
     api_key: str
     secret_key: str
+    passphrase: Optional[str] = None
+    label: Optional[str] = None
+
 
 class TradeNoteUpdate(BaseModel):
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
 
+
+class CancelOrderRequest(BaseModel):
+    exchange: str = "binance"
+    symbol: str
+    order_id: str
+
+
+class ModifyOrderRequest(BaseModel):
+    exchange: str = "binance"
+    symbol: str
+    order_id: str
+    price: Optional[float] = None
+    quantity: Optional[float] = None
+    stop_price: Optional[float] = None
+
+
 @router.post("/order")
-async def create_order(req: OrderRequest, user: User = Depends(get_current_user)):
-    api_key = None
-    secret_key = None
-    if req.exchange == 'binance':
-        api_key = user.binance_api_key
-        secret_key = user.binance_secret_key
-    if not api_key or not secret_key:
-        raise HTTPException(400, "Exchange API keys not configured")
-    return await trading_service.create_order(
-        req.exchange, req.symbol, req.side, req.amount,
-        req.order_type, req.price, req.stop_price, req.leverage,
-        api_key, secret_key
+async def create_order(
+    req: OrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex_req = ExchangeOrderRequest(
+        symbol=req.symbol,
+        side=req.side,
+        quantity=req.amount,
+        order_type=req.order_type,
+        price=req.price,
+        stop_price=req.stop_price,
+        leverage=req.leverage,
+        reduce_only=req.reduce_only,
+        margin_mode=req.margin_mode,
     )
+    result = await exchange_manager.create_order(user.id, req.exchange, ex_req, db)
+    if result.error:
+        raise HTTPException(400, result.error)
+
+    order_record = Order(
+        user_id=user.id,
+        symbol=req.symbol,
+        side=req.side,
+        type=req.order_type,
+        price=req.price,
+        stop_price=req.stop_price,
+        quantity=req.amount,
+        filled_quantity=result.filled_quantity,
+        status=result.status,
+        exchange=req.exchange,
+        exchange_order_id=result.order_id,
+    )
+    db.add(order_record)
+    await db.commit()
+
+    return {
+        "order_id": result.order_id,
+        "symbol": result.symbol,
+        "side": result.side,
+        "status": result.status,
+        "filled_quantity": result.filled_quantity,
+        "avg_price": result.avg_price,
+        "error": result.error,
+    }
+
 
 @router.post("/cancel")
-async def cancel_order(exchange: str, symbol: str, order_id: str, user: User = Depends(get_current_user)):
-    api_key = user.binance_api_key if exchange == 'binance' else user.bybit_api_key
-    secret_key = user.binance_secret_key if exchange == 'binance' else user.bybit_secret_key
-    return await trading_service.cancel_order(exchange, symbol, order_id, api_key, secret_key)
+async def cancel_order(
+    req: CancelOrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = await exchange_manager.get_user_exchange(user.id, req.exchange, db)
+    if not ex:
+        raise HTTPException(400, "Exchange not connected")
+    success = await ex.cancel_order(req.symbol, req.order_id)
+    if success:
+        result = await db.execute(
+            select(Order).where(
+                Order.exchange_order_id == req.order_id,
+                Order.user_id == user.id,
+            )
+        )
+        order = result.scalar_one_or_none()
+        if order:
+            order.status = "canceled"
+            await db.commit()
+    return {"success": success}
+
+
+@router.post("/modify")
+async def modify_order(
+    req: ModifyOrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = await exchange_manager.get_user_exchange(user.id, req.exchange, db)
+    if not ex:
+        raise HTTPException(400, "Exchange not connected")
+    result = await ex.modify_order(
+        req.symbol, req.order_id,
+        price=req.price, quantity=req.quantity, stop_price=req.stop_price,
+    )
+    return {
+        "order_id": result.order_id,
+        "status": result.status,
+        "avg_price": result.avg_price,
+        "filled_quantity": result.filled_quantity,
+        "error": result.error,
+    }
+
 
 @router.get("/positions")
-async def get_positions(user: User = Depends(get_current_user)):
+async def get_positions(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     positions = []
-    if user.binance_api_key:
-        bp = await trading_service.get_positions('binance', user.binance_api_key, user.binance_secret_key)
-        positions.extend(bp)
-    if user.bybit_api_key:
-        byp = await trading_service.get_positions('bybit', user.bybit_api_key, user.bybit_secret_key)
-        positions.extend(byp)
+    for exchange_name in ("binance", "bybit"):
+        ex = await exchange_manager.get_user_exchange(user.id, exchange_name, db)
+        if ex and ex.is_connected:
+            pos = await ex.get_positions()
+            for p in pos:
+                positions.append({
+                    "symbol": p.symbol,
+                    "side": p.side,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "mark_price": p.mark_price,
+                    "liquidation_price": p.liquidation_price,
+                    "leverage": p.leverage,
+                    "margin": p.margin,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "realized_pnl": p.realized_pnl,
+                    "exchange": exchange_name,
+                })
     return positions
 
+
 @router.get("/balance")
-async def get_balance(user: User = Depends(get_current_user)):
+async def get_balance(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     balances = {}
-    if user.binance_api_key:
-        balances['binance'] = await trading_service.get_balance('binance', user.binance_api_key, user.binance_secret_key)
-    if user.bybit_api_key:
-        balances['bybit'] = await trading_service.get_balance('bybit', user.bybit_api_key, user.bybit_secret_key)
+    for exchange_name in ("binance", "bybit"):
+        ex = await exchange_manager.get_user_exchange(user.id, exchange_name, db)
+        if ex and ex.is_connected:
+            bal = await ex.get_balance()
+            balances[exchange_name] = {
+                "total": bal.total,
+                "free": bal.free,
+                "used": bal.used,
+                "unrealized_pnl": bal.unrealized_pnl,
+            }
     return balances
 
+
 @router.get("/orders")
-async def get_open_orders(exchange: str = "binance", symbol: str = None, user: User = Depends(get_current_user)):
-    api_key = user.binance_api_key if exchange == 'binance' else user.bybit_api_key
-    secret_key = user.binance_secret_key if exchange == 'binance' else user.bybit_secret_key
-    return await trading_service.get_open_orders(exchange, symbol, api_key, secret_key)
+async def get_open_orders(
+    exchange: str = "binance",
+    symbol: str = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = await exchange_manager.get_user_exchange(user.id, exchange, db)
+    if not ex:
+        return []
+    orders = await ex.get_open_orders(symbol)
+    return [
+        {
+            "order_id": o.order_id,
+            "symbol": o.symbol,
+            "side": o.side,
+            "order_type": o.order_type,
+            "quantity": o.quantity,
+            "filled_quantity": o.filled_quantity,
+            "price": o.price,
+            "avg_price": o.avg_price,
+            "status": o.status,
+        }
+        for o in orders
+    ]
+
+
+@router.post("/leverage")
+async def set_leverage(
+    exchange: str = "binance",
+    symbol: str = None,
+    leverage: int = 1,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = await exchange_manager.get_user_exchange(user.id, exchange, db)
+    if not ex:
+        raise HTTPException(400, "Exchange not connected")
+    success = await ex.set_leverage(symbol, leverage)
+    return {"success": success}
+
+
+@router.post("/margin-mode")
+async def set_margin_mode(
+    exchange: str = "binance",
+    symbol: str = None,
+    mode: str = "isolated",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = await exchange_manager.get_user_exchange(user.id, exchange, db)
+    if not ex:
+        raise HTTPException(400, "Exchange not connected")
+    success = await ex.set_margin_mode(symbol, mode)
+    return {"success": success}
+
 
 @router.get("/history")
 async def get_trade_history(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     symbol: str = Query(default=None),
-    side: str = Query(default=None, pattern="^(long|short)?$"),
+    side: str = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -201,13 +376,25 @@ async def export_trades_csv(
 
 
 @router.post("/api-keys")
-async def save_api_keys(req: APIKeyRequest, user: User = Depends(get_current_user)):
-    if req.exchange == 'binance':
-        user.binance_api_key = req.api_key
-        user.binance_secret_key = req.secret_key
-    elif req.exchange == 'bybit':
-        user.bybit_api_key = req.api_key
-        user.bybit_secret_key = req.secret_key
-    else:
-        raise HTTPException(400, "Unsupported exchange")
-    return {"message": "API keys saved"}
+async def save_api_keys(
+    req: APIKeyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    success = await exchange_manager.save_credentials(
+        user.id, req.exchange, req.api_key, req.secret_key,
+        passphrase=req.passphrase, label=req.label, db=db,
+    )
+    if not success:
+        raise HTTPException(400, "Failed to save API keys")
+    return {"message": "API keys saved securely"}
+
+
+@router.delete("/api-keys/{exchange}")
+async def remove_api_keys(
+    exchange: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await exchange_manager.remove_credentials(user.id, exchange, db)
+    return {"message": "API keys removed"}
