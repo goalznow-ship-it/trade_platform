@@ -255,6 +255,13 @@ export const api = {
   // WebSocket Stats
   getWsStats: () => request<any>("/ws/stats"),
 
+  // Admin AI Brain
+  getBrainStatus: () => request<any>("/api/v1/admin/brain/status"),
+  getBrainEngines: () => request<any>("/api/v1/admin/brain/engines"),
+  getBrainAssessment: (symbol = "BTCUSDT") => request<any>(`/api/v1/admin/brain/assessment?symbol=${symbol}`),
+  getBrainSelfLearning: () => request<any>("/api/v1/admin/brain/self-learning"),
+  getBrainSystem: () => request<any>("/api/v1/admin/brain/system"),
+
   // Institutional
   getInstitutionalSignal: (symbol: string, timeframe = "1h", capital = 10000, riskPercent = 0.02) =>
     request<any>(`/api/v1/institutional/signal/${symbol}?timeframe=${timeframe}&capital=${capital}&risk_percent=${riskPercent}`),

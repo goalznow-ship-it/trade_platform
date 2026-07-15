@@ -222,6 +222,85 @@ async def revenue_stats(admin: User = Depends(require_admin), db: AsyncSession =
         "monthly_recurring": paid_subs * 29 if paid_subs > 0 else 0,
     }
 
+# AI Brain Monitoring
+@router.get("/brain/status")
+async def brain_status(admin: User = Depends(require_admin)):
+    from app.services.brain import ai_brain
+    return {
+        "available": True,
+        "cache_size": len(ai_brain._assessment_cache),
+        "cache_ttl_seconds": ai_brain._cache_ttl_seconds,
+        "weights": {
+            "technical": ai_brain.TECHNICAL_WEIGHT,
+            "smc": ai_brain.SMC_WEIGHT,
+            "orderflow": ai_brain.ORDERFLOW_WEIGHT,
+            "derivatives": ai_brain.DERIVATIVES_WEIGHT,
+            "macro": ai_brain.MACRO_WEIGHT,
+            "onchain": ai_brain.ONCHAIN_WEIGHT,
+            "sentiment": ai_brain.SENTIMENT_WEIGHT,
+            "whale": ai_brain.WHALE_WEIGHT,
+            "risk": ai_brain.RISK_WEIGHT,
+        },
+    }
+
+
+@router.get("/brain/engines")
+async def brain_engines(admin: User = Depends(require_admin)):
+    from app.services.brain import (
+        orderflow_engine, derivatives_engine, smc_engine,
+        institutional_scorer, multi_timeframe_engine, market_coverage,
+        macro_engine, onchain_engine, social_sentiment, whale_tracker,
+    )
+    return {
+        "engines": {
+            "orderflow": orderflow_engine is not None,
+            "derivatives": derivatives_engine is not None,
+            "smc": smc_engine is not None,
+            "institutional_scorer": institutional_scorer is not None,
+            "multi_timeframe": multi_timeframe_engine is not None,
+            "market_coverage": market_coverage is not None,
+            "macro": macro_engine is not None,
+            "onchain": onchain_engine is not None,
+            "social_sentiment": social_sentiment is not None,
+            "whale_tracker": whale_tracker is not None,
+        },
+        "loaded_count": sum(1 for v in [
+            orderflow_engine, derivatives_engine, smc_engine,
+            institutional_scorer, multi_timeframe_engine, market_coverage,
+            macro_engine, onchain_engine, social_sentiment, whale_tracker,
+        ] if v is not None),
+        "total_engines": 10,
+    }
+
+
+@router.get("/brain/assessment")
+async def brain_assessment(
+    symbol: str = "BTCUSDT",
+    admin: User = Depends(require_admin),
+):
+    from app.services.brain import ai_brain
+    assessment = await ai_brain.assess_market(symbol)
+    return assessment
+
+
+@router.get("/brain/self-learning")
+async def brain_self_learning(admin: User = Depends(require_admin)):
+    from app.services.self_learning import self_learning
+    report = self_learning.get_learning_report()
+    return report
+
+
+@router.get("/brain/system")
+async def brain_system(admin: User = Depends(require_admin)):
+    from app.services.streaming import streaming_service
+    ws_stats = ws_manager.stats
+    stream_stats = streaming_service.get_stats()
+    return {
+        "websocket": ws_stats,
+        "streaming": stream_stats,
+    }
+
+
 # Audit Logs
 @router.get("/logs")
 async def get_logs(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):

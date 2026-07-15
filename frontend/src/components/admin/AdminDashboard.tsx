@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { AIBrainDashboard } from "./AIBrainDashboard"
 import {
   Users, Activity, Shield,
   TrendingUp, DollarSign,
-  Server, Database, Wifi, Zap,
+  Server, Database, Wifi, Zap, Brain,
 } from "lucide-react"
 
 interface AdminStats {
@@ -92,6 +93,7 @@ export function AdminDashboard() {
     { id: "users", label: "Users", icon: Users },
     { id: "subscriptions", label: "Subscriptions", icon: DollarSign },
     { id: "signals", label: "Signals", icon: TrendingUp },
+    { id: "brain", label: "AI Brain", icon: Brain },
   ]
 
   return (
@@ -362,6 +364,8 @@ export function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {activeTab === "brain" && <AIBrainDashboard />}
       </div>
     </div>
   )

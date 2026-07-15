@@ -244,4 +244,20 @@ class StreamingService:
             await asyncio.sleep(60)
 
 
+    def get_stats(self) -> dict:
+        now = datetime.now(timezone.utc).timestamp()
+        return {
+            "running": self._running,
+            "workers": {
+                name: {
+                    "last_heartbeat_ago_secs": round(now - ts, 1),
+                    "alive": now - ts < 30,
+                }
+                for name, ts in self._heartbeats.items()
+            },
+            "worker_count": len(self._tasks),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 streaming_service = StreamingService()
