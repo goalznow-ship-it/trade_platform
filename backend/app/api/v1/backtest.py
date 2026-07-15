@@ -26,15 +26,18 @@ async def run_backtest(
     limit: int = 500,
     initial_balance: float = 10000,
     leverage: int = 1,
+    risk_per_trade: float = 0.02,
     user: User = Depends(get_current_user)
 ):
     sym = symbol.replace("-", "/")
     data = await market_service.get_ohlcv(sym, 'binance', timeframe, limit)
     if not data:
         return {"error": "No data available"}
-    result = backtest_service.run_backtest(data, initial_balance, leverage=leverage)
-    result["symbol"] = sym
-    result["timeframe"] = timeframe
+    result = await backtest_service.run_backtest(
+        symbol=sym, data=data, timeframe=timeframe,
+        initial_balance=initial_balance, leverage=leverage,
+        risk_per_trade=risk_per_trade,
+    )
     return result
 
 
@@ -48,7 +51,7 @@ async def save_backtest(
     data = await market_service.get_ohlcv(sym, "binance", req.timeframe, 500)
     if not data:
         raise HTTPException(400, "No data available")
-    result = backtest_service.run_backtest(data, leverage=3)
+    result = await backtest_service.run_backtest(symbol=sym, data=data, timeframe=req.timeframe, leverage=3)
     if "error" in result:
         raise HTTPException(400, result["error"])
 
@@ -61,9 +64,10 @@ async def save_backtest(
         win_rate=result.get("win_rate", 0),
         profit_factor=result.get("profit_factor", 0),
         sharpe_ratio=result.get("sharpe_ratio", 0),
-        max_drawdown=result.get("max_drawdown", 0),
+        max_drawdown=result.get("max_drawdown_percent", 0),
         total_return=result.get("total_return", 0),
         avg_risk_reward=result.get("avg_risk_reward", 0),
+        monthly_results=result.get("monthly_returns"),
     )
     db.add(bt)
     await db.commit()
