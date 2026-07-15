@@ -25,6 +25,7 @@ from app.services.binance_ws import binance_ws
 from app.services.market_coverage import market_coverage
 from app.services.streaming import streaming_service
 from app.services.exchange.manager import exchange_manager
+from app.services.paper_trading import paper_trading_service
 
 
 @asynccontextmanager
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     await alert_service.start()
     await streaming_service.start()
     await exchange_manager.start_reconnect_loop("binance")
+    await paper_trading_service.start_monitoring()
     try:
         await redis_client.ping()
         logger.info("Redis connected")
@@ -50,6 +52,7 @@ async def lifespan(app: FastAPI):
     yield
     await alert_service.stop()
     await streaming_service.stop()
+    await paper_trading_service.stop_monitoring()
     await binance_ws.stop()
     await ws_manager.stop()
     logger.info(f"Server shutting down")
