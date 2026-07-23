@@ -95,6 +95,11 @@ class IndicatorService:
         return tr.rolling(period).mean().dropna().tolist()
 
     @staticmethod
+    def latest_atr(data: list, period: int = 14) -> float | None:
+        values = IndicatorService.atr(data, period)
+        return float(values[-1]) if values else None
+
+    @staticmethod
     def supertrend(data: list, period: int = 10, multiplier: float = 3.0) -> dict:
         if not data:
             return {'supertrend': [], 'direction': [], 'current_direction': 'unavailable'}

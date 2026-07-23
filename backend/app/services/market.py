@@ -6,6 +6,7 @@ from app.core.logging import logger
 class MarketService:
     def __init__(self):
         self.logger = logger
+        self._exchange_semaphore = asyncio.Semaphore(2)
         self.exchanges = {
             'binance': ccxt.binance({
                 'enableRateLimit': True,
@@ -18,6 +19,13 @@ class MarketService:
             'coinbase': ccxt.coinbase(),
         }
 
+    async def _call_exchange(self, method, *args, **kwargs):
+        async with self._exchange_semaphore:
+            return await asyncio.wait_for(
+                asyncio.to_thread(method, *args, **kwargs),
+                timeout=12,
+            )
+
     async def get_ohlcv(self, symbol: str, exchange: str = 'binance', timeframe: str = '1h', limit: int = 200) -> list:
         cache_key = f"ohlcv:{exchange}:{symbol}:{timeframe}:{limit}"
         cached = await cache_get(cache_key)
@@ -26,7 +34,7 @@ class MarketService:
 
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            ohlcv = await asyncio.to_thread(
+            ohlcv = await self._call_exchange(
                 ex.fetch_ohlcv, symbol, timeframe, limit=limit,
             )
             result = [
@@ -49,7 +57,7 @@ class MarketService:
     async def get_ticker(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            t = await asyncio.to_thread(ex.fetch_ticker, symbol)
+            t = await self._call_exchange(ex.fetch_ticker, symbol)
             return {
                 'symbol': t['symbol'],
                 'price': t['last'],
@@ -68,7 +76,7 @@ class MarketService:
     async def get_orderbook(self, symbol: str, exchange: str = 'binance', limit: int = 50) -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            ob = await asyncio.to_thread(ex.fetch_order_book, symbol, limit)
+            ob = await self._call_exchange(ex.fetch_order_book, symbol, limit)
             return {
                 'bids': ob['bids'][:10],
                 'asks': ob['asks'][:10],
@@ -80,7 +88,7 @@ class MarketService:
     async def get_funding_rate(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            funding = await asyncio.to_thread(ex.fetch_funding_rate, symbol)
+            funding = await self._call_exchange(ex.fetch_funding_rate, symbol)
             return {
                 'symbol': funding['symbol'],
                 'funding_rate': funding['fundingRate'],
@@ -92,7 +100,7 @@ class MarketService:
     async def get_open_interest(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            oi = await asyncio.to_thread(ex.fetch_open_interest, symbol)
+            oi = await self._call_exchange(ex.fetch_open_interest, symbol)
             return {
                 'symbol': oi['symbol'],
                 'open_interest': oi['openInterest'],

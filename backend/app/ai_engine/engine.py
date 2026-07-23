@@ -2,6 +2,7 @@
 AI Signal Engine - generates complete trade setups with entry zones, targets, and analysis
 """
 
+import asyncio
 from typing import Optional, List
 from app.services.ai_analysis import ai_engine as core_ai
 from app.services.market import market_service
@@ -12,6 +13,9 @@ from app.core.logging import logger
 scorer = SignalScorer()
 
 class AIEngine:
+    def __init__(self):
+        self._scan_lock = asyncio.Lock()
+
     async def generate_signal(self, symbol: str, timeframe: str = '1h') -> Optional[dict]:
         try:
             data = await market_service.get_ohlcv(symbol, 'binance', timeframe, 200)
@@ -22,8 +26,10 @@ class AIEngine:
             if not analysis or analysis.get('confidence', 0) == 0:
                 return None
 
-            futures = await market_service.get_funding_rate(symbol)
-            oi = await market_service.get_open_interest(symbol)
+            futures, oi = await asyncio.gather(
+                market_service.get_funding_rate(symbol),
+                market_service.get_open_interest(symbol),
+            )
 
             scoring = scorer.calculate(analysis, futures_data={
                 'funding_rate': futures.get('funding_rate', 0),
@@ -31,7 +37,7 @@ class AIEngine:
             })
 
             current_price = data[-1]['close']
-            atr = indicator_service.atr(data)
+            atr = indicator_service.latest_atr(data)
             atr_val = atr if atr else current_price * 0.02
 
             is_long = scoring['direction'] == 'long'
@@ -73,6 +79,36 @@ class AIEngine:
             return None
 
     async def scan_all(self, symbols: Optional[List[str]] = None, min_confidence: float = 50) -> List[dict]:
+        from app.core.cache import cache_get, cache_set
+
+        cache_key = "legacy:signal_scan:all"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, list):
+            return [
+                signal for signal in cached
+                if signal.get("confidence", 0) >= min_confidence
+            ][:20]
+
+        async with self._scan_lock:
+            cached = await cache_get(cache_key)
+            if isinstance(cached, list):
+                return [
+                    signal for signal in cached
+                    if signal.get("confidence", 0) >= min_confidence
+                ][:20]
+
+            results = await self._scan_uncached(symbols, 0)
+            await cache_set(cache_key, results, ttl=30)
+            return [
+                signal for signal in results
+                if signal.get("confidence", 0) >= min_confidence
+            ][:20]
+
+    async def _scan_uncached(
+        self,
+        symbols: Optional[List[str]],
+        min_confidence: float,
+    ) -> List[dict]:
         if symbols is None:
             from app.services.market_coverage import market_coverage
             try:
@@ -83,12 +119,17 @@ class AIEngine:
                            'SUI/USDT', 'ATOM/USDT', 'UNI/USDT', 'ARB/USDT', 'OP/USDT',
                            'INJ/USDT', 'SEI/USDT', 'APT/USDT', 'NEAR/USDT', 'FIL/USDT']
 
-        results = []
-        for sym in symbols:
-            signal = await self.generate_signal(sym, '1h')
-            if signal and signal['confidence'] >= min_confidence:
-                results.append(signal)
+        semaphore = asyncio.Semaphore(3)
 
+        async def scan_symbol(sym: str) -> Optional[dict]:
+            async with semaphore:
+                signal = await self.generate_signal(sym, '1h')
+                if signal and signal['confidence'] >= min_confidence:
+                    return signal
+                return None
+
+        scanned = await asyncio.gather(*(scan_symbol(sym) for sym in symbols))
+        results = [signal for signal in scanned if signal is not None]
         return sorted(results, key=lambda r: r['confidence'], reverse=True)[:20]
 
     def _generate_reasons(self, analysis: dict, scoring: dict, is_long: bool, conf: float) -> List[str]:

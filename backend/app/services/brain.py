@@ -135,7 +135,12 @@ class AICentralBrain:
                     scores[label] = 50.0
                     engine_results[label] = {"error": str(result)}
                 elif isinstance(result, dict):
-                    scores[label] = result.get("score", 50.0)
+                    raw_score = result.get("score", 50.0)
+                    scores[label] = (
+                        float(raw_score)
+                        if isinstance(raw_score, (int, float))
+                        else 50.0
+                    )
                     engine_results[label] = result
                     if result.get("factors"):
                         factors.extend(result["factors"])
@@ -263,7 +268,8 @@ class AICentralBrain:
         signals = []
         weights = []
 
-        tech_score = technical.get("score", 50) if isinstance(technical, dict) else 50
+        tech_raw = technical.get("score", 50) if isinstance(technical, dict) else 50
+        tech_score = float(tech_raw) if isinstance(tech_raw, (int, float)) else 50.0
         if tech_score < 25:
             signals.append(90)
             weights.append(0.25)
@@ -277,7 +283,8 @@ class AICentralBrain:
             signals.append(30)
             weights.append(0.25)
 
-        onchain_score = onchain.get("score", 50) if isinstance(onchain, dict) else 50
+        onchain_raw = onchain.get("score", 50) if isinstance(onchain, dict) else 50
+        onchain_score = float(onchain_raw) if isinstance(onchain_raw, (int, float)) else 50.0
         if onchain_score < 25:
             signals.append(85)
             weights.append(0.15)
@@ -289,7 +296,8 @@ class AICentralBrain:
             weights.append(0.15)
 
         if isinstance(macro, dict):
-            vix = macro.get("vix", {}).get("value", 15) if isinstance(macro.get("vix"), dict) else 15
+            vix_raw = macro.get("vix", {}).get("value", 15) if isinstance(macro.get("vix"), dict) else 15
+            vix = float(vix_raw) if isinstance(vix_raw, (int, float)) else 15.0
             env = macro.get("risk_environment", "mixed")
             if vix > 30:
                 signals.append(85)
@@ -320,7 +328,8 @@ class AICentralBrain:
 
             ls = derivatives.get("long_short_ratio", {})
             if isinstance(ls, dict):
-                ls_val = ls.get("long_short_ratio", 1.0)
+                ls_raw = ls.get("long_short_ratio", 1.0)
+                ls_val = float(ls_raw) if isinstance(ls_raw, (int, float)) else 1.0
                 if ls_val > 2.0:
                     signals.append(40)
                     weights.append(0.10)
@@ -333,10 +342,10 @@ class AICentralBrain:
 
             liqs = derivatives.get("liquidations", {})
             if isinstance(liqs, dict):
-                total_long_value = liqs.get("total_long_value", 0)
-                total_short_value = liqs.get("total_short_value", 0)
-                total_longs = liqs.get("total_long_liquidations", 0)
-                total_shorts = liqs.get("total_short_liquidations", 0)
+                total_long_value = liqs.get("total_long_value") or 0
+                total_short_value = liqs.get("total_short_value") or 0
+                total_longs = liqs.get("total_long_liquidations") or 0
+                total_shorts = liqs.get("total_short_liquidations") or 0
                 long_liq_total = total_long_value * max(total_longs, 1)
                 short_liq_total = total_short_value * max(total_shorts, 1)
                 if long_liq_total > short_liq_total * 2:
@@ -363,7 +372,8 @@ class AICentralBrain:
         if isinstance(derivatives, dict):
             ls = derivatives.get("long_short_ratio", {})
             if isinstance(ls, dict):
-                ls_val = ls.get("long_short_ratio", 1.0)
+                ls_raw = ls.get("long_short_ratio", 1.0)
+                ls_val = float(ls_raw) if isinstance(ls_raw, (int, float)) else 1.0
                 if ls_val < 0.4:
                     short_squeeze_signals.append(95)
                     weights.append(0.35)
@@ -383,8 +393,10 @@ class AICentralBrain:
 
             funding = derivatives.get("funding", {})
             if isinstance(funding, dict):
-                funding_rate = abs(funding.get("funding_rate_raw", 0))
-                annualized = funding.get("annualized_rate", 0)
+                funding_raw = funding.get("funding_rate_raw") or 0
+                annualized_raw = funding.get("annualized_rate") or 0
+                funding_rate = abs(funding_raw) if isinstance(funding_raw, (int, float)) else 0
+                annualized = annualized_raw if isinstance(annualized_raw, (int, float)) else 0
                 if abs(annualized) > 50:
                     if funding.get("signal") == "bullish":
                         short_squeeze_signals.append(80)
@@ -944,7 +956,7 @@ class AICentralBrain:
             if not macro_engine:
                 return {"score": 50.0, "factors": ["Macro engine unavailable"]}
 
-            snapshot = macro_engine.get_macro_snapshot()
+            snapshot = await asyncio.to_thread(macro_engine.get_macro_snapshot)
             if not snapshot.get("available"):
                 return {"score": None, "available": False, "factors": ["Macro data unavailable"]}
             score = 50.0
@@ -1198,7 +1210,12 @@ class AICentralBrain:
             if market_service:
                 ob = await market_service.get_orderbook(symbol)
                 if isinstance(ob, dict):
-                    return ob.get(side, [])
+                    levels = ob.get(side, [])
+                    return [
+                        {"price": float(level[0]), "amount": float(level[1])}
+                        for level in levels
+                        if isinstance(level, (list, tuple)) and len(level) >= 2
+                    ]
             return []
         except Exception:
             return []
@@ -1215,16 +1232,19 @@ class AICentralBrain:
 
     async def _get_top_symbols_scores(self) -> List[float]:
         try:
-            if not market_coverage:
+            if not market_coverage or not market_service:
                 return []
             symbols = await market_coverage.get_top_symbols(count=10)
-            scores = []
-            for s in symbols:
-                try:
-                    assessment = await self.assess_market(s)
-                    scores.append(assessment.get("overall_market_score", 50))
-                except Exception:
-                    scores.append(50)
+            tickers = await asyncio.gather(
+                *(market_service.get_ticker(symbol) for symbol in symbols),
+                return_exceptions=True,
+            )
+            scores: List[float] = []
+            for ticker in tickers:
+                if isinstance(ticker, dict):
+                    change = ticker.get("change_percent")
+                    if isinstance(change, (int, float)):
+                        scores.append(max(0.0, min(100.0, 50.0 + change * 5.0)))
             return scores
         except Exception:
             return []

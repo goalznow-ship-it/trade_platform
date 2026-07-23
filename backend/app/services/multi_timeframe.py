@@ -53,43 +53,50 @@ class MultiTimeframeAnalyzer:
         results = {}
         errors = []
 
-        for tf in timeframes:
-            try:
-                limit = TIMEFRAME_LIMITS.get(tf, 100)
-                data = await market_service.get_ohlcv(symbol, "binance", tf, limit)
-                if not data or len(data) < 30:
-                    errors.append(f"{tf}: insufficient data ({len(data) if data else 0} candles)")
-                    continue
+        semaphore = asyncio.Semaphore(3)
 
-                smc_data = smc_engine.analyze(data)
-                score_result = await institutional_scorer.score(symbol, data, tf, smc_data)
+        async def analyze_timeframe(tf: str):
+            async with semaphore:
+                try:
+                    limit = TIMEFRAME_LIMITS.get(tf, 100)
+                    data = await market_service.get_ohlcv(symbol, "binance", tf, limit)
+                    if not data or len(data) < 30:
+                        return None, f"{tf}: insufficient data ({len(data) if data else 0} candles)"
 
-                results[tf] = {
-                    "score": score_result["total_score"],
-                    "abs_score": score_result["abs_score"],
-                    "direction": score_result["direction"],
-                    "classification": score_result["classification"],
-                    "scores": score_result["scores"],
-                    "risk_level": score_result["risk_level"],
-                    "trend": smc_data.get("trend", "unknown"),
-                    "details": score_result.get("details", {}),
-                    "smc": {
-                        "bos_count": smc_data.get("bos_count", 0),
-                        "choch_count": smc_data.get("choch_count", 0),
-                        "net_bos": smc_data.get("net_bos", 0),
-                        "net_choch": smc_data.get("net_choch", 0),
-                        "premium_discount": smc_data.get("premium_discount", {}),
-                        "liquidity_sweep": smc_data.get("liquidity_sweep"),
-                        "displacement": smc_data.get("displacement"),
-                    },
-                    "candle_count": len(data),
-                }
+                    smc_data = smc_engine.analyze(data)
+                    score_result = await institutional_scorer.score(symbol, data, tf, smc_data)
 
-                await asyncio.sleep(0.05)
+                    return {
+                        "score": score_result["total_score"],
+                        "abs_score": score_result["abs_score"],
+                        "direction": score_result["direction"],
+                        "classification": score_result["classification"],
+                        "scores": score_result["scores"],
+                        "risk_level": score_result["risk_level"],
+                        "trend": smc_data.get("trend", "unknown"),
+                        "details": score_result.get("details", {}),
+                        "smc": {
+                            "bos_count": smc_data.get("bos_count", 0),
+                            "choch_count": smc_data.get("choch_count", 0),
+                            "net_bos": smc_data.get("net_bos", 0),
+                            "net_choch": smc_data.get("net_choch", 0),
+                            "premium_discount": smc_data.get("premium_discount", {}),
+                            "liquidity_sweep": smc_data.get("liquidity_sweep"),
+                            "displacement": smc_data.get("displacement"),
+                        },
+                        "candle_count": len(data),
+                    }, None
+                except Exception as exc:
+                    return None, f"{tf}: {exc}"
 
-            except Exception as e:
-                errors.append(f"{tf}: {str(e)}")
-                continue
+        analyzed = await asyncio.gather(
+            *(analyze_timeframe(tf) for tf in timeframes),
+        )
+        for tf, (result, error) in zip(timeframes, analyzed):
+            if result is not None:
+                results[tf] = result
+            if error:
+                errors.append(error)
 
         if not results:
             return {

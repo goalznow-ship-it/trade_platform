@@ -47,10 +47,10 @@ services:
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
-      DEBUG: ${DEBUG:-true}
+      DEBUG: ${DEBUG:-false}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
-      ENABLE_BACKGROUND_SERVICES: ${ENABLE_BACKGROUND_SERVICES:-false}
+      ENABLE_BACKGROUND_SERVICES: ${ENABLE_BACKGROUND_SERVICES:-true}
       TRADING_ENABLED: ${TRADING_ENABLED:-false}
     depends_on:
       postgres:

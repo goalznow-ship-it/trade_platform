@@ -58,7 +58,6 @@ async def scan_all(
 ):
     await _enforce_signal_limit(user)
     signals = await ai_engine.scan_all(min_confidence=min_confidence)
-    signals["remaining_daily"] = max(0, {"free": 3, "pro": 999999, "elite": 999999}.get(user.subscription_tier or "free", 3) - daily_tracker.daily_usage(user.id))
     return signals
 
 @router.get("/history")

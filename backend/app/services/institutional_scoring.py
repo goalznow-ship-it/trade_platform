@@ -401,7 +401,7 @@ class InstitutionalScorer:
         lows = [d["low"] for d in data]
 
         volatility = np.std([(highs[i] - lows[i]) / closes[i] for i in range(len(closes))]) * 100 if len(closes) > 1 else 0
-        atr = indicator_service.atr(data)
+        atr = indicator_service.latest_atr(data)
         atr_pct = atr / closes[-1] * 100 if atr and closes else 0
 
         if atr_pct < 1:
@@ -473,7 +473,11 @@ class InstitutionalScorer:
             "macd_histogram": round(macd.get("current_histogram", 0), 4) if isinstance(macd, dict) else None,
             "adx": round(adx.get("current_adx", 0), 1) if isinstance(adx, dict) else None,
             "supertrend": adx.get("current_direction", "neutral") if isinstance(adx, dict) else "neutral",
-            "atr": round(indicator_service.atr(data), 2) if indicator_service.atr(data) else None,
+            "atr": (
+                round(atr, 2)
+                if (atr := indicator_service.latest_atr(data)) is not None
+                else None
+            ),
             "current_price": closes[-1] if closes else 0,
             "volume_ratio": round(
                 data[-1]["volume"] / (np.mean([d["volume"] for d in data[-20:]]) or 1), 2

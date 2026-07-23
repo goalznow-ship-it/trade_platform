@@ -162,7 +162,7 @@ class StreamingService:
         from app.services.macro_engine import macro_engine
         while self._running:
             try:
-                snapshot = macro_engine.get_macro_snapshot()
+                snapshot = await asyncio.to_thread(macro_engine.get_macro_snapshot)
                 await ws_manager.broadcast(Channel.MACRO, "macro_update", {
                     "data": snapshot,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -210,7 +210,12 @@ class StreamingService:
                     *(self._ticker_or_none(symbol) for symbol in symbols),
                     return_exceptions=False,
                 )
-                changes = [t.get("change_percent", 0) for t in tickers if t]
+                changes = [
+                    change
+                    for ticker in tickers
+                    if isinstance(ticker, dict)
+                    and isinstance((change := ticker.get("change_percent")), (int, float))
+                ]
                 advancing = sum(1 for change in changes if change > 0)
                 unchanged = sum(1 for change in changes if change == 0)
                 declining = sum(1 for change in changes if change < 0)
@@ -237,17 +242,17 @@ class StreamingService:
             return None
 
     async def _stream_signals(self, symbols: List[str]):
-        from app.services.institutional_signals import institutional_signal_generator
+        from app.services.institutional_signals import institutional_signal_engine
         while self._running:
             results = []
             for sym in symbols[:10]:
                 try:
-                    signal = await institutional_signal_generator.generate_signal(sym, "1h")
-                    if signal and signal.get("score", 0) >= 70:
+                    signal = await institutional_signal_engine.generate_signal(sym, "1h")
+                    if signal and signal.get("confidence", 0) >= 70:
                         results.append(signal)
                 except Exception:
                     pass
-            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
             if results:
                 await ws_manager.broadcast(Channel.SIGNALS, "signal_update", {
                     "data": results[:5],

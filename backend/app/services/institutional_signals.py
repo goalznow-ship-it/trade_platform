@@ -23,6 +23,9 @@ from app.core.logging import logger
 
 
 class InstitutionalSignalEngine:
+    def __init__(self):
+        self._scan_lock = asyncio.Lock()
+
     async def generate_signal(
         self,
         symbol: str,
@@ -30,33 +33,54 @@ class InstitutionalSignalEngine:
         capital: float = 10000,
         risk_percent: float = 0.02,
     ) -> dict:
+        from app.core.cache import cache_get, cache_set
+
+        cache_key = (
+            f"institutional:signal:{symbol}:{timeframe}:"
+            f"{capital:.2f}:{risk_percent:.4f}"
+        )
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
+
         data = await market_service.get_ohlcv(symbol, "binance", timeframe, 200)
         if not data or len(data) < 50:
-            return self._empty_signal(symbol, timeframe, "Insufficient OHLCV data")
+            result = self._empty_signal(symbol, timeframe, "Insufficient OHLCV data")
+            await cache_set(cache_key, result, ttl=10)
+            return result
 
         current_price = data[-1]["close"]
 
-        mtf = await multi_timeframe.analyze(symbol)
         smc_data = smc_engine.analyze(data)
         inst_score = await institutional_scorer.score(symbol, data, timeframe, smc_data)
 
-        futures_data = await self._get_futures_data(symbol)
         details = inst_score.get("details", {})
-        atr = details.get("atr") or indicator_service.atr(data)
+        atr = details.get("atr") or indicator_service.latest_atr(data)
 
         direction = inst_score["direction"]
-        if direction == "neutral":
-            if mtf.get("aggregated") and mtf["aggregated"]["direction"] != "neutral":
-                direction = mtf["aggregated"]["direction"]
-                inst_score["direction"] = direction
-
         abs_score = inst_score["abs_score"]
         if abs_score < 70:
-            return {
+            result = {
                 **self._empty_signal(symbol, timeframe, f"Score {abs_score}/100 below 70 threshold"),
                 "institutional_score": inst_score,
                 "direction": direction,
+                "confidence": abs_score,
+                "current_price": round(current_price, 4),
             }
+            await cache_set(cache_key, result, ttl=15)
+            return result
+
+        # The expensive six-timeframe and derivatives analysis only adds value
+        # after the primary institutional score passes the execution gate.
+        mtf, futures_data = await asyncio.gather(
+            multi_timeframe.analyze(symbol),
+            self._get_futures_data(symbol),
+        )
+        if direction == "neutral":
+            aggregated = mtf.get("aggregated")
+            if aggregated and aggregated.get("direction") != "neutral":
+                direction = aggregated["direction"]
+                inst_score["direction"] = direction
 
         entry_zone = self._calculate_entry_zone(current_price, atr, direction)
         stop_loss = self._calculate_stop_loss(current_price, atr, data, direction, smc_data)
@@ -117,7 +141,7 @@ class InstitutionalSignalEngine:
         }
         execution = await self._get_execution_approval(trade_request)
 
-        return {
+        result = {
             "symbol": symbol,
             "timeframe": timeframe,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -159,37 +183,50 @@ class InstitutionalSignalEngine:
                 if details.get(key) is not None
             },
         }
+        await cache_set(cache_key, result, ttl=15)
+        return result
 
     async def scan_all(self, min_score: float = 70, limit: int = 10) -> List[dict]:
         from app.services.market_coverage import market_coverage
         from app.core.cache import cache_get, cache_set
 
-        cache_key = f"institutional:scan:{min_score:.1f}:{limit}"
+        cache_key = "institutional:scan:all"
         cached = await cache_get(cache_key)
         if isinstance(cached, list):
-            return cached
+            return [
+                signal for signal in cached
+                if signal.get("confidence", 0) >= min_score
+            ][:limit]
 
-        symbols = await market_coverage.get_top_symbols(30)
-        semaphore = asyncio.Semaphore(4)
+        async with self._scan_lock:
+            cached = await cache_get(cache_key)
+            if isinstance(cached, list):
+                return [
+                    signal for signal in cached
+                    if signal.get("confidence", 0) >= min_score
+                ][:limit]
 
-        async def analyze_symbol(symbol: str) -> Optional[dict]:
-            async with semaphore:
-                try:
-                    signal = await self.generate_signal(symbol)
-                    if signal.get("confidence", 0) >= min_score:
-                        return signal
-                except Exception as e:
-                    logger.debug(f"Scan error {symbol}: {e}")
-            return None
+            symbols = await market_coverage.get_top_symbols(30)
+            semaphore = asyncio.Semaphore(6)
 
-        scanned = await asyncio.gather(
-            *(analyze_symbol(symbol) for symbol in symbols),
-        )
-        results = [signal for signal in scanned if signal is not None]
-        results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
-        final = results[:limit]
-        await cache_set(cache_key, final, ttl=30)
-        return final
+            async def analyze_symbol(symbol: str) -> Optional[dict]:
+                async with semaphore:
+                    try:
+                        return await self.generate_signal(symbol)
+                    except Exception as e:
+                        logger.debug(f"Scan error {symbol}: {e}")
+                return None
+
+            scanned = await asyncio.gather(
+                *(analyze_symbol(symbol) for symbol in symbols),
+            )
+            results = [signal for signal in scanned if signal is not None]
+            results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
+            await cache_set(cache_key, results, ttl=30)
+            return [
+                signal for signal in results
+                if signal.get("confidence", 0) >= min_score
+            ][:limit]
 
     def _calculate_entry_zone(self, price: float, atr: float, direction: str) -> dict:
         if direction == "long":

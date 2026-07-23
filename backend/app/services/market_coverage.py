@@ -14,7 +14,7 @@ TOP_30_FALLBACK = [
     "DOGE/USDT", "ADA/USDT", "SUI/USDT", "LINK/USDT", "AVAX/USDT",
     "DOT/USDT", "LTC/USDT", "TRX/USDT", "APT/USDT", "ATOM/USDT",
     "ARB/USDT", "OP/USDT", "NEAR/USDT", "FIL/USDT", "AAVE/USDT",
-    "INJ/USDT", "SEI/USDT", "TIA/USDT", "WIF/USDT", "PEPE/USDT",
+    "INJ/USDT", "SEI/USDT", "TIA/USDT", "WIF/USDT", "1000PEPE/USDT",
     "ETC/USDT", "BCH/USDT", "UNI/USDT", "MKR/USDT", "FET/USDT",
 ]
 
@@ -27,19 +27,33 @@ class MarketCoverageService:
         self._fallback = TOP_30_FALLBACK
         self._logger = logger
 
+    @staticmethod
+    def _normalize_symbols(symbols: List[str]) -> List[str]:
+        # Repair symbols cached by older releases that used spot asset names
+        # for Binance perpetual contracts.
+        aliases = {"PEPE/USDT": "1000PEPE/USDT"}
+        return list(dict.fromkeys(aliases.get(symbol, symbol) for symbol in symbols))
+
     async def get_top_symbols(self, count: int = 30, force_refresh: bool = False) -> List[str]:
         if force_refresh:
             return await self._fetch_and_cache()
 
         cached = await cache_get(self._cache_key)
         if cached is not None and isinstance(cached, list) and len(cached) >= count:
-            return cached[:count]
+            normalized = self._normalize_symbols(cached)
+            if normalized != cached:
+                await cache_set(
+                    self._cache_key,
+                    normalized,
+                    ttl=self._update_interval_hours * 3600,
+                )
+            return normalized[:count]
 
         return await self._fetch_and_cache()
 
     async def _fetch_and_cache(self) -> List[str]:
         try:
-            symbols = await self._fetch_top_from_exchange()
+            symbols = self._normalize_symbols(await self._fetch_top_from_exchange())
             if symbols and len(symbols) >= 20:
                 await cache_set(self._cache_key, symbols, ttl=self._update_interval_hours * 3600)
                 await cache_set(self._cache_key_timestamp, datetime.now(timezone.utc).isoformat(),
@@ -54,21 +68,27 @@ class MarketCoverageService:
 
     async def _fetch_top_from_exchange(self) -> List[str]:
         try:
+            import asyncio
             import ccxt
             ex = ccxt.binance({
                 'enableRateLimit': True,
                 'options': {'defaultType': 'future'}
             })
-            markets = ex.load_markets()
-            tickers = ex.fetch_tickers()
+            markets = await asyncio.to_thread(ex.load_markets)
+            tickers = await asyncio.to_thread(ex.fetch_tickers)
 
             usdt_perps = []
-            for symbol, ticker in tickers.items():
-                if symbol.endswith("/USDT") and symbol in markets:
-                    m = markets[symbol]
-                    if m.get('future', False) or m.get('linear', False):
-                        quote_volume = ticker.get('quoteVolume', 0) or 0
-                        usdt_perps.append((symbol, quote_volume))
+            for symbol, market in markets.items():
+                if (
+                    market.get("active", True)
+                    and market.get("swap")
+                    and market.get("linear")
+                    and market.get("settle") == "USDT"
+                ):
+                    ticker = tickers.get(symbol, {})
+                    quote_volume = ticker.get("quoteVolume", 0) or 0
+                    api_symbol = f"{market.get('base')}/USDT"
+                    usdt_perps.append((api_symbol, quote_volume))
 
             usdt_perps.sort(key=lambda x: x[1], reverse=True)
             top = [s[0] for s in usdt_perps[:40]]

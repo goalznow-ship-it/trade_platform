@@ -43,6 +43,7 @@ interface InstitutionalSignal {
   entry_zone?: { min?: number; max?: number; mid?: number }
   indicators?: Record<string, unknown>
   institutional_score?: {
+    abs_score?: number
     long_probability?: number
     short_probability?: number
     risk_level?: string
@@ -69,7 +70,7 @@ export function TerminalPage() {
           .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
           .catch(() => null)
         setSignal(institutional)
-        if (institutional && !institutional.error) {
+        if (institutional) {
           const direction = institutional.direction
           const score = institutional.institutional_score
           const factorScores: Record<string, number> = {}
@@ -80,8 +81,8 @@ export function TerminalPage() {
             }
           }
           setAnalysis({
-            prediction: direction,
-            confidence: institutional.confidence,
+            prediction: institutional.error ? "neutral" : direction,
+            confidence: institutional.confidence ?? score?.abs_score,
             current_price: institutional.current_price,
             long_probability: score?.long_probability,
             short_probability: score?.short_probability,
@@ -93,7 +94,7 @@ export function TerminalPage() {
               macd: institutional.indicators?.macd_histogram,
             },
           })
-          setExplain({
+          setExplain(institutional.error ? null : {
             reasons: institutional.reasons || [],
             warnings: [
               institutional.invalidation,
@@ -114,11 +115,7 @@ export function TerminalPage() {
             },
           })
         } else {
-          setAnalysis(institutional ? {
-            prediction: "neutral",
-            confidence: 0,
-            current_price: institutional.current_price,
-          } : null)
+          setAnalysis(null)
           setExplain(null)
         }
       } catch {} finally {

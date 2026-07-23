@@ -25,6 +25,9 @@ async def websocket_v2(websocket: WebSocket, token: str = Query("")):
             await ws_manager.handle_message(client, raw)
     except WebSocketDisconnect:
         pass
+    except RuntimeError as e:
+        if "not connected" not in str(e).lower():
+            logger.error(f"WebSocket v2 error: {e}")
     except Exception as e:
         logger.error(f"WebSocket v2 error: {e}")
     finally:
@@ -51,6 +54,9 @@ async def websocket_v2_channel(websocket: WebSocket, channel: str, token: str = 
             await ws_manager.handle_message(client, raw)
     except WebSocketDisconnect:
         pass
+    except RuntimeError as e:
+        if "not connected" not in str(e).lower():
+            logger.error(f"WebSocket v2 channel error: {e}")
     except Exception as e:
         logger.error(f"WebSocket v2 channel error: {e}")
     finally:
@@ -78,6 +84,9 @@ async def websocket_ticker(websocket: WebSocket, symbol: str, token: str = Query
             await ws_manager.handle_message(client, raw)
     except WebSocketDisconnect:
         pass
+    except RuntimeError as e:
+        if "not connected" not in str(e).lower():
+            logger.error(f"WebSocket ticker error: {e}")
     except Exception as e:
         logger.error(f"WebSocket ticker error: {e}")
     finally:

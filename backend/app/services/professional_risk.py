@@ -82,7 +82,7 @@ class ProfessionalRiskEngine:
         if len(data) < 20:
             return None
 
-        atr = indicator_service.atr(data)
+        atr = indicator_service.latest_atr(data)
         if not atr:
             return None
 

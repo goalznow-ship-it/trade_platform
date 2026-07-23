@@ -324,7 +324,7 @@ class ExecutionEngine:
                     data = await market_service.get_ohlcv(symbol, "binance", "1h", 100)
                     if data:
                         from app.services.indicators import indicator_service
-                        atr_val = indicator_service.atr(data)
+                        atr_val = indicator_service.latest_atr(data)
                 except Exception:
                     pass
 
