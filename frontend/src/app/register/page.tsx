@@ -22,7 +22,7 @@ export default function RegisterPage() {
     setError("")
     if (!username || !email || !password) { setError("Please fill in all fields"); return }
     if (password !== confirmPassword) { setError("Passwords do not match"); return }
-    if (password.length < 6) { setError("Password must be at least 6 characters"); return }
+    if (password.length < 10) { setError("Password must be at least 10 characters"); return }
     setLoading(true)
     try {
       await register(username, email, password)

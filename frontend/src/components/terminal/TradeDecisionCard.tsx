@@ -10,6 +10,8 @@ interface SuggestionsData {
   entry?: number
   stop_loss?: number
   take_profit?: number
+  take_profit_2?: number
+  take_profit_3?: number
   suggested_leverage?: number
   position_size?: number
   [key: string]: unknown
@@ -131,7 +133,7 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
           <div className="p-2.5 rounded-lg bg-green-900/10 border border-green-900/20">
             <div className="text-[10px] text-green-400/70 mb-0.5">Take Profit 2</div>
             <div className="text-sm font-bold text-green-400/70 font-mono">
-              ${((suggestions.take_profit || 0) * 1.03).toFixed(2)}
+              ${(suggestions.take_profit_2 || 0).toFixed(2)}
             </div>
           </div>
         </div>

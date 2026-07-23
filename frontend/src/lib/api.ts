@@ -42,7 +42,13 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    const detail = err.detail
+    const message = typeof detail === "string"
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((item) => item?.msg || "Invalid input").join(", ")
+        : res.statusText || "Request failed"
+    throw new Error(message)
   }
   return res.json()
 }
@@ -307,7 +313,7 @@ export const api = {
 
   // Institutional
   getInstitutionalSignal: (symbol: string, timeframe = "1h", capital = 10000, riskPercent = 0.02) =>
-    request<any>(`/api/v1/institutional/signal/${symbol}?timeframe=${timeframe}&capital=${capital}&risk_percent=${riskPercent}`),
+    request<any>(`/api/v1/institutional/signal/${encodeURIComponent(symbol.replace("/", "-"))}?timeframe=${encodeURIComponent(timeframe)}&capital=${capital}&risk_percent=${riskPercent}`),
 
   institutionalScan: (minScore = 70, limit = 10) =>
     request<any>(`/api/v1/institutional/scan?min_score=${minScore}&limit=${limit}`),

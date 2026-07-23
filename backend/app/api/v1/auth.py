@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from pydantic import BaseModel, Field
 from app.core.database import get_db
 from app.core.security import (
@@ -52,7 +52,15 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == req.username))
+    identifier = req.username.strip().lower()
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.username) == identifier,
+                func.lower(User.email) == identifier,
+            )
+        )
+    )
     user = result.scalar_one_or_none()
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(401, "Invalid credentials")

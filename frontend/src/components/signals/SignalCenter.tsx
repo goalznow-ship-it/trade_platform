@@ -45,8 +45,8 @@ export function SignalCenter() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.scanAllV2(highConfidenceOnly ? 80 : 0)
-      setSignals(Array.isArray(data) ? data : [])
+      const data = await api.institutionalScan(highConfidenceOnly ? 80 : 70, 30)
+      setSignals(Array.isArray(data?.signals) ? data.signals : [])
     } catch {
       setSignals([])
     } finally {
@@ -185,5 +185,4 @@ export function SignalCenter() {
     </div>
   )
 }
-
 

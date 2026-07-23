@@ -6,17 +6,17 @@ import { useMarketStore } from "@/store/market"
 import { cn } from "@/lib/utils"
 import {
   createChart, ColorType, CrosshairMode, LineStyle,
-  CandlestickSeries, LineSeries, createSeriesMarkers,
+  CandlestickSeries, createSeriesMarkers,
   type IChartApi, type ISeriesApi, type Time, type SeriesMarker,
 } from "lightweight-charts"
 
 const TIMEFRAMES = [
-  { id: "1m", label: "1m" },
   { id: "5m", label: "5m" },
   { id: "15m", label: "15m" },
   { id: "1h", label: "1H" },
   { id: "4h", label: "4H" },
   { id: "1d", label: "1D" },
+  { id: "1w", label: "1W" },
 ]
 
 interface RawOHLCVItem {
@@ -84,14 +84,23 @@ interface ExplainData {
 interface AIChartProps {
   analysis?: AnalysisData | null
   explain?: ExplainData | null
+  signal?: {
+    error?: string
+    direction?: string
+    confidence?: number
+    entry_zone?: { min?: number; max?: number; mid?: number }
+    stop_loss?: number
+    take_profit_1?: number
+    take_profit_2?: number
+    take_profit_3?: number
+    execution?: { approved?: boolean }
+  } | null
 }
 
-export function AIChart({ analysis, explain }: AIChartProps) {
+export function AIChart({ analysis, explain, signal }: AIChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
-  const forecastBullRef = useRef<ISeriesApi<"Line"> | null>(null)
-  const forecastBearRef = useRef<ISeriesApi<"Line"> | null>(null)
   const { selectedSymbol, selectedTimeframe, setSymbol, setTimeframe } = useMarketStore()
   const [candleData, setCandleData] = useState<OHLCVItem[]>([])
   // state setter only — loading value not used in render
@@ -131,8 +140,6 @@ export function AIChart({ analysis, explain }: AIChartProps) {
       chartRef.current.remove()
       chartRef.current = null
       candleSeriesRef.current = null
-      forecastBullRef.current = null
-      forecastBearRef.current = null
     }
 
     const chart = createChart(containerRef.current, {
@@ -172,80 +179,38 @@ export function AIChart({ analysis, explain }: AIChartProps) {
     })
     candleSeriesRef.current.setData(candleData)
 
-    // AI Forecast Path Lines
     const lastCandle = candleData[candleData.length - 1]
-    if (lastCandle && analysis) {
-      const isBullish = analysis.prediction === "long"
+    if (lastCandle && signal && !signal.error && candleSeriesRef.current) {
+      const isBullish = signal.direction === "long"
       const lastTime = lastCandle.time
-      const lastClose = lastCandle.close
-      const move = lastClose * 0.02
-
-      // Bullish path (always show both, but one is primary)
-      const bullSteps = 4
-      const bullData = Array.from({ length: bullSteps }, (_, i) => ({
-        time: ((lastTime as number) + (i + 1) * 60 * 60) as Time,
-        value: lastClose + move * (i + 1) * 0.4,
-      }))
-
-      forecastBullRef.current = chart.addSeries(LineSeries, {
-        color: "#22c55e",
-        lineStyle: LineStyle.SparseDotted,
-        lineWidth: 2,
-        lastValueVisible: false,
-        priceFormat: { type: "price", minMove: 0.01 },
+      const levels = [
+        { price: signal.entry_zone?.min, title: "ENTRY LOW", color: "#3b82f6", style: LineStyle.Dashed },
+        { price: signal.entry_zone?.max, title: "ENTRY HIGH", color: "#60a5fa", style: LineStyle.Dashed },
+        { price: signal.stop_loss, title: "STOP LOSS", color: "#ef4444", style: LineStyle.Solid },
+        { price: signal.take_profit_1, title: "TP1", color: "#22c55e", style: LineStyle.Solid },
+        { price: signal.take_profit_2, title: "TP2", color: "#16a34a", style: LineStyle.Dashed },
+        { price: signal.take_profit_3, title: "TP3", color: "#15803d", style: LineStyle.Dotted },
+      ]
+      levels.forEach((level) => {
+        if (level.price && level.price > 0) {
+          candleSeriesRef.current?.createPriceLine({
+            price: level.price,
+            color: level.color,
+            lineWidth: level.title === "STOP LOSS" || level.title === "TP1" ? 2 : 1,
+            lineStyle: level.style,
+            axisLabelVisible: true,
+            title: level.title,
+          })
+        }
       })
-      forecastBullRef.current.setData(bullData)
-
-      // Bearish path
-      const bearSteps = 4
-      const bearData = Array.from({ length: bearSteps }, (_, i) => ({
-        time: ((lastTime as number) + (i + 1) * 60 * 60) as Time,
-        value: lastClose - move * (i + 1) * 0.4,
-      }))
-
-      forecastBearRef.current = chart.addSeries(LineSeries, {
-        color: "#ef4444",
-        lineStyle: LineStyle.SparseDotted,
-        lineWidth: 2,
-        lastValueVisible: false,
-        priceFormat: { type: "price", minMove: 0.01 },
-      })
-      forecastBearRef.current.setData(bearData)
-
-      // Entry/Exit Markers
-      if (candleSeriesRef.current) {
-        const markers: SeriesMarker<Time>[] = []
-        if (explain?.suggestions?.entry || explain?.key_levels?.support) {
-          markers.push({
-            time: lastTime,
-            position: isBullish ? "belowBar" as const : "aboveBar" as const,
-            color: isBullish ? "#22c55e" : "#ef4444",
-            shape: isBullish ? "arrowUp" as const : "arrowDown" as const,
-            text: isBullish ? "BUY" : "SELL",
-          })
-        }
-        if (explain?.suggestions?.stop_loss) {
-          markers.push({
-            time: lastTime,
-            position: "aboveBar" as const,
-            color: "#ef4444",
-            shape: "arrowDown" as const,
-            text: "SL",
-          })
-        }
-        if (explain?.suggestions?.take_profit) {
-          markers.push({
-            time: lastTime,
-            position: "belowBar" as const,
-            color: "#22c55e",
-            shape: "arrowUp" as const,
-            text: "TP",
-          })
-        }
-        if (markers.length > 0) {
-          createSeriesMarkers(candleSeriesRef.current, markers)
-        }
-      }
+      const markers: SeriesMarker<Time>[] = [{
+        time: lastTime,
+        position: isBullish ? "belowBar" : "aboveBar",
+        color: isBullish ? "#22c55e" : "#ef4444",
+        shape: isBullish ? "arrowUp" : "arrowDown",
+        text: `${isBullish ? "LONG" : "SHORT"} ${signal.confidence || 0}%`,
+      }]
+      createSeriesMarkers(candleSeriesRef.current, markers)
     }
 
     chartRef.current = chart
@@ -261,10 +226,8 @@ export function AIChart({ analysis, explain }: AIChartProps) {
       chart.remove()
       chartRef.current = null
       candleSeriesRef.current = null
-      forecastBullRef.current = null
-      forecastBearRef.current = null
     }
-  }, [candleData, analysis, explain])
+  }, [candleData, signal])
 
   return (
     <div className="flex flex-col h-full">
@@ -307,18 +270,15 @@ export function AIChart({ analysis, explain }: AIChartProps) {
         </div>
       </div>
 
-      {/* AI Overlay Bar - Forecast Path Legend */}
+      {/* Institutional signal levels sourced from the backend engine */}
       {analysis && (
         <div className="flex items-center gap-4 px-3 py-1 bg-gray-900/80 border-b border-gray-800 text-[10px]">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-0.5 rounded bg-green-400" />
-            <span className="text-gray-400">Bullish Path</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-0.5 rounded bg-red-400" />
-            <span className="text-gray-400">Bearish Path</span>
-          </div>
-          <div className="w-px h-3 bg-gray-700" />
+          <span className="text-gray-400">Real Binance OHLCV</span>
+          {signal && !signal.error && (
+            <span className={signal.execution?.approved ? "text-green-400" : "text-amber-400"}>
+              {signal.execution?.approved ? "Trade eligible" : "Validation required"}
+            </span>
+          )}
           {(explain?.suggestions?.stop_loss || analysis?.details?.support) && (
             <>
               <div className="flex items-center gap-1">

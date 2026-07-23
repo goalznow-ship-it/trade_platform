@@ -51,6 +51,7 @@ interface Signal {
   entry_price?: number
   price?: number
   entry_zone_high?: number
+  entry_zone?: { min?: number; max?: number; mid?: number }
   stop_loss?: number
   take_profit?: number
   take_profit_1?: number
@@ -58,6 +59,7 @@ interface Signal {
   take_profit_3?: number
   risk_reward?: number
   risk_reward_ratio?: number
+  risk_reward_1?: number
   timeframe?: string
   signal_type?: string
   sentiment_score?: number
@@ -66,6 +68,13 @@ interface Signal {
   structure?: SignalStructure
   futures?: SignalFutures
   news?: SignalNews
+  confidence?: number
+  classification?: string
+  execution?: {
+    approved?: boolean
+    risk_label?: string
+    rejection_reasons?: string[]
+  }
 }
 
 interface SignalCardProps {
@@ -111,15 +120,18 @@ export function SignalCard({ signal }: SignalCardProps) {
   const dir = signal.direction || signal.signal || "neutral"
   const isLong = dir === "long" || dir === "bullish" || dir === "buy"
   const isShort = dir === "short" || dir === "bearish" || dir === "sell"
-  const rr = signal.risk_reward || signal.risk_reward_ratio || 0
-  const entry = signal.entry_price || signal.price || 0
-  const entryZoneHigh = signal.entry_zone_high || entry * 1.002
+  const rr = signal.risk_reward_1 || signal.risk_reward || signal.risk_reward_ratio || 0
+  const entry = signal.entry_zone?.min || signal.entry_zone?.mid || signal.entry_price || signal.price || 0
+  const entryZoneHigh = signal.entry_zone?.max || signal.entry_zone_high || entry
   const sl = signal.stop_loss || 0
   const tp1 = signal.take_profit || signal.take_profit_1 || 0
   const tp2 = signal.take_profit_2 || tp1 * 1.025 || 0
   const tp3 = signal.take_profit_3 || tp1 * 1.05 || 0
 
-  const scores = calcWeightedScore(signal)
+  const calculatedScores = calcWeightedScore(signal)
+  const scores = signal.confidence !== undefined
+    ? { ...calculatedScores, total: Math.round(signal.confidence) }
+    : calculatedScores
   const scoreInfo = getScoreLabel(scores.total)
 
   const tech = signal.technical || {}
@@ -180,6 +192,14 @@ export function SignalCard({ signal }: SignalCardProps) {
               </div>
               {signal.reason && (
                 <div className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{signal.reason}</div>
+              )}
+              {signal.execution && (
+                <div className={cn(
+                  "text-[10px] mt-0.5",
+                  signal.execution.approved ? "text-green-400" : "text-amber-400"
+                )}>
+                  {signal.execution.approved ? "Execution gate approved" : "Not execution-approved"}
+                </div>
               )}
             </div>
           </div>

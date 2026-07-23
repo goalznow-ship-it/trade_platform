@@ -123,7 +123,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(401, "User not found or inactive")
-    if user.subscription_expires and user.subscription_expires < datetime.now(timezone.utc):
+    expires_at = user.subscription_expires
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at and expires_at < datetime.now(timezone.utc):
         if user.subscription_tier != "free":
             user.subscription_tier = "free"
             user.subscription_expires = None

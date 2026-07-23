@@ -390,11 +390,11 @@ class InstitutionalSignalEngine:
             }
         except Exception as e:
             return {
-                "approved": True,
-                "risk_score": 50,
+                "approved": False,
+                "risk_score": 100,
                 "risk_label": "unvalidated",
-                "rejection_reasons": [],
-                "note": f"Execution gate unavailable: {e}",
+                "rejection_reasons": ["Execution gate unavailable"],
+                "note": f"Signal is not trade-eligible because execution validation failed: {e}",
             }
 
 

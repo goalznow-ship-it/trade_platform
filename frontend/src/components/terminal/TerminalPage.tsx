@@ -29,22 +29,77 @@ interface ExplainData {
   [key: string]: unknown
 }
 
+interface InstitutionalSignal {
+  error?: string
+  direction?: string
+  confidence?: number
+  current_price?: number
+  invalidation?: string
+  reasons?: string[]
+  stop_loss?: number
+  take_profit_1?: number
+  take_profit_2?: number
+  take_profit_3?: number
+  entry_zone?: { min?: number; max?: number; mid?: number }
+  indicators?: Record<string, unknown>
+  execution?: { rejection_reasons?: string[]; approved?: boolean }
+  position_sizing?: { leverage?: number; position_size?: number }
+}
+
 export function TerminalPage() {
   const { selectedSymbol, selectedTimeframe } = useMarketStore()
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [explain, setExplain] = useState<ExplainData | null>(null)
+  const [signal, setSignal] = useState<InstitutionalSignal | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const [ai, ex] = await Promise.all([
+        const [ai, institutional] = await Promise.all([
           api.getAIAnalysis(selectedSymbol, selectedTimeframe).catch(() => null),
-          api.getAIExplainability().catch(() => null),
+          api.getInstitutionalSignal(selectedSymbol, selectedTimeframe).catch(() => null),
         ])
-        setAnalysis(ai)
-        setExplain(ex)
+        setSignal(institutional)
+        if (institutional && !institutional.error) {
+          const direction = institutional.direction
+          setAnalysis({
+            ...ai,
+            prediction: direction,
+            confidence: institutional.confidence,
+            current_price: institutional.current_price,
+            long_probability: direction === "long" ? institutional.confidence : 100 - institutional.confidence,
+            short_probability: direction === "short" ? institutional.confidence : 100 - institutional.confidence,
+            details: {
+              ...(ai?.details || {}),
+              ...(institutional.indicators || {}),
+            },
+          })
+          setExplain({
+            reasons: institutional.reasons || [],
+            warnings: [
+              institutional.invalidation,
+              ...(institutional.execution?.rejection_reasons || []),
+            ].filter(Boolean),
+            suggestions: {
+              entry: institutional.entry_zone?.mid,
+              stop_loss: institutional.stop_loss,
+              take_profit: institutional.take_profit_1,
+              take_profit_2: institutional.take_profit_2,
+              take_profit_3: institutional.take_profit_3,
+              suggested_leverage: institutional.position_sizing?.leverage,
+              position_size: institutional.position_sizing?.position_size,
+            },
+            key_levels: {
+              support: institutional.entry_zone?.min,
+              resistance: institutional.entry_zone?.max,
+            },
+          })
+        } else {
+          setAnalysis(ai)
+          setExplain(null)
+        }
       } catch {} finally {
         setLoading(false)
       }
@@ -59,7 +114,7 @@ export function TerminalPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Chart Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          <AIChart analysis={analysis} explain={explain} />
+          <AIChart analysis={analysis} explain={explain} signal={signal} />
 
           {/* Bottom Panel - AI Forecast + Summary */}
           <div className="border-t border-gray-800 bg-gray-950/80 p-3">

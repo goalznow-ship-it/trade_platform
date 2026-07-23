@@ -22,7 +22,11 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(username, password)
-      router.push("/dashboard")
+      const requested = new URLSearchParams(window.location.search).get("next")
+      const destination = requested?.startsWith("/") && !requested.startsWith("//")
+        ? requested
+        : "/dashboard"
+      router.replace(destination)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid credentials")
     } finally {
@@ -83,7 +87,7 @@ export default function LoginPage() {
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Username</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Username or email</label>
               <input
                 type="text"
                 value={username}
