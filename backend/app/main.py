@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.bootstrap import ensure_default_admin
+from app.core.database import async_session_factory, init_db
 from app.core.logging import logger
 from app.core.rate_limiter import RateLimitMiddleware
 from app.core.security import AuditMiddleware
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
     from app.core.redis import redis_client
     if settings.ENVIRONMENT.lower() != "production":
         await init_db()
+    async with async_session_factory() as db:
+        await ensure_default_admin(db)
     await ws_manager.start()
     if settings.ENABLE_BACKGROUND_SERVICES:
         await binance_ws.start()

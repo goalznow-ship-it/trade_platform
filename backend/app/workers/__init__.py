@@ -9,7 +9,7 @@ from app.services.news import news_service
 from app.services.indicators import indicator_service
 from app.services.ai_analysis import ai_engine
 from app.services.signals import signal_service
-from app.services.notifications import notification_service
+from app.services.notifications import notifications_service
 from sqlalchemy import select
 from datetime import datetime, timezone
 
@@ -138,9 +138,7 @@ def send_signal_notification(self, signal_id: int):
                     if user.discord_id:
                         channels.append("discord")
                     if channels:
-                        await notification_service.send_signal_notification(
-                            user.id, signal_data, channels
-                        )
+                        await notifications_service.send_signal_alert(user.id, signal_data)
                         sent_count += 1
                 return {"signal_id": signal_id, "users_notified": sent_count}
 

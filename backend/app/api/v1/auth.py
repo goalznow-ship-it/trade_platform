@@ -60,7 +60,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(401, "Account disabled")
 
     from datetime import datetime, timezone
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
 
     return TokenResponse(
