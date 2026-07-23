@@ -41,10 +41,15 @@ interface AnalysisData {
 interface TradeDecisionCardProps {
   analysis?: AnalysisData | null
   explain?: ExplainData | null
+  livePrice?: number
   loading?: boolean
 }
 
-export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionCardProps) {
+function displayPrice(value?: number) {
+  return value && value > 0 ? `$${value.toFixed(2)}` : "N/A"
+}
+
+export function TradeDecisionCard({ analysis, explain, livePrice, loading }: TradeDecisionCardProps) {
   if (loading) {
     return (
       <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
@@ -66,9 +71,9 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
     )
   }
 
-  const isBullish = analysis.prediction === "long"
-  const isBearish = analysis.prediction === "short"
   const conf = analysis.confidence || 0
+  const isBullish = analysis.prediction === "long" && conf >= 70
+  const isBearish = analysis.prediction === "short" && conf >= 70
   const reasons = explain?.reasons || []
   const warnings = explain?.warnings || []
   const suggestions = explain?.suggestions || {}
@@ -105,37 +110,48 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
           decisionColor === "red" && "text-red-400/70",
           decisionColor === "yellow" && "text-yellow-400/70",
         )}>
-          Confidence: {conf}% | {analysis.long_probability?.toFixed(0) || 0}% Long / {analysis.short_probability?.toFixed(0) || 0}% Short
+          Confidence: {conf}% | {analysis.long_probability !== undefined ? `${analysis.long_probability.toFixed(0)}%` : "N/A"} Long / {analysis.short_probability !== undefined ? `${analysis.short_probability.toFixed(0)}%` : "N/A"} Short
         </div>
       </div>
 
       {/* Suggested Levels */}
       {(suggestions.stop_loss || suggestions.take_profit) && (
         <div className="grid grid-cols-2 gap-2">
-          <div className="p-2.5 rounded-lg bg-gray-800/30">
-            <div className="text-[10px] text-gray-500 mb-0.5">Suggested Entry</div>
+          <div className="p-2.5 rounded-lg bg-blue-900/15 border border-blue-900/30">
+            <div className="text-[10px] text-blue-400 mb-0.5">Current Live Price</div>
             <div className="text-sm font-bold text-white font-mono">
-              ${Number(explain?.key_levels?.support || analysis.details?.support || 0).toFixed(2)}
+              {displayPrice(livePrice)}
+            </div>
+          </div>
+          <div className="p-2.5 rounded-lg bg-gray-800/30">
+            <div className="text-[10px] text-gray-500 mb-0.5">Signal Entry Snapshot</div>
+            <div className="text-sm font-bold text-white font-mono">
+              {displayPrice(suggestions.entry)}
             </div>
           </div>
           <div className="p-2.5 rounded-lg bg-red-900/20 border border-red-900/30">
             <div className="text-[10px] text-red-400 mb-0.5">Stop Loss</div>
             <div className="text-sm font-bold text-red-400 font-mono">
-              ${(suggestions.stop_loss || 0).toFixed(2)}
+              {displayPrice(suggestions.stop_loss)}
             </div>
           </div>
           <div className="p-2.5 rounded-lg bg-green-900/20 border border-green-900/30">
             <div className="text-[10px] text-green-400 mb-0.5">Take Profit 1</div>
             <div className="text-sm font-bold text-green-400 font-mono">
-              ${(suggestions.take_profit || 0).toFixed(2)}
+              {displayPrice(suggestions.take_profit)}
             </div>
           </div>
           <div className="p-2.5 rounded-lg bg-green-900/10 border border-green-900/20">
             <div className="text-[10px] text-green-400/70 mb-0.5">Take Profit 2</div>
             <div className="text-sm font-bold text-green-400/70 font-mono">
-              ${(suggestions.take_profit_2 || 0).toFixed(2)}
+              {displayPrice(suggestions.take_profit_2)}
             </div>
           </div>
+          {livePrice && suggestions.entry && Math.abs(livePrice - suggestions.entry) / livePrice > 0.002 && (
+            <div className="col-span-2 text-[10px] text-amber-300 bg-amber-900/10 border border-amber-900/30 rounded p-2">
+              Entry is the price when this signal snapshot was generated. Live price has moved; do not chase the entry without a fresh validation.
+            </div>
+          )}
         </div>
       )}
 
@@ -155,9 +171,9 @@ export function TradeDecisionCard({ analysis, explain, loading }: TradeDecisionC
           <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
             <div className="text-gray-500">Risk/Reward</div>
             <div className="text-white font-bold">
-              {suggestions.stop_loss && suggestions.take_profit
-                ? `1:${((suggestions.take_profit - Number(explain?.key_levels?.support || 0)) / (Number(explain?.key_levels?.support || 0) - suggestions.stop_loss)).toFixed(1)}`
-                : "--"}
+              {suggestions.entry && suggestions.stop_loss && suggestions.take_profit
+                ? `1:${(Math.abs(suggestions.take_profit - suggestions.entry) / Math.abs(suggestions.entry - suggestions.stop_loss)).toFixed(1)}`
+                : "N/A"}
             </div>
           </div>
         </div>

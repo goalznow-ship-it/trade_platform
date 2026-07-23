@@ -54,7 +54,10 @@ class InstitutionalScorer:
             "risk": risk,
         }
 
-        total = sum(scores[k] * getattr(self, f"{k}_weight") for k in scores) / 100
+        # Each category scorer already returns signed points capped by its
+        # configured category weight. Summing them produces the intended
+        # institutional score on the -100..100 scale.
+        total = sum(scores.values())
 
         direction = "long" if total > 5 else ("short" if total < -5 else "neutral")
         abs_score = abs(total)

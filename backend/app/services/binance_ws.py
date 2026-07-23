@@ -15,7 +15,7 @@ import aiohttp
 from app.core.websocket_manager import ws_manager
 from app.core.logging import logger
 
-BINANCE_WS_BASE = "wss://fstream.binance.com/ws"
+BINANCE_WS_BASE = "wss://fstream.binance.com"
 
 class BinanceWebSocketService:
     def __init__(self):
@@ -56,9 +56,10 @@ class BinanceWebSocketService:
         self.tasks[name] = asyncio.create_task(self._run_stream(streams, handler))
 
     async def _run_stream(self, streams: list, handler):
-        url = f"{BINANCE_WS_BASE}/{'/'.join(streams)}"
-        if len(streams) > 1:
-            url = f"{BINANCE_WS_BASE}/{'/'.join(streams)}"
+        if len(streams) == 1:
+            url = f"{BINANCE_WS_BASE}/ws/{streams[0]}"
+        else:
+            url = f"{BINANCE_WS_BASE}/stream?streams={'/'.join(streams)}"
         if len(streams) > 200:
             logger.error(f"Too many streams: {len(streams)}")
             return
@@ -69,7 +70,7 @@ class BinanceWebSocketService:
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
-                            await handler(data)
+                            await handler(data.get("data", data))
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             break
             except asyncio.CancelledError:

@@ -42,12 +42,20 @@ interface InstitutionalSignal {
   take_profit_3?: number
   entry_zone?: { min?: number; max?: number; mid?: number }
   indicators?: Record<string, unknown>
+  institutional_score?: {
+    long_probability?: number
+    short_probability?: number
+    risk_level?: string
+    scores?: Record<string, number>
+    weights?: Record<string, number>
+    details?: Record<string, unknown>
+  }
   execution?: { rejection_reasons?: string[]; approved?: boolean }
   position_sizing?: { leverage?: number; position_size?: number }
 }
 
 export function TerminalPage() {
-  const { selectedSymbol, selectedTimeframe } = useMarketStore()
+  const { selectedSymbol, selectedTimeframe, tickers } = useMarketStore()
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [explain, setExplain] = useState<ExplainData | null>(null)
   const [signal, setSignal] = useState<InstitutionalSignal | null>(null)
@@ -57,23 +65,32 @@ export function TerminalPage() {
     async function load() {
       setLoading(true)
       try {
-        const [ai, institutional] = await Promise.all([
-          api.getAIAnalysis(selectedSymbol, selectedTimeframe).catch(() => null),
-          api.getInstitutionalSignal(selectedSymbol, selectedTimeframe).catch(() => null),
-        ])
+        const institutional = await api
+          .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
+          .catch(() => null)
         setSignal(institutional)
         if (institutional && !institutional.error) {
           const direction = institutional.direction
+          const score = institutional.institutional_score
+          const factorScores: Record<string, number> = {}
+          for (const [key, value] of Object.entries(score?.scores || {})) {
+            const weight = score?.weights?.[key]
+            if (typeof value === "number" && typeof weight === "number" && weight > 0) {
+              factorScores[key] = value / weight
+            }
+          }
           setAnalysis({
-            ...ai,
             prediction: direction,
             confidence: institutional.confidence,
             current_price: institutional.current_price,
-            long_probability: direction === "long" ? institutional.confidence : 100 - institutional.confidence,
-            short_probability: direction === "short" ? institutional.confidence : 100 - institutional.confidence,
+            long_probability: score?.long_probability,
+            short_probability: score?.short_probability,
+            risk_level: score?.risk_level,
+            scores: factorScores,
             details: {
-              ...(ai?.details || {}),
+              ...(score?.details || {}),
               ...(institutional.indicators || {}),
+              macd: institutional.indicators?.macd_histogram,
             },
           })
           setExplain({
@@ -97,7 +114,11 @@ export function TerminalPage() {
             },
           })
         } else {
-          setAnalysis(ai)
+          setAnalysis(institutional ? {
+            prediction: "neutral",
+            confidence: 0,
+            current_price: institutional.current_price,
+          } : null)
           setExplain(null)
         }
       } catch {} finally {
@@ -109,17 +130,27 @@ export function TerminalPage() {
     return () => clearInterval(interval)
   }, [selectedSymbol, selectedTimeframe])
 
+  const ticker = tickers[selectedSymbol]
+    || tickers[selectedSymbol.replace("/", "")]
+    || tickers[selectedSymbol.replace("/", "-")]
+  const livePrice = ticker?.price && ticker.price > 0
+    ? ticker.price
+    : signal?.current_price
+  const displayedAnalysis = analysis
+    ? { ...analysis, current_price: livePrice }
+    : analysis
+
   return (
     <div className="h-full flex flex-col bg-[#0d1117]">
       <div className="flex-1 flex overflow-hidden">
         {/* Chart Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          <AIChart analysis={analysis} explain={explain} signal={signal} />
+          <AIChart analysis={displayedAnalysis} explain={explain} signal={signal} livePrice={livePrice} />
 
           {/* Bottom Panel - AI Forecast + Summary */}
           <div className="border-t border-gray-800 bg-gray-950/80 p-3">
             <div className="max-w-5xl">
-              <AIForecastPanel analysis={analysis} loading={loading} />
+              <AIForecastPanel analysis={displayedAnalysis} signal={signal} loading={loading} />
             </div>
           </div>
         </div>
@@ -131,7 +162,7 @@ export function TerminalPage() {
               AI Prediction Engine
             </div>
           </div>
-          <AIPredictionPanel analysis={analysis} loading={loading} />
+          <AIPredictionPanel analysis={displayedAnalysis} loading={loading} />
 
           <div className="border-b border-gray-800">
             <div className="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
@@ -139,7 +170,7 @@ export function TerminalPage() {
             </div>
           </div>
           <div className="p-3">
-            <TradeDecisionCard analysis={analysis} explain={explain} loading={loading} />
+            <TradeDecisionCard analysis={displayedAnalysis} explain={explain} livePrice={livePrice} loading={loading} />
           </div>
         </div>
       </div>

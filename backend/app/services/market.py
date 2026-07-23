@@ -26,7 +26,9 @@ class MarketService:
 
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            ohlcv = ex.fetch_ohlcv(symbol, timeframe, limit=limit)
+            ohlcv = await asyncio.to_thread(
+                ex.fetch_ohlcv, symbol, timeframe, limit=limit,
+            )
             result = [
                 {
                     'time': o[0] // 1000,
@@ -47,7 +49,7 @@ class MarketService:
     async def get_ticker(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            t = ex.fetch_ticker(symbol)
+            t = await asyncio.to_thread(ex.fetch_ticker, symbol)
             return {
                 'symbol': t['symbol'],
                 'price': t['last'],
@@ -66,7 +68,7 @@ class MarketService:
     async def get_orderbook(self, symbol: str, exchange: str = 'binance', limit: int = 50) -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            ob = ex.fetch_order_book(symbol, limit)
+            ob = await asyncio.to_thread(ex.fetch_order_book, symbol, limit)
             return {
                 'bids': ob['bids'][:10],
                 'asks': ob['asks'][:10],
@@ -78,7 +80,7 @@ class MarketService:
     async def get_funding_rate(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            funding = ex.fetch_funding_rate(symbol)
+            funding = await asyncio.to_thread(ex.fetch_funding_rate, symbol)
             return {
                 'symbol': funding['symbol'],
                 'funding_rate': funding['fundingRate'],
@@ -90,7 +92,7 @@ class MarketService:
     async def get_open_interest(self, symbol: str, exchange: str = 'binance') -> dict:
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
-            oi = ex.fetch_open_interest(symbol)
+            oi = await asyncio.to_thread(ex.fetch_open_interest, symbol)
             return {
                 'symbol': oi['symbol'],
                 'open_interest': oi['openInterest'],
@@ -154,4 +156,3 @@ class MarketService:
 
 
 market_service = MarketService()
-

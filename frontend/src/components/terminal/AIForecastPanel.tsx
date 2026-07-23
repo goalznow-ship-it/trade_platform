@@ -29,10 +29,23 @@ interface AnalysisData {
 
 interface AIForecastPanelProps {
   analysis?: AnalysisData | null
+  signal?: {
+    error?: string
+    direction?: string
+    confidence?: number
+    stop_loss?: number
+    take_profit_1?: number
+    take_profit_2?: number
+    take_profit_3?: number
+  } | null
   loading?: boolean
 }
 
-export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
+function displayPrice(value?: number) {
+  return value && value > 0 ? formatPrice(value) : "N/A"
+}
+
+export function AIForecastPanel({ analysis, signal, loading }: AIForecastPanelProps) {
   const { selectedTimeframe } = useMarketStore()
 
   if (loading) {
@@ -58,12 +71,16 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
   const isBullish = analysis.prediction === "long"
   const isBearish = analysis.prediction === "short"
   const conf = analysis.confidence || 0
-  const currentPrice = analysis.current_price || analysis.details?.support || 0
-  const move = currentPrice * 0.02
-
-  const targets = isBullish
-    ? [currentPrice + move * 0.5, currentPrice + move, currentPrice + move * 1.8]
-    : [currentPrice - move * 0.5, currentPrice - move, currentPrice - move * 1.8]
+  const currentPrice = analysis.current_price
+  const hasDirectionalForecast = (isBullish || isBearish)
+    && conf >= 70
+    && !signal?.error
+    && Boolean(signal?.take_profit_1)
+  const targets = [
+    signal?.take_profit_1,
+    signal?.take_profit_2,
+    signal?.take_profit_3,
+  ].filter((target): target is number => Boolean(target && target > 0))
 
   return (
     <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-800 space-y-3">
@@ -92,20 +109,18 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
             <div className="w-2 h-2 rounded-full bg-blue-400" />
             <span className="text-[10px] text-gray-500">Current</span>
           </div>
-          <span className="text-xs font-bold text-white font-mono">{formatPrice(currentPrice)}</span>
+          <span className="text-xs font-bold text-white font-mono">{displayPrice(currentPrice)}</span>
         </div>
 
-        {/* Price Path */}
-        <div className="ml-1 mt-1 space-y-1">
-          {targets.map((target, i) => {
-            const isAbove = target > currentPrice
+        {hasDirectionalForecast && currentPrice ? (
+          <div className="ml-1 mt-1 space-y-1">
+            {targets.map((target, i) => {
             const pct = ((target - currentPrice) / currentPrice * 100)
             return (
               <div key={i} className="flex items-center gap-2 pl-4 border-l-2 border-dashed border-gray-700/50 py-1.5">
                 <div className={cn(
                   "w-1.5 h-1.5 rounded-full",
-                  isBullish && isAbove ? "bg-green-400" :
-                  isBearish && !isAbove ? "bg-red-400" : "bg-gray-600"
+                  isBullish ? "bg-green-400" : "bg-red-400"
                 )} />
                 <div className="flex items-center justify-between flex-1">
                   <div className="flex items-center gap-1">
@@ -118,7 +133,7 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
                       "text-[11px] font-mono font-medium",
                       isBullish ? "text-green-400" : "text-red-400"
                     )}>
-                      {formatPrice(target)}
+                      TP{i + 1} {formatPrice(target)}
                     </span>
                   </div>
                   <span className={cn(
@@ -130,8 +145,13 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
                 </div>
               </div>
             )
-          })}
-        </div>
+            })}
+          </div>
+        ) : (
+          <div className="mt-2 p-3 rounded border border-amber-900/30 bg-amber-900/10 text-xs text-amber-300">
+            No directional forecast: signal is WAIT or confidence is below 70%.
+          </div>
+        )}
       </div>
 
       {/* Target Range */}
@@ -139,7 +159,9 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
         <div className="p-2 rounded bg-gray-800/30 border border-gray-700/20">
           <div className="text-[9px] text-gray-500 uppercase tracking-wider">Expected Range</div>
           <div className="text-xs font-bold text-white font-mono mt-0.5">
-            {formatPrice(targets[0])} - {formatPrice(targets[targets.length - 1])}
+            {hasDirectionalForecast && targets.length
+              ? `${displayPrice(targets[0])} - ${displayPrice(targets[targets.length - 1])}`
+              : "N/A"}
           </div>
         </div>
         <div className="p-2 rounded bg-gray-800/30 border border-gray-700/20">
@@ -151,7 +173,7 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
         <div className="p-2 rounded bg-gray-800/30 border border-gray-700/20">
           <div className="text-[9px] text-gray-500 uppercase tracking-wider">Invalidation</div>
           <div className="text-xs font-bold text-red-400 font-mono mt-0.5">
-            {formatPrice(isBullish ? currentPrice * 0.97 : currentPrice * 1.03)}
+            {hasDirectionalForecast ? displayPrice(signal?.stop_loss) : "N/A"}
           </div>
         </div>
         <div className="p-2 rounded bg-gray-800/30 border border-gray-700/20">
@@ -160,7 +182,9 @@ export function AIForecastPanel({ analysis, loading }: AIForecastPanelProps) {
             "text-xs font-bold font-mono mt-0.5",
             isBullish ? "text-green-400" : isBearish ? "text-red-400" : "text-yellow-400"
           )}>
-            {isBullish ? analysis.long_probability?.toFixed(0) : isBearish ? analysis.short_probability?.toFixed(0) : 50}%
+            {hasDirectionalForecast && typeof (isBullish ? analysis.long_probability : analysis.short_probability) === "number"
+              ? `${(isBullish ? analysis.long_probability : analysis.short_probability)?.toFixed(0)}%`
+              : "N/A"}
           </div>
         </div>
       </div>

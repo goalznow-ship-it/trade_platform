@@ -66,9 +66,9 @@ export function AIPredictionPanel({ analysis, loading }: AIPredictionPanelProps)
     { key: "trend", label: "Trend", score: scores.trend, icon: TrendingUp },
     { key: "momentum", label: "Momentum", score: scores.momentum, icon: Activity },
     { key: "volume", label: "Volume", score: scores.volume, icon: Volume2 },
-    { key: "volatility", label: "Volatility", score: scores.volatility, icon: BarChart3 },
-    { key: "market_structure", label: "Market Structure", score: scores.market_structure, icon: TrendingDown },
+    { key: "liquidity", label: "Liquidity", score: scores.liquidity, icon: BarChart3 },
     { key: "smc", label: "Smart Money", score: scores.smc, icon: Shield },
+    { key: "risk", label: "Risk Quality", score: scores.risk, icon: TrendingDown },
   ]
 
   return (
@@ -123,8 +123,9 @@ export function AIPredictionPanel({ analysis, loading }: AIPredictionPanelProps)
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Factor Analysis</h3>
         <div className="space-y-2">
           {factorItems.map((f) => {
-            const s = f.score ?? 0
-            const pct = Math.abs(s) * 100
+            const hasScore = typeof f.score === "number" && Number.isFinite(f.score)
+            const s = hasScore ? f.score as number : 0
+            const pct = Math.min(100, Math.abs(s) * 100)
             return (
               <div key={f.key}>
                 <div className="flex items-center justify-between text-xs mb-0.5">
@@ -133,13 +134,13 @@ export function AIPredictionPanel({ analysis, loading }: AIPredictionPanelProps)
                     <span className="text-gray-400">{f.label}</span>
                   </div>
                   <span className={cn("font-mono font-medium", s > 0 ? "text-green-400" : s < 0 ? "text-red-400" : "text-gray-500")}>
-                    {(s * 100).toFixed(0)}%
+                    {hasScore ? `${(s * 100).toFixed(0)}%` : "N/A"}
                   </span>
                 </div>
                 <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                   <div
                     className={cn("h-full rounded-full transition-all", s > 0 ? "bg-green-500" : s < 0 ? "bg-red-500" : "bg-gray-600")}
-                    style={{ width: `${pct}%` }}
+                    style={{ width: hasScore ? `${pct}%` : "0%" }}
                   />
                 </div>
               </div>

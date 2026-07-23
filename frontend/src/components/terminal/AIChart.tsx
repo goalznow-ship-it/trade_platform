@@ -95,9 +95,10 @@ interface AIChartProps {
     take_profit_3?: number
     execution?: { approved?: boolean }
   } | null
+  livePrice?: number
 }
 
-export function AIChart({ analysis, explain, signal }: AIChartProps) {
+export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
@@ -243,7 +244,9 @@ export function AIChart({ analysis, explain, signal }: AIChartProps) {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
-          <div className="text-base font-bold text-white font-mono">${price || "--"}</div>
+          <div className="text-base font-bold text-white font-mono">
+            {livePrice && livePrice > 0 ? `$${livePrice.toFixed(2)}` : price ? `$${price}` : "N/A"}
+          </div>
           {(analysis?.details?.rsi) && (
             <div className="hidden sm:flex items-center gap-1.5 text-[10px]">
               <span className={cn("px-1.5 py-0.5 rounded font-mono", (analysis.details.rsi || 0) > 70 ? "bg-red-900/50 text-red-400" : (analysis.details.rsi || 0) < 30 ? "bg-green-900/50 text-green-400" : "bg-gray-800 text-gray-400")}>
@@ -279,19 +282,25 @@ export function AIChart({ analysis, explain, signal }: AIChartProps) {
               {signal.execution?.approved ? "Trade eligible" : "Validation required"}
             </span>
           )}
-          {(explain?.suggestions?.stop_loss || analysis?.details?.support) && (
+          {signal && !signal.error && signal.confidence !== undefined && signal.confidence >= 70 && (
             <>
               <div className="flex items-center gap-1">
                 <span className="text-green-400 font-medium">Entry</span>
-                <span className="text-white font-mono">${(analysis?.details?.support || 0).toFixed(2)}</span>
+                <span className="text-white font-mono">
+                  {signal.entry_zone?.mid ? `$${signal.entry_zone.mid.toFixed(2)}` : "N/A"}
+                </span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="text-red-400 font-medium">SL</span>
-                <span className="text-red-400 font-mono">${(explain?.suggestions?.stop_loss || 0).toFixed(2)}</span>
+                <span className="text-red-400 font-mono">
+                  {signal.stop_loss ? `$${signal.stop_loss.toFixed(2)}` : "N/A"}
+                </span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="text-green-400 font-medium">TP</span>
-                <span className="text-green-400 font-mono">${(explain?.suggestions?.take_profit || 0).toFixed(2)}</span>
+                <span className="text-green-400 font-mono">
+                  {signal.take_profit_1 ? `$${signal.take_profit_1.toFixed(2)}` : "N/A"}
+                </span>
               </div>
             </>
           )}

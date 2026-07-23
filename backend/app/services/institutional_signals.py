@@ -162,21 +162,34 @@ class InstitutionalSignalEngine:
 
     async def scan_all(self, min_score: float = 70, limit: int = 10) -> List[dict]:
         from app.services.market_coverage import market_coverage
+        from app.core.cache import cache_get, cache_set
+
+        cache_key = f"institutional:scan:{min_score:.1f}:{limit}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, list):
+            return cached
+
         symbols = await market_coverage.get_top_symbols(30)
-        results = []
+        semaphore = asyncio.Semaphore(4)
 
-        for symbol in symbols:
-            try:
-                signal = await self.generate_signal(symbol)
-                if signal.get("confidence", 0) >= min_score:
-                    results.append(signal)
-            except Exception as e:
-                logger.debug(f"Scan error {symbol}: {e}")
-                continue
-            await asyncio.sleep(0.1)
+        async def analyze_symbol(symbol: str) -> Optional[dict]:
+            async with semaphore:
+                try:
+                    signal = await self.generate_signal(symbol)
+                    if signal.get("confidence", 0) >= min_score:
+                        return signal
+                except Exception as e:
+                    logger.debug(f"Scan error {symbol}: {e}")
+            return None
 
+        scanned = await asyncio.gather(
+            *(analyze_symbol(symbol) for symbol in symbols),
+        )
+        results = [signal for signal in scanned if signal is not None]
         results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
-        return results[:limit]
+        final = results[:limit]
+        await cache_set(cache_key, final, ttl=30)
+        return final
 
     def _calculate_entry_zone(self, price: float, atr: float, direction: str) -> dict:
         if direction == "long":
