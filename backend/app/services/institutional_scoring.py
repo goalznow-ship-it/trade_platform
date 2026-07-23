@@ -35,6 +35,11 @@ class InstitutionalScorer:
     async def score(self, symbol: str, data: list, timeframe: str = "1h",
                     smc_data: Optional[dict] = None,
                     futures_data: Optional[dict] = None) -> dict:
+        return self.score_sync(symbol, data, timeframe, smc_data, futures_data)
+
+    def score_sync(self, symbol: str, data: list, timeframe: str = "1h",
+                   smc_data: Optional[dict] = None,
+                   futures_data: Optional[dict] = None) -> dict:
         if len(data) < 50:
             return self._empty(symbol, timeframe, "Insufficient data")
 

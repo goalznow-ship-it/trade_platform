@@ -46,6 +46,7 @@ export function BacktestPage() {
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [history, setHistory] = useState<BacktestHistoryItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"backtest" | "history">("backtest")
 
   useEffect(() => {
@@ -54,11 +55,14 @@ export function BacktestPage() {
 
   async function runBacktest() {
     setLoading(true)
+    setError(null)
     try {
-      const res = await api.runBacktest(symbol, timeframe, 500, balance)
+      const res = await api.runBacktest(symbol, timeframe, 500, balance, leverage)
+      if (res?.error) throw new Error(res.error)
       setResult(res)
-    } catch {
+    } catch (err) {
       setResult(null)
+      setError(err instanceof Error ? err.message : "Backtest could not be completed")
     } finally {
       setLoading(false)
     }
@@ -138,6 +142,11 @@ export function BacktestPage() {
             </div>
 
             {/* Results */}
+            {error && (
+              <div className="p-3 rounded-lg border border-red-900/50 bg-red-950/30 text-xs text-red-300">
+                {error}
+              </div>
+            )}
             {result && (
               <>
                 {/* Summary Cards */}
@@ -185,6 +194,13 @@ export function BacktestPage() {
                     ))}
                   </div>
                 </div>
+
+                {result.total_trades === 0 && (
+                  <div className="p-3 rounded-lg border border-amber-900/50 bg-amber-950/20 text-xs text-amber-200">
+                    Engine uğurla işləyib, lakin seçilmiş 500 real şamda 70+ institusional bal alan giriş tapılmayıb.
+                    Symbol və ya timeframe-i dəyişərək yenidən yoxlayın.
+                  </div>
+                )}
 
                 {/* Trades Table */}
                 {result.trades && result.trades.length > 0 && (

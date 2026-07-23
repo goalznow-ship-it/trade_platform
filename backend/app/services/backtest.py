@@ -1,3 +1,4 @@
+import asyncio
 import pandas as pd
 import numpy as np
 import math
@@ -21,12 +22,44 @@ class BacktestService:
         leverage: int = 1,
         risk_per_trade: float = 0.02,
     ) -> dict:
+        from app.core.cache import cache_get, cache_set
+
+        last_bar = data[-1].get("time") if data else "none"
+        cache_key = (
+            f"backtest:{symbol}:{timeframe}:{len(data)}:{last_bar}:"
+            f"{initial_balance:.2f}:{fee_rate:.6f}:{slippage_bps:.2f}:"
+            f"{leverage}:{risk_per_trade:.4f}"
+        )
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
+
+        result = await asyncio.to_thread(
+            self._run_backtest_sync,
+            symbol, data, timeframe, initial_balance, fee_rate,
+            slippage_bps, leverage, risk_per_trade,
+        )
+        await cache_set(cache_key, result, ttl=300)
+        return result
+
+    def _run_backtest_sync(
+        self,
+        symbol: str,
+        data: list,
+        timeframe: str = "1h",
+        initial_balance: float = 10000,
+        fee_rate: float = 0.0004,
+        slippage_bps: float = 2.0,
+        leverage: int = 1,
+        risk_per_trade: float = 0.02,
+    ) -> dict:
         if len(data) < 100:
             return {"error": "Insufficient data"}
 
         df = pd.DataFrame(data)
         if "time" in df.columns:
-            df["datetime"] = pd.to_datetime(df["time"], unit="ms")
+            time_unit = "ms" if float(df["time"].iloc[-1]) > 10_000_000_000 else "s"
+            df["datetime"] = pd.to_datetime(df["time"], unit=time_unit, utc=True)
         elif "timestamp" in df.columns:
             df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms")
 
@@ -46,11 +79,13 @@ class BacktestService:
 
         for i in range(lookback, num_bars):
             current = df.iloc[i]
-            prev_data = df.iloc[:i + 1].to_dict("records")
-
-            signal = await self._generate_institutional_signal(
-                symbol, prev_data, institutional_scorer, smc_engine,
-            )
+            signal = None
+            if position is None:
+                start = max(0, i - 249)
+                prev_data = df.iloc[start:i + 1].to_dict("records")
+                signal = self._generate_institutional_signal(
+                    symbol, prev_data, institutional_scorer, smc_engine,
+                )
 
             if signal and signal["action"] != 0 and position is None:
                 position = self._open_position(
@@ -78,12 +113,16 @@ class BacktestService:
                         if entry_time is not None and exit_time is not None:
                             trade_duration = (exit_time - entry_time).total_seconds() / 3600
 
+                    side_name = "long" if position["side"] == 1 else "short"
                     trades.append({
                         "entry_price": position["entry_price"],
                         "exit_price": exit_price,
+                        "entry": position["entry_price"],
+                        "exit": exit_price,
                         "entry_time": str(df.iloc[entry_idx].get("datetime", "")) if entry_idx < len(df) else "",
                         "exit_time": str(current.get("datetime", "")),
                         "side": position["side"],
+                        "direction": side_name,
                         "pnl": round(pnl, 2),
                         "pnl_percent": round(pnl_pct, 2),
                         "return_pct": round((pnl / trade_entry_balance) * 100, 2) if position.get("entry_balance") else 0,
@@ -108,7 +147,7 @@ class BacktestService:
             initial_balance, balance, symbol, timeframe,
         )
 
-    async def _generate_institutional_signal(
+    def _generate_institutional_signal(
         self, symbol: str, data: list,
         scorer, smc,
     ) -> Optional[dict]:
@@ -117,7 +156,7 @@ class BacktestService:
                 return None
 
             smc_data = smc.analyze(data)
-            score_result = await scorer.score(symbol, data, "1h", smc_data)
+            score_result = scorer.score_sync(symbol, data, "1h", smc_data)
 
             direction = score_result.get("direction", "neutral")
             abs_score = score_result.get("abs_score", 0)
@@ -354,6 +393,7 @@ class BacktestService:
             "total_pnl": round(total_pnl, 2),
             "final_balance": round(final_balance, 2),
             "max_drawdown_percent": round(max_drawdown, 2),
+            "max_drawdown": round(max_drawdown, 2),
             "profit_factor": round(profit_factor, 2),
             "sharpe_ratio": round(sharpe, 2),
             "avg_risk_reward": avg_rr,

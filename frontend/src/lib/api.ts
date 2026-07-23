@@ -154,8 +154,11 @@ export const api = {
   getDailyPnL: () => request<any[]>("/api/v1/portfolio/daily-pnl"),
 
   // Backtest
-  runBacktest: (symbol: string, timeframe = "1h", limit = 500, initialBalance = 10000) =>
-    request<any>(`/api/v1/backtest/run?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}&initial_balance=${initialBalance}`),
+  runBacktest: (symbol: string, timeframe = "1h", limit = 500, initialBalance = 10000, leverage = 1) =>
+    request<any>(
+      `/api/v1/backtest/run?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`
+      + `&limit=${limit}&initial_balance=${initialBalance}&leverage=${leverage}`,
+    ),
 
   saveBacktest: (data: any) =>
     request("/api/v1/backtest/save", { method: "POST", body: JSON.stringify(data) }),

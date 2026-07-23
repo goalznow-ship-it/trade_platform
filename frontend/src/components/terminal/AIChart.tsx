@@ -108,6 +108,12 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loading, setLoading] = useState(true)
   const [price, setPrice] = useState<string>("")
+  const latestCandle = candleData[candleData.length - 1]
+  const candleDirection = !latestCandle
+    ? "neutral"
+    : latestCandle.close > latestCandle.open
+      ? "bullish"
+      : latestCandle.close < latestCandle.open ? "bearish" : "neutral"
 
   const loadChartData = useCallback(async () => {
     setLoading(true)
@@ -181,7 +187,18 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
     candleSeriesRef.current.setData(candleData)
 
     const lastCandle = candleData[candleData.length - 1]
-    if (lastCandle && signal && !signal.error && candleSeriesRef.current) {
+    if (lastCandle && candleSeriesRef.current) {
+      const candleBullish = lastCandle.close >= lastCandle.open
+      createSeriesMarkers(candleSeriesRef.current, [{
+        time: lastCandle.time,
+        position: candleBullish ? "belowBar" : "aboveBar",
+        color: candleBullish ? "#4ade80" : "#f87171",
+        shape: candleBullish ? "arrowUp" : "arrowDown",
+        text: candleBullish ? "ŞAM ↑" : "ŞAM ↓",
+      }])
+    }
+    if (lastCandle && signal && !signal.error && signal.confidence !== undefined
+        && signal.confidence >= 70 && candleSeriesRef.current) {
       const isBullish = signal.direction === "long"
       const lastTime = lastCandle.time
       const levels = [
@@ -246,6 +263,20 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
           </select>
           <div className="text-base font-bold text-white font-mono">
             {livePrice && livePrice > 0 ? `$${livePrice.toFixed(2)}` : price ? `$${price}` : "N/A"}
+          </div>
+          <div className={cn(
+            "px-2 py-1 rounded border text-[10px] font-bold font-mono",
+            candleDirection === "bullish"
+              ? "text-green-300 bg-green-950/60 border-green-700/60"
+              : candleDirection === "bearish"
+                ? "text-red-300 bg-red-950/60 border-red-700/60"
+                : "text-gray-300 bg-gray-800 border-gray-700"
+          )}>
+            {candleDirection === "bullish"
+              ? "ŞAM ↑ BULLISH"
+              : candleDirection === "bearish"
+                ? "ŞAM ↓ BEARISH"
+                : "ŞAM → NEUTRAL"}
           </div>
           {(analysis?.details?.rsi) && (
             <div className="hidden sm:flex items-center gap-1.5 text-[10px]">

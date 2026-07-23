@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import {
   createChart, ColorType, CrosshairMode, LineStyle,
-  CandlestickSeries, HistogramSeries,
-  type IChartApi, type ISeriesApi, type Time,
+  CandlestickSeries, HistogramSeries, createSeriesMarkers,
+  type IChartApi, type ISeriesApi, type Time, type SeriesMarker,
 } from "lightweight-charts"
 import { api } from "@/lib/api"
 import { useWebSocket } from "@/hooks/useWebSocket"
@@ -50,6 +50,12 @@ export function TradingChart() {
   const [activeTool, setActiveTool] = useState<string | null>(null)
   const [showDrawingTools, setShowDrawingTools] = useState(false)
   const [showIndicators, setShowIndicators] = useState(false)
+  const latestCandle = candleData[candleData.length - 1]
+  const candleDirection = !latestCandle
+    ? "neutral"
+    : latestCandle.close > latestCandle.open
+      ? "bullish"
+      : latestCandle.close < latestCandle.open ? "bearish" : "neutral"
 
   useEffect(() => {
     let cancelled = false
@@ -114,6 +120,18 @@ export function TradingChart() {
       wickUpColor: "#22c55e",
     })
     candleSeriesRef.current.setData(candleData)
+    const latest = candleData[candleData.length - 1]
+    if (latest) {
+      const bullish = latest.close >= latest.open
+      const markers: SeriesMarker<Time>[] = [{
+        time: latest.time,
+        position: bullish ? "belowBar" : "aboveBar",
+        color: bullish ? "#4ade80" : "#f87171",
+        shape: bullish ? "arrowUp" : "arrowDown",
+        text: bullish ? "ŞAM ↑" : "ŞAM ↓",
+      }]
+      createSeriesMarkers(candleSeriesRef.current, markers)
+    }
 
     volumeSeriesRef.current = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -152,6 +170,16 @@ export function TradingChart() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-800">
         <div className="flex items-center gap-1">
+          <span className={cn(
+            "mr-2 px-2 py-1 rounded border text-[10px] font-bold font-mono",
+            candleDirection === "bullish"
+              ? "text-green-300 bg-green-950/60 border-green-700/60"
+              : candleDirection === "bearish"
+                ? "text-red-300 bg-red-950/60 border-red-700/60"
+                : "text-gray-300 bg-gray-800 border-gray-700"
+          )}>
+            {candleDirection === "bullish" ? "↑ BULLISH" : candleDirection === "bearish" ? "↓ BEARISH" : "→ NEUTRAL"}
+          </span>
           <button
             onClick={() => setShowDrawingTools(!showDrawingTools)}
             className={cn("p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800", showDrawingTools && "text-blue-400 bg-blue-600/20")}
