@@ -323,31 +323,15 @@ class DerivativesEngine:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        simulated_strikes = []
-        base_price = 50000.0
-        for i in range(-10, 11):
-            strike_price = base_price * (1 + i * 0.02)
-            gamma = abs(100 - abs(i) * 10) / 10000
-            oi = max(100, 1000 - abs(i) * 80)
-            gex = gamma * oi * strike_price
-            simulated_strikes.append({
-                "strike": round(strike_price, 2),
-                "gamma": round(gamma, 6),
-                "open_interest": round(oi, 0),
-                "gex": round(gex, 2),
-                "side": "call" if i > 0 else "put",
-            })
-
-        total_gamma = sum(s["gex"] for s in simulated_strikes)
-        simulated_strikes.sort(key=lambda x: abs(x["gex"]), reverse=True)
-
         return {
-            "data_source": "simulated",
-            "total_gamma_exposure": round(total_gamma, 2),
-            "gamma_levels": simulated_strikes[:30],
-            "gamma_positive": total_gamma > 0,
-            "interpretation": "Simulated gamma profile based on standard distribution",
-            "zero_gex_level": self._find_zero_gex(simulated_strikes),
+            "available": False,
+            "data_source": None,
+            "reason": "Real options gamma provider is not configured",
+            "total_gamma_exposure": None,
+            "gamma_levels": [],
+            "gamma_positive": None,
+            "interpretation": None,
+            "zero_gex_level": None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

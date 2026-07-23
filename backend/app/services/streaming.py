@@ -78,10 +78,27 @@ class StreamingService:
 
     async def _stream_orderflow(self, symbols: List[str]):
         from app.services.orderflow import orderflow_engine
+        from app.services.market import market_service
         while self._running:
             for sym in symbols:
                 try:
-                    snapshot = orderflow_engine.get_aggregated_snapshot(sym, None, None, None)
+                    orderbook, trades = await asyncio.gather(
+                        market_service.get_orderbook(sym, limit=50),
+                        market_service.get_trades(sym, limit=100),
+                    )
+                    bids = [
+                        {"price": level[0], "amount": level[1]}
+                        for level in orderbook.get("bids", [])
+                    ]
+                    asks = [
+                        {"price": level[0], "amount": level[1]}
+                        for level in orderbook.get("asks", [])
+                    ]
+                    if not bids or not asks:
+                        continue
+                    snapshot = orderflow_engine.get_aggregated_snapshot(
+                        sym, bids, asks, trades,
+                    )
                     await ws_manager.broadcast(Channel.ORDERFLOW, "orderflow_update", {
                         "symbol": sym,
                         "data": snapshot,
@@ -93,10 +110,38 @@ class StreamingService:
 
     async def _stream_derivatives(self, symbols: List[str]):
         from app.services.derivatives import derivatives_engine
+        from app.services.market import market_service
         while self._running:
             for sym in symbols:
                 try:
-                    snapshot = derivatives_engine.get_aggregated_derivatives_snapshot(sym)
+                    funding, oi, ticker = await asyncio.gather(
+                        market_service.get_funding_rate(sym),
+                        market_service.get_open_interest(sym),
+                        market_service.get_ticker(sym),
+                    )
+                    if funding.get("funding_rate") is None or oi.get("open_interest") is None:
+                        continue
+                    funding_time = funding.get("funding_time")
+                    next_funding = (
+                        datetime.fromtimestamp(funding_time / 1000, tz=timezone.utc)
+                        if isinstance(funding_time, (int, float))
+                        else None
+                    )
+                    snapshot = derivatives_engine.get_aggregated_derivatives_snapshot(
+                        sym,
+                        funding_rate=funding["funding_rate"],
+                        next_funding_time=next_funding,
+                        oi_current=oi["open_interest"],
+                        price_change_24h=ticker.get("change_percent"),
+                    )
+                    snapshot["long_short_ratio"] = {
+                        "available": False,
+                        "reason": "Real long/short provider not configured",
+                    }
+                    snapshot["liquidations"] = {
+                        "available": False,
+                        "reason": "Real liquidation provider not configured",
+                    }
                     await ws_manager.broadcast(Channel.DERIVATIVES, "derivatives_update", {
                         "symbol": sym,
                         "data": snapshot,

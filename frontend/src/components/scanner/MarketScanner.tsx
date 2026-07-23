@@ -30,6 +30,7 @@ interface ScannerResult {
   futures?: {
     liquidation?: unknown
   }
+  providerUnavailable?: boolean
 }
 
 export function MarketScanner() {
@@ -48,8 +49,19 @@ export function MarketScanner() {
     async function load() {
       setLoading(true)
       try {
-        const data = await api.scanAllV2(0)
+        const [data, whaleData] = await Promise.all([
+          api.scanAllV2(0),
+          api.getRecentWhales(10).catch(() => []),
+        ])
         const signals: ScannerResult[] = Array.isArray(data) ? data : []
+        const whaleSignals: ScannerResult[] = Array.isArray(whaleData)
+          ? whaleData.map((item: Record<string, unknown>) => ({
+              symbol: String(item.symbol || "N/A"),
+              direction: String(item.direction || "neutral"),
+              price: typeof item.price === "number" ? item.price : undefined,
+              reason: `Real whale transfer: ${String(item.amount ?? "N/A")}`,
+            }))
+          : []
         const long = signals.filter((s: ScannerResult) => (s.direction || s.signal) === "long" || (s.direction || s.signal) === "bullish" || (s.direction || s.signal) === "buy")
           .sort((a: ScannerResult, b: ScannerResult) => (b.confidence || 0) - (a.confidence || 0))
           .slice(0, 10)
@@ -61,7 +73,7 @@ export function MarketScanner() {
           volatility: signals.filter((s: ScannerResult) => s.details?.atr && s.details.atr > 2).slice(0, 5),
           volume: signals.filter((s: ScannerResult) => (s.scores?.volume || 0) > 0.3).slice(0, 5),
           liquidation: signals.filter((s: ScannerResult) => s.futures?.liquidation).slice(0, 5),
-          whale: signals.filter((s: ScannerResult) => (s.confidence || 0) > 80).slice(0, 5),
+          whale: whaleSignals.slice(0, 5),
         })
       } catch {
         setResults({ long: [], short: [], volatility: [], volume: [], liquidation: [], whale: [] })
@@ -84,6 +96,7 @@ export function MarketScanner() {
   ]
 
   const currentData = results[activeTab as keyof typeof results] || []
+  const providerUnavailable = activeTab === "liquidation" || activeTab === "whale"
 
   return (
     <div className="h-full overflow-y-auto bg-[#0d1117]">
@@ -132,7 +145,9 @@ export function MarketScanner() {
         ) : currentData.length === 0 ? (
           <div className="text-center py-12 text-gray-600">
             <Search className="w-8 h-8 mx-auto mb-2" />
-            <div className="text-sm">No results for this category</div>
+            <div className="text-sm">
+              {providerUnavailable ? "Real provider unavailable or no verified events" : "No real results for this category"}
+            </div>
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -194,5 +209,4 @@ export function MarketScanner() {
     </div>
   )
 }
-
 

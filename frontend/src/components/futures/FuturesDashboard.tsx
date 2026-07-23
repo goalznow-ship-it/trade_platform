@@ -24,13 +24,28 @@ export function FuturesDashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const signals = await api.scanAllV2(0)
-        setData(Array.isArray(signals) ? (signals as SignalItem[]).map((s) => ({
-          ...s,
-          funding_rate: s.funding_rate || 0,
-          long_probability: s.long_probability || 50,
-          short_probability: s.short_probability || 50,
-        })) : [])
+        const [scanResponse, fundingResponse] = await Promise.all([
+          api.institutionalScan(0, 30),
+          api.getFundingRates(30),
+        ])
+        const signals = Array.isArray(scanResponse) ? scanResponse : []
+        const funding = Array.isArray(fundingResponse?.funding_rates)
+          ? fundingResponse.funding_rates
+          : []
+        const fundingBySymbol = new Map<string, number | undefined>(
+          funding.map((item: SignalItem) => [item.symbol, item.funding_rate]),
+        )
+        setData(signals.map((signal: SignalItem & {
+          institutional_score?: {
+            long_probability?: number
+            short_probability?: number
+          }
+        }) => ({
+          ...signal,
+          funding_rate: fundingBySymbol.get(signal.symbol),
+          long_probability: signal.institutional_score?.long_probability,
+          short_probability: signal.institutional_score?.short_probability,
+        })))
       } catch {
         setData([])
       } finally {
@@ -111,8 +126,8 @@ export function FuturesDashboard() {
           </h2>
           <div className="space-y-1.5">
             {sortedByFunding.slice(0, 8).map((item, i) => {
-              const fr = item.funding_rate || 0
-              const isExtreme = Math.abs(fr) > 0.01
+              const fr = item.funding_rate
+              const isExtreme = typeof fr === "number" && Math.abs(fr) > 0.01
               return (
                 <div key={i}
                   className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20 hover:bg-gray-800/40 transition-colors">
@@ -125,8 +140,8 @@ export function FuturesDashboard() {
                   </span>
                   <div className="flex-1" />
                   <span className={cn("text-xs font-mono font-medium",
-                    fr > 0 ? "text-red-400" : fr < 0 ? "text-green-400" : "text-gray-500")}>
-                    {fr > 0 ? "+" : ""}{(fr * 100).toFixed(4)}%
+                    typeof fr === "number" && fr > 0 ? "text-red-400" : typeof fr === "number" && fr < 0 ? "text-green-400" : "text-gray-500")}>
+                    {typeof fr === "number" ? `${fr > 0 ? "+" : ""}${(fr * 100).toFixed(4)}%` : "N/A"}
                   </span>
                   {isExtreme && <Flame className="w-3.5 h-3.5 text-orange-400" />}
                   <span className={cn("text-xs font-mono",
@@ -156,7 +171,7 @@ export function FuturesDashboard() {
                   </div>
                   <span className="text-xs font-mono text-green-400 font-bold">{item.confidence || 0}%</span>
                   <span className="text-[10px] text-gray-500">
-                    FR: {(item.funding_rate || 0) > 0 ? "+" : ""}{(item.funding_rate || 0) * 100}%
+                    FR: {typeof item.funding_rate === "number" ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%` : "N/A"}
                   </span>
                 </div>
               ))}
@@ -181,7 +196,7 @@ export function FuturesDashboard() {
                   </div>
                   <span className="text-xs font-mono text-red-400 font-bold">{item.confidence || 0}%</span>
                   <span className="text-[10px] text-gray-500">
-                    FR: {(item.funding_rate || 0) > 0 ? "+" : ""}{(item.funding_rate || 0) * 100}%
+                    FR: {typeof item.funding_rate === "number" ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%` : "N/A"}
                   </span>
                 </div>
               ))}
@@ -225,13 +240,15 @@ export function FuturesDashboard() {
                     <td className={cn("py-2.5 pr-4 text-right font-mono",
                       (item.funding_rate || 0) > 0.005 ? "text-red-400" :
                       (item.funding_rate || 0) < -0.005 ? "text-green-400" : "text-gray-500")}>
-                      {(item.funding_rate || 0) > 0 ? "+" : ""}{(item.funding_rate || 0).toFixed(4)}%
+                      {typeof item.funding_rate === "number"
+                        ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%`
+                        : "N/A"}
                     </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-green-400">
-                      {item.long_probability?.toFixed(0) || 50}%
+                      {typeof item.long_probability === "number" ? `${item.long_probability.toFixed(0)}%` : "N/A"}
                     </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-red-400">
-                      {item.short_probability?.toFixed(0) || 50}%
+                      {typeof item.short_probability === "number" ? `${item.short_probability.toFixed(0)}%` : "N/A"}
                     </td>
                   </tr>
                 ))}
@@ -243,5 +260,3 @@ export function FuturesDashboard() {
     </div>
   )
 }
-
-

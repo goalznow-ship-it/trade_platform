@@ -55,10 +55,14 @@ class MarketService:
             return []
 
     async def get_ticker(self, symbol: str, exchange: str = 'binance') -> dict:
+        cache_key = f"ticker:{exchange}:{symbol}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
             t = await self._call_exchange(ex.fetch_ticker, symbol)
-            return {
+            result = {
                 'symbol': t['symbol'],
                 'price': t['last'],
                 'bid': t['bid'],
@@ -70,41 +74,94 @@ class MarketService:
                 'change_percent': t['percentage'],
                 'timestamp': t['timestamp'],
             }
+            await cache_set(cache_key, result, ttl=3)
+            return result
         except Exception:
             return {}
 
     async def get_orderbook(self, symbol: str, exchange: str = 'binance', limit: int = 50) -> dict:
+        cache_key = f"orderbook:{exchange}:{symbol}:{limit}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
             ob = await self._call_exchange(ex.fetch_order_book, symbol, limit)
-            return {
+            result = {
                 'bids': ob['bids'][:10],
                 'asks': ob['asks'][:10],
                 'timestamp': ob['timestamp'],
             }
+            await cache_set(cache_key, result, ttl=1)
+            return result
         except Exception:
             return {}
 
+    async def get_trades(self, symbol: str, exchange: str = 'binance', limit: int = 100) -> list:
+        cache_key = f"trades:{exchange}:{symbol}:{limit}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, list):
+            return cached
+        try:
+            ex = self.exchanges.get(exchange, self.exchanges['binance'])
+            trades = await self._call_exchange(ex.fetch_trades, symbol, limit=limit)
+            result = [
+                {
+                    'price': trade.get('price'),
+                    'amount': trade.get('amount'),
+                    'side': trade.get('side'),
+                    'timestamp': trade.get('timestamp'),
+                    'aggressive': trade.get('takerOrMaker') == 'taker',
+                }
+                for trade in trades
+                if trade.get('price') is not None and trade.get('amount') is not None
+            ]
+            await cache_set(cache_key, result, ttl=1)
+            return result
+        except Exception:
+            return []
+
     async def get_funding_rate(self, symbol: str, exchange: str = 'binance') -> dict:
+        cache_key = f"funding:{exchange}:{symbol}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
             funding = await self._call_exchange(ex.fetch_funding_rate, symbol)
-            return {
+            result = {
                 'symbol': funding['symbol'],
                 'funding_rate': funding['fundingRate'],
-                'funding_time': funding['fundingTime'],
+                'funding_time': (
+                    funding.get('fundingTimestamp')
+                    or funding.get('nextFundingTimestamp')
+                    or funding.get('timestamp')
+                ),
             }
+            await cache_set(cache_key, result, ttl=15)
+            return result
         except Exception:
             return {}
 
     async def get_open_interest(self, symbol: str, exchange: str = 'binance') -> dict:
+        cache_key = f"open-interest:{exchange}:{symbol}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict):
+            return cached
         try:
             ex = self.exchanges.get(exchange, self.exchanges['binance'])
             oi = await self._call_exchange(ex.fetch_open_interest, symbol)
-            return {
+            result = {
                 'symbol': oi['symbol'],
-                'open_interest': oi['openInterest'],
+                'open_interest': (
+                    oi.get('openInterestAmount')
+                    or oi.get('baseVolume')
+                    or oi.get('openInterest')
+                ),
+                'open_interest_value': oi.get('openInterestValue'),
             }
+            await cache_set(cache_key, result, ttl=10)
+            return result
         except Exception:
             return {}
 
@@ -146,7 +203,7 @@ class MarketService:
 
         results = []
         try:
-            markets = self.exchanges['binance'].load_markets()
+            markets = await self._call_exchange(self.exchanges['binance'].load_markets)
             for s in markets:
                 if query.upper() in s and '/USDT' in s:
                     results.append({

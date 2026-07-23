@@ -74,9 +74,9 @@ export function AIConfidencePanel() {
     )
   }
 
-  const confidence = top.confidence ?? top.overall_market_score ?? 50
-  const longProb = top.bull_probability ?? 50
-  const shortProb = top.bear_probability ?? 50
+  const confidence = top.confidence ?? top.overall_market_score
+  const longProb = top.bull_probability
+  const shortProb = top.bear_probability
 
   const regime = top.regime || (
     confidence >= 80 ? "Strong Trend" : confidence >= 60 ? "Trending" : confidence >= 40 ? "Neutral" : "Choppy"
@@ -149,7 +149,7 @@ export function AIConfidencePanel() {
         </div>
       ) : null}
 
-      <ScoreBar label="Overall" value={top.overall_market_score || 50} color="bg-blue-500" />
+      <ScoreBar label="Overall" value={top.overall_market_score} color="bg-blue-500" />
       <ScoreBar label="Confidence" value={confidence} color="bg-purple-500" />
 
       {factors.length > 0 && (

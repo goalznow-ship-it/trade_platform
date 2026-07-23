@@ -6,27 +6,44 @@ import { cn } from "@/lib/utils"
 import {
   Radar, Activity,
   BarChart3, Flame, DollarSign, ArrowUpDown,
-  RefreshCw, Wallet, AlertTriangle, ArrowUpRight, ArrowDownRight,
+  RefreshCw, Wallet, AlertTriangle,
 } from "lucide-react"
 
 interface MarketOverview {
   btc_dominance?: number
-  eth_btc_ratio?: number
-  funding_sentiment?: string
-  funding_change?: string
-  long_short_ratio?: number
+  btc_price?: number
+  eth_price?: number
   btc_change?: number
 }
 
 interface WhaleTransaction {
-  amount: string
+  amount?: string | number
+  value?: string | number
   symbol: string
-  direction: string
-  impact: number
+  direction?: string
+  impact?: number
+  type?: string
+  exchange?: string
+}
+
+interface OpenInterestItem {
+  symbol: string
+  open_interest?: number
+  open_interest_usd?: number
+  price?: number
+}
+
+interface FundingItem {
+  symbol: string
+  funding_rate?: number
+  price?: number
 }
 
 export function MarketRadar() {
   const [data, setData] = useState<MarketOverview | null>(null)
+  const [openInterest, setOpenInterest] = useState<OpenInterestItem[]>([])
+  const [fundingRates, setFundingRates] = useState<FundingItem[]>([])
+  const [whales, setWhales] = useState<WhaleTransaction[]>([])
   const [loading, setLoading] = useState(true)
   const [alerts, setAlerts] = useState<string[]>([])
 
@@ -34,18 +51,23 @@ export function MarketRadar() {
     async function load() {
       setLoading(true)
       try {
-        const [overview, whales] = await Promise.all([
+        const [overview, oiResponse, fundingResponse, whaleResponse] = await Promise.all([
           api.getOverview(),
+          api.getOpenInterest(5).catch(() => ({ open_interest: [] })),
+          api.getFundingRates(10).catch(() => ({ funding_rates: [] })),
           api.getRecentWhales(5).catch(() => []),
         ])
         setData(overview)
+        setOpenInterest(Array.isArray(oiResponse?.open_interest) ? oiResponse.open_interest : [])
+        setFundingRates(Array.isArray(fundingResponse?.funding_rates) ? fundingResponse.funding_rates : [])
+        setWhales(Array.isArray(whaleResponse) ? whaleResponse : [])
         const alerts: string[] = []
         if (overview?.btc_change && Math.abs(overview.btc_change) > 3) {
           alerts.push(`BTC moved ${overview.btc_change > 0 ? "+" : ""}${overview.btc_change.toFixed(1)}% — high volatility`)
         }
-        if (Array.isArray(whales) && whales.length > 0) {
-          whales.slice(0, 3).forEach((w: WhaleTransaction) => {
-            alerts.push(`Whale: ${w.amount} ${w.symbol} moved — ${w.direction} impact ${w.impact}%`)
+        if (Array.isArray(whaleResponse) && whaleResponse.length > 0) {
+          whaleResponse.slice(0, 3).forEach((w: WhaleTransaction) => {
+            alerts.push(`Whale: ${w.amount ?? "N/A"} ${w.symbol} — ${w.direction || "unknown"}`)
           })
         }
         if (alerts.length === 0) {
@@ -78,11 +100,33 @@ export function MarketRadar() {
     )
   }
 
+  const ethBtcRatio = data?.eth_price && data?.btc_price
+    ? data.eth_price / data.btc_price
+    : null
+  const validFunding = fundingRates
+    .map((item) => item.funding_rate)
+    .filter((rate): rate is number => typeof rate === "number")
+  const avgFunding = validFunding.length
+    ? validFunding.reduce((sum, rate) => sum + rate, 0) / validFunding.length
+    : null
+  const fundingSentiment = avgFunding === null
+    ? "N/A"
+    : avgFunding > 0.0001 ? "LONG BIAS" : avgFunding < -0.0001 ? "SHORT BIAS" : "NEUTRAL"
+  const formatUsd = (value?: number) => {
+    if (typeof value !== "number") return "N/A"
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      notation: "compact",
+      maximumFractionDigits: 2,
+    }).format(value)
+  }
+
   const items = [
-    { label: "BTC Dominance", value: `${(data?.btc_dominance || 52.4).toFixed(1)}%`, change: "+0.8%", icon: DollarSign, color: "text-orange-400", bg: "bg-orange-900/10", border: "border-orange-900/30" },
-    { label: "ETH/BTC Ratio", value: (data?.eth_btc_ratio || 0.042).toFixed(3), change: "-2.1%", icon: ArrowUpDown, color: "text-blue-400", bg: "bg-blue-900/10", border: "border-blue-900/30" },
-    { label: "Funding Sentiment", value: data?.funding_sentiment || "NEUTRAL", change: data?.funding_change || "+0.002%", icon: Activity, color: "text-yellow-400", bg: "bg-yellow-900/10", border: "border-yellow-900/30" },
-    { label: "Long/Short Ratio", value: (data?.long_short_ratio || 1.24).toFixed(2), change: "Bearish bias", icon: BarChart3, color: "text-red-400", bg: "bg-red-900/10", border: "border-red-900/30" },
+    { label: "BTC Dominance", value: typeof data?.btc_dominance === "number" ? `${data.btc_dominance.toFixed(1)}%` : "N/A", change: "Provider unavailable", icon: DollarSign, color: "text-orange-400", bg: "bg-orange-900/10", border: "border-orange-900/30" },
+    { label: "ETH/BTC Ratio", value: ethBtcRatio?.toFixed(4) ?? "N/A", change: "Live Binance prices", icon: ArrowUpDown, color: "text-blue-400", bg: "bg-blue-900/10", border: "border-blue-900/30" },
+    { label: "Funding Sentiment", value: fundingSentiment, change: avgFunding === null ? "N/A" : `${(avgFunding * 100).toFixed(4)}% avg`, icon: Activity, color: "text-yellow-400", bg: "bg-yellow-900/10", border: "border-yellow-900/30" },
+    { label: "Long/Short Ratio", value: "N/A", change: "Provider unavailable", icon: BarChart3, color: "text-gray-400", bg: "bg-gray-900/30", border: "border-gray-800" },
   ]
 
   return (
@@ -151,22 +195,15 @@ export function MarketRadar() {
               <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Open Interest</h2>
             </div>
             <div className="space-y-2">
-              {[
-                { sym: "BTC/USDT", val: "$24.5B", change: "+3.2%", dir: "up" },
-                { sym: "ETH/USDT", val: "$9.8B", change: "-1.5%", dir: "down" },
-                { sym: "SOL/USDT", val: "$3.2B", change: "+5.8%", dir: "up" },
-              ].map((item) => (
-                <div key={item.sym} className="flex items-center justify-between p-2 rounded-lg bg-gray-800/30">
-                  <span className="text-xs font-mono text-white">{item.sym}</span>
+              {openInterest.length > 0 ? openInterest.slice(0, 5).map((item) => (
+                <div key={item.symbol} className="flex items-center justify-between p-2 rounded-lg bg-gray-800/30">
+                  <span className="text-xs font-mono text-white">{item.symbol}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-gray-300">{item.val}</span>
-                    <span className={cn("text-[10px] font-mono flex items-center gap-0.5", item.dir === "up" ? "text-green-400" : "text-red-400")}>
-                      {item.dir === "up" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                      {item.change}
-                    </span>
+                    <span className="text-xs font-mono text-gray-300">{formatUsd(item.open_interest_usd)}</span>
+                    <span className="text-[10px] text-gray-600">live</span>
                   </div>
                 </div>
-              ))}
+              )) : <div className="text-xs text-gray-600 py-6 text-center">Open-interest data unavailable</div>}
             </div>
           </div>
 
@@ -176,29 +213,9 @@ export function MarketRadar() {
               <Flame className="w-4 h-4 text-red-400" />
               <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Liquidation Clusters</h2>
             </div>
-            <div className="space-y-2">
-              {[
-                { sym: "BTC/USDT", longs: "$12.5M", shorts: "$8.2M", total: "$20.7M" },
-                { sym: "ETH/USDT", longs: "$5.8M", shorts: "$3.4M", total: "$9.2M" },
-                { sym: "SOL/USDT", longs: "$2.1M", shorts: "$4.5M", total: "$6.6M" },
-              ].map((item) => (
-                <div key={item.sym} className="p-2 rounded-lg bg-gray-800/30">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-mono text-white">{item.sym}</span>
-                    <span className="text-[10px] text-gray-500">Total: {item.total}</span>
-                  </div>
-                  <div className="flex gap-1 h-1.5 rounded-full overflow-hidden bg-gray-800">
-                    <div className="h-full bg-green-500/60 rounded-l-full"
-                      style={{ width: `${(parseFloat(item.longs.replace(/[^0-9.]/g, "")) / parseFloat(item.total.replace(/[^0-9.]/g, ""))) * 100}%` }} />
-                    <div className="h-full bg-red-500/60 rounded-r-full"
-                      style={{ width: `${(parseFloat(item.shorts.replace(/[^0-9.]/g, "")) / parseFloat(item.total.replace(/[^0-9.]/g, ""))) * 100}%` }} />
-                  </div>
-                  <div className="flex justify-between mt-0.5 text-[9px]">
-                    <span className="text-green-400/70">{item.longs} L</span>
-                    <span className="text-red-400/70">{item.shorts} S</span>
-                  </div>
-                </div>
-              ))}
+            <div className="py-8 text-center">
+              <div className="text-sm font-mono text-gray-500">N/A</div>
+              <div className="text-[10px] text-gray-600 mt-1">Real liquidation provider not configured</div>
             </div>
           </div>
 
@@ -209,32 +226,35 @@ export function MarketRadar() {
               <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Whale Transactions</h2>
             </div>
             <div className="space-y-2">
-              {[
-                { sym: "BTC", amt: "+5,200 BTC", val: "$332M", type: "deposit", exchange: "Binance" },
-                { sym: "ETH", amt: "+45,000 ETH", val: "$142M", type: "withdrawal", exchange: "Coinbase" },
-                { sym: "USDT", amt: "+$200M", val: "$200M", type: "mint", exchange: "Tron" },
-              ].map((item, i) => (
+              {whales.length > 0 ? whales.map((item, i) => {
+                const type = item.type || item.direction || "unknown"
+                return (
                 <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-gray-800/30">
                   <div className={cn(
                     "w-6 h-6 rounded flex items-center justify-center text-[9px] font-bold",
-                    item.type === "deposit" ? "bg-red-900/40 text-red-400" :
-                    item.type === "withdrawal" ? "bg-green-900/40 text-green-400" : "bg-blue-900/40 text-blue-400"
+                    type === "deposit" ? "bg-red-900/40 text-red-400" :
+                    type === "withdrawal" ? "bg-green-900/40 text-green-400" : "bg-blue-900/40 text-blue-400"
                   )}>
-                    {item.type === "deposit" ? "↓" : item.type === "withdrawal" ? "↑" : "★"}
+                    {type === "deposit" ? "↓" : type === "withdrawal" ? "↑" : "★"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-medium text-white">{item.sym}</span>
-                      <span className="text-[10px] font-mono text-gray-300">{item.val}</span>
+                      <span className="text-xs font-mono font-medium text-white">{item.symbol}</span>
+                      <span className="text-[10px] font-mono text-gray-300">{String(item.value ?? "N/A")}</span>
                     </div>
                     <div className="flex items-center gap-1 text-[9px] text-gray-500">
-                      <span>{item.amt}</span>
+                      <span>{String(item.amount ?? "N/A")}</span>
                       <span>·</span>
-                      <span>{item.exchange}</span>
+                      <span>{item.exchange || type}</span>
                     </div>
                   </div>
                 </div>
-              ))}
+              )}) : (
+                <div className="py-8 text-center">
+                  <div className="text-sm font-mono text-gray-500">N/A</div>
+                  <div className="text-[10px] text-gray-600 mt-1">Real whale provider not configured</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -242,5 +262,3 @@ export function MarketRadar() {
     </div>
   )
 }
-
-

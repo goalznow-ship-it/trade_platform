@@ -16,8 +16,25 @@ export function SentimentWidget() {
   const fearGreed = useMarketStore((s) => s.fearGreed)
   const isLive = useMarketStore((s) => s.isLive)
 
-  const value = fearGreed?.value ?? 50
-  const classification = fearGreed?.classification || getClassification(value)
+  if (!fearGreed) {
+    return (
+      <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Market Sentiment</h3>
+          <Brain className="w-3.5 h-3.5 text-purple-400" />
+        </div>
+        <div className="py-5 text-center">
+          <div className="text-lg font-bold font-mono text-gray-500">N/A</div>
+          <div className="text-[10px] text-gray-600 mt-1">
+            {isLive ? "Waiting for verified provider data" : "Live feed unavailable"}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const value = fearGreed.value
+  const classification = fearGreed.classification || getClassification(value)
   const SentimentIcon = value <= 25 ? Frown : value <= 45 ? Meh : value <= 55 ? Meh : Smile
   const isBullish = value > 55
 
@@ -65,9 +82,6 @@ export function SentimentWidget() {
             <div className="mt-1.5 text-[10px] text-gray-500">
               Market sentiment suggests bullish conditions
             </div>
-          )}
-          {!fearGreed && !isLive && (
-            <div className="mt-1.5 text-[9px] text-gray-700 animate-pulse">Waiting for data...</div>
           )}
         </div>
       </div>

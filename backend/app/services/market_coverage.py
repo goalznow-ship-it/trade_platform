@@ -6,6 +6,7 @@ Market Coverage Service
 """
 from datetime import datetime, timezone
 from typing import List
+import asyncio
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
@@ -166,21 +167,25 @@ class MarketCoverageService:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
-        results = []
-        for s in symbols[:count]:
+        async def load_symbol(s: str):
             try:
-                f = await market_service.get_funding_rate(s)
+                f, t = await asyncio.gather(
+                    market_service.get_funding_rate(s),
+                    market_service.get_ticker(s),
+                )
                 if f and f.get('funding_rate') is not None:
-                    t = await market_service.get_ticker(s)
-                    results.append({
+                    return {
                         'symbol': s,
                         'funding_rate': round(f['funding_rate'], 6),
                         'price': t.get('price') if t else None,
                         'change_percent': t.get('change_percent') if t else None,
-                    })
+                    }
             except Exception:
-                continue
+                pass
+            return None
 
+        loaded = await asyncio.gather(*(load_symbol(s) for s in symbols[:count]))
+        results = [item for item in loaded if item is not None]
         results.sort(key=lambda r: abs(r['funding_rate']), reverse=True)
         return results
 
@@ -188,24 +193,31 @@ class MarketCoverageService:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
-        results = []
-        for s in symbols[:count]:
+        async def load_symbol(s: str):
             try:
-                oi = await market_service.get_open_interest(s)
+                oi, t = await asyncio.gather(
+                    market_service.get_open_interest(s),
+                    market_service.get_ticker(s),
+                )
                 if oi and oi.get('open_interest') is not None:
-                    t = await market_service.get_ticker(s)
                     oi_value = oi['open_interest']
                     market_price = t.get('price', 0) if t else 0
-                    results.append({
+                    oi_usd = oi.get('open_interest_value')
+                    if oi_usd is None and market_price:
+                        oi_usd = oi_value * market_price
+                    return {
                         'symbol': s,
                         'open_interest': round(oi_value, 2),
-                        'open_interest_usd': round(oi_value * market_price, 0) if market_price else 0,
+                        'open_interest_usd': round(oi_usd, 0) if oi_usd is not None else None,
                         'price': market_price,
                         'change_percent': t.get('change_percent') if t else None,
-                    })
+                    }
             except Exception:
-                continue
+                pass
+            return None
 
+        loaded = await asyncio.gather(*(load_symbol(s) for s in symbols[:count]))
+        results = [item for item in loaded if item is not None]
         results.sort(key=lambda r: r['open_interest_usd'], reverse=True)
         return results
 

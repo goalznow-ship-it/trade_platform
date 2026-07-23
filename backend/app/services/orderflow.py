@@ -3,7 +3,7 @@ Order Flow Analysis Engine
 
 Institutional-grade order flow analytics:
 - Order book imbalance and pressure ratios
-- Cumulative volume delta (CVD) simulation
+- Order-book depth delta and trade-derived CVD
 - Large order detection (>0.5% of total)
 - Liquidity vacuum detection
 - Spoof detection heuristics
