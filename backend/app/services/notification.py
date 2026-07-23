@@ -1,11 +1,10 @@
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.models.admin import Notification
 from app.core.logging import logger
 from app.core.websocket_manager import ws_manager
-from app.core.redis import redis_client
 
 
 class NotificationService:

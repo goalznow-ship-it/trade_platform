@@ -1,7 +1,6 @@
 import httpx
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
-from typing import Optional
 from textblob import TextBlob
 from app.core.logging import logger
 

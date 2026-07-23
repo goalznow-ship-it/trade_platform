@@ -1,7 +1,6 @@
 import numpy as np
-from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from app.models.risk import RiskProfile, RiskSnapshot
 from app.models.trade import TradeHistory, Position
 from app.core.logging import logger

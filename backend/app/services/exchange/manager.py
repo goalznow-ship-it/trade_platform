@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable
 from datetime import datetime, timezone
 from cryptography.fernet import Fernet
 from app.core.logging import logger
@@ -19,12 +19,16 @@ ENCRYPTION_KEY = None
 def get_encryption_key() -> bytes:
     global ENCRYPTION_KEY
     if ENCRYPTION_KEY is None:
-        import os
-        key = os.environ.get("EXCHANGE_ENCRYPTION_KEY")
-        if key:
-            ENCRYPTION_KEY = key.encode() if len(key) == 44 else Fernet.generate_key()
-        else:
-            ENCRYPTION_KEY = Fernet.generate_key()
+        from app.core.config import settings
+        key = settings.EXCHANGE_ENCRYPTION_KEY
+        if not key:
+            raise RuntimeError("EXCHANGE_ENCRYPTION_KEY is required to store exchange credentials")
+        try:
+            candidate = key.encode()
+            Fernet(candidate)
+        except Exception as exc:
+            raise RuntimeError("EXCHANGE_ENCRYPTION_KEY must be a valid Fernet key") from exc
+        ENCRYPTION_KEY = candidate
     return ENCRYPTION_KEY
 
 
@@ -51,12 +55,12 @@ class ExchangeManager:
         if self._initialized:
             return
         self._initialized = True
-        self._exchanges: Dict[str, BaseExchange] = {}
+        self._exchange_factories: Dict[str, Callable[[], BaseExchange]] = {}
         self._user_connections: Dict[int, Dict[str, BaseExchange]] = {}
         self._reconnect_tasks: Dict[str, asyncio.Task] = {}
 
-    def register_exchange(self, name: str, exchange: BaseExchange) -> None:
-        self._exchanges[name] = exchange
+    def register_exchange(self, name: str, factory: Callable[[], BaseExchange]) -> None:
+        self._exchange_factories[name] = factory
 
     async def get_user_exchange(self, user_id: int, exchange_name: str,
                                  db: AsyncSession) -> Optional[BaseExchange]:
@@ -80,22 +84,22 @@ class ExchangeManager:
         secret_key = decrypt_api_key(creds.secret_key)
         passphrase = decrypt_api_key(creds.passphrase) if creds.passphrase else None
 
-        exchange_class = self._exchanges.get(exchange_name)
-        if not exchange_class:
+        factory = self._exchange_factories.get(exchange_name)
+        if not factory:
             return None
-
-        connected = await exchange_class.connect(api_key, secret_key, passphrase)
+        exchange_client = factory()
+        connected = await exchange_client.connect(api_key, secret_key, passphrase)
         if not connected:
             return None
 
         if user_id not in self._user_connections:
             self._user_connections[user_id] = {}
-        self._user_connections[user_id][exchange_name] = exchange_class
+        self._user_connections[user_id][exchange_name] = exchange_client
 
         creds.last_used = datetime.now(timezone.utc)
         await db.commit()
 
-        return exchange_class
+        return exchange_client
 
     async def save_credentials(self, user_id: int, exchange: str,
                                 api_key: str, secret_key: str,
@@ -130,6 +134,7 @@ class ExchangeManager:
                 db.add(creds)
 
             await db.commit()
+            await self.disconnect_user(user_id, exchange)
             return True
         except Exception as e:
             logger.error(f"Save credentials error: {e}")
@@ -148,6 +153,7 @@ class ExchangeManager:
             if creds:
                 creds.is_active = False
                 await db.commit()
+            await self.disconnect_user(user_id, exchange)
             return True
         except Exception as e:
             logger.error(f"Remove credentials error: {e}")
@@ -177,6 +183,13 @@ class ExchangeManager:
                         logger.info(f"Reconnecting {exchange_name} for user {uid}")
                         await ex.reconnect()
         self._reconnect_tasks[exchange_name] = asyncio.create_task(loop())
+
+    async def shutdown(self) -> None:
+        for task in self._reconnect_tasks.values():
+            task.cancel()
+        self._reconnect_tasks.clear()
+        for user_id in list(self._user_connections):
+            await self.disconnect_user(user_id)
 
     async def get_position(self, user_id: int, exchange_name: str,
                             symbol: str, db: AsyncSession) -> Optional[PositionResult]:
@@ -219,4 +232,4 @@ class ExchangeManager:
 
 
 exchange_manager = ExchangeManager()
-exchange_manager.register_exchange("binance", BinanceFuturesExchange())
+exchange_manager.register_exchange("binance", BinanceFuturesExchange)

@@ -15,11 +15,10 @@ Outputs: overall score, bull/bear/crash/squeeze probabilities, regime,
          contributing factors, alt season signal.
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict
 from datetime import datetime, timezone
 import asyncio
 import math
-from collections import defaultdict
 from app.core.logging import logger
 
 try:
@@ -946,6 +945,8 @@ class AICentralBrain:
                 return {"score": 50.0, "factors": ["Macro engine unavailable"]}
 
             snapshot = macro_engine.get_macro_snapshot()
+            if not snapshot.get("available"):
+                return {"score": None, "available": False, "factors": ["Macro data unavailable"]}
             score = 50.0
             factors = []
 
@@ -1028,6 +1029,8 @@ class AICentralBrain:
                 return {"score": 50.0, "factors": ["On-chain engine unavailable"]}
 
             snapshot = onchain_engine.get_onchain_snapshot(symbol)
+            if not snapshot.get("available"):
+                return {"score": None, "available": False, "factors": ["On-chain data unavailable"]}
             score = snapshot.get("combined_score", 50.0)
             factors = []
 
@@ -1091,6 +1094,8 @@ class AICentralBrain:
                 return {"score": 50.0, "factors": ["Social sentiment engine unavailable"]}
 
             snapshot = social_sentiment.get_social_sentiment_snapshot(symbol)
+            if not snapshot.get("available"):
+                return {"score": None, "available": False, "factors": ["Social sentiment unavailable"]}
             score = snapshot.get("combined_score", 50.0)
             factors = []
 

@@ -1,4 +1,3 @@
-from typing import Optional, List
 from app.services.indicators import indicator_service
 from app.services.ai_analysis import ai_engine
 from app.core.logging import logger
@@ -45,12 +44,12 @@ class SignalService:
         if supertrend_data.get('current_direction') == 'uptrend' and rsi['current'] < 70:
             signals.append(self._create_indicator_signal(
                 symbol, 'supertrend', 'long', current_price, ai_result,
-                f"Supertrend uptrend"
+                "Supertrend uptrend"
             ))
         elif supertrend_data.get('current_direction') == 'downtrend' and rsi['current'] > 30:
             signals.append(self._create_indicator_signal(
                 symbol, 'supertrend', 'short', current_price, ai_result,
-                f"Supertrend downtrend"
+                "Supertrend downtrend"
             ))
 
         signals = sorted(signals, key=lambda s: s['confidence'], reverse=True)[:5]

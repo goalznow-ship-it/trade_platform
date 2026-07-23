@@ -56,9 +56,9 @@ export function WatchlistPanel() {
     loadWatchlists()
   }
 
-  async function handleRemoveSymbol(symbolId: number) {
+  async function handleRemoveSymbol(symbol: string) {
     if (!activeId) return
-    await api.removeWatchlistSymbol(activeId, symbolId)
+    await api.removeWatchlistSymbol(activeId, symbol)
     loadWatchlists()
   }
 
@@ -135,7 +135,7 @@ export function WatchlistPanel() {
             <span className="text-sm text-gray-200 font-mono flex-1">{s.symbol}</span>
             <Badge variant="info" className="text-[9px]">{s.exchange || "BINANCE"}</Badge>
             <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveSymbol(s.id) }}
+              onClick={(e) => { e.stopPropagation(); handleRemoveSymbol(s.symbol) }}
               className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100"
             >
               <Trash2 className="w-3 h-3" />

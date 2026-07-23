@@ -1,5 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Text, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 import enum
@@ -16,6 +15,7 @@ class ExchangeName(str, enum.Enum):
 
 class ExchangeCredentials(Base):
     __tablename__ = "exchange_credentials"
+    __table_args__ = (UniqueConstraint("user_id", "exchange", name="uq_exchange_credentials_user_exchange"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

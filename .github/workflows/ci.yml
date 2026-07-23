@@ -33,10 +33,10 @@ jobs:
           pip install ruff mypy
 
       - name: Lint with ruff
-        run: ruff check app/ --exit-zero
+        run: ruff check app/
 
       - name: Type check with mypy
-        run: mypy app/ --ignore-missing-imports --exit-zero
+        run: mypy app/ --ignore-missing-imports
 
   frontend-lint:
     name: Frontend Lint
@@ -59,10 +59,16 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint -- --exit-on-fatal-error
+        run: npm run lint -- --max-warnings=0
+
+      - name: Type check
+        run: npx tsc --noEmit
 
       - name: Build
         run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
   backend-test:
     name: Backend Tests
@@ -106,7 +112,12 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
 
       - name: Run tests
         run: pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml
@@ -120,7 +131,7 @@ jobs:
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
-          file: backend/coverage.xml
+          files: backend/coverage.xml
 
   docker-build:
     name: Docker Build Check
@@ -164,6 +175,5 @@ jobs:
           script: |
             cd /opt/trading-platform
             git pull origin main
-            docker compose -f docker/docker-compose.yml pull
             docker compose -f docker/docker-compose.yml up -d --build
-            docker system prune -f
+            docker compose -f docker/docker-compose.yml ps

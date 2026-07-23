@@ -1,7 +1,5 @@
 import numpy as np
-from typing import Optional, List
 from app.services.indicators import indicator_service
-from app.services.market import market_service
 from app.core.logging import logger
 
 class AIAnalysisEngine:

@@ -1,14 +1,12 @@
 import numpy as np
 from datetime import datetime, timezone, timedelta
-from calendar import month_name
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, extract
+from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.trade import Trade, TradeHistory
-from app.models.portfolio import Portfolio, PortfolioAsset
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 

@@ -4,9 +4,8 @@ Market Coverage Service
 - Auto-updates weekly from Binance volume ranking
 - Cached symbols with fallback
 """
-import asyncio
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 

@@ -3,14 +3,13 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.rate_limiter import daily_tracker
 from app.models.user import User
 from app.models.analysis import Signal
 from app.ai_engine.engine import ai_engine
-from app.core.logging import logger
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
@@ -29,7 +28,6 @@ async def _enforce_signal_limit(user: User):
     return remaining
 
 
-@router.get("/{symbol}")
 async def get_signal(
     symbol: str, timeframe: str = "1h",
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
@@ -38,7 +36,7 @@ async def get_signal(
     signal = await ai_engine.generate_signal(symbol, timeframe)
     if not signal:
         raise HTTPException(503, "Unable to generate signal - data unavailable")
-    signal["remaining_daily"] = daily_tracker.daily_usage(user.id)
+    signal["remaining_daily"] = max(0, {"free": 3, "pro": 999999, "elite": 999999}.get(user.subscription_tier or "free", 3) - daily_tracker.daily_usage(user.id))
     return signal
 
 @router.get("/generate/{symbol}")
@@ -50,7 +48,7 @@ async def generate_signal(
     signal = await ai_engine.generate_signal(symbol, timeframe)
     if not signal:
         raise HTTPException(503, "Unable to generate signal - data unavailable")
-    signal["remaining_daily"] = daily_tracker.daily_usage(user.id)
+    signal["remaining_daily"] = max(0, {"free": 3, "pro": 999999, "elite": 999999}.get(user.subscription_tier or "free", 3) - daily_tracker.daily_usage(user.id))
     return signal
 
 @router.get("/scan")
@@ -60,7 +58,7 @@ async def scan_all(
 ):
     await _enforce_signal_limit(user)
     signals = await ai_engine.scan_all(min_confidence=min_confidence)
-    signals["remaining_daily"] = daily_tracker.daily_usage(user.id)
+    signals["remaining_daily"] = max(0, {"free": 3, "pro": 999999, "elite": 999999}.get(user.subscription_tier or "free", 3) - daily_tracker.daily_usage(user.id))
     return signals
 
 @router.get("/history")
@@ -69,7 +67,7 @@ async def signal_history(
     limit: int = 50,
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
-    q = select(Signal).where(Signal.symbol_id == user.id)
+    q = select(Signal)
     if symbol:
         q = q.where(Signal.symbol == symbol)
     q = q.order_by(Signal.created_at.desc()).limit(limit)
@@ -83,3 +81,13 @@ async def signal_history(
         "result": getattr(s, 'result', None),
         "created_at": str(s.created_at),
     } for s in signals]
+
+
+@router.get("/{symbol}")
+async def get_signal_legacy(
+    symbol: str,
+    timeframe: str = "1h",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_signal(symbol, timeframe, user, db)

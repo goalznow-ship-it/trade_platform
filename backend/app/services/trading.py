@@ -1,6 +1,4 @@
 import ccxt
-from typing import Optional, List
-from datetime import datetime
 from app.core.logging import logger
 
 class TradingService:

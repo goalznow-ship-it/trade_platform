@@ -19,10 +19,8 @@ Classification:
   <70:    Reject
 """
 import numpy as np
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from app.services.indicators import indicator_service
-from app.services.market import market_service
-from app.core.logging import logger
 
 
 class InstitutionalScorer:
@@ -263,9 +261,9 @@ class InstitutionalScorer:
 
         close_prices = [d["close"] for d in data]
         if len(close_prices) >= 20:
-            if current_vol > avg_vol and closes[-1] > closes[-2]:
+            if current_vol > avg_vol and close_prices[-1] > close_prices[-2]:
                 score += 3
-            elif current_vol > avg_vol and closes[-1] < closes[-2]:
+            elif current_vol > avg_vol and close_prices[-1] < close_prices[-2]:
                 score -= 3
 
         return max(-self.volume_weight, min(self.volume_weight, score))

@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-from typing import Optional
 from app.services.ai_analysis import ai_engine
 from app.services.market import market_service
 from app.services.indicators import indicator_service

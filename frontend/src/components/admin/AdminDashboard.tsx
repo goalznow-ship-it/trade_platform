@@ -45,29 +45,57 @@ interface AdminRevenue {
   paid_subscriptions?: number
 }
 
+interface AdminHealth {
+  status?: string
+  services?: { redis?: string; postgres?: string; websocket?: string }
+}
+interface TradingControl {
+  configured: boolean
+  halted: boolean
+  reason?: string
+  accepting_live_orders: boolean
+}
+interface ProviderHealth {
+  providers: Record<string, {
+    status: string
+    configured: boolean
+    consecutive_failures: number
+    last_error?: string
+  }>
+}
+
 export function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [signals, setSignals] = useState<AdminSignal[]>([])
   const [, setSubscriptions] = useState<AdminUser[]>([])
   const [revenue, setRevenue] = useState<AdminRevenue | null>(null)
+  const [health, setHealth] = useState<AdminHealth | null>(null)
+  const [tradingControl, setTradingControl] = useState<TradingControl | null>(null)
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<string>("overview")
 
   const load = useCallback(async () => {
     try {
-      const [s, u, sig, sub, rev] = await Promise.all([
+      const [s, u, sig, sub, rev, healthResult, control, providers] = await Promise.all([
         api.getAdminStats().catch(() => null),
         api.getAdminUsers().catch(() => []),
         api.getAdminSignals().catch(() => []),
         request("/api/v1/admin/subscriptions").catch(() => []),
         request("/api/v1/admin/revenue").catch(() => null),
+        api.getAdminHealth().catch(() => null),
+        api.getTradingControl().catch(() => null),
+        api.getProviderHealth().catch(() => null),
       ])
       setStats(s)
       setUsers(Array.isArray(u) ? u : [])
       setSignals(Array.isArray(sig) ? sig : [])
       setSubscriptions(Array.isArray(sub) ? sub : [])
       setRevenue(rev)
+      setHealth(healthResult)
+      setTradingControl(control)
+      setProviderHealth(providers)
     } finally {
       setLoading(false)
     }
@@ -161,10 +189,10 @@ export function AdminDashboard() {
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
-                  { label: "API", status: "operational", icon: Activity },
-                  { label: "Database", status: "connected", icon: Database },
-                  { label: "WebSocket", status: `${10} clients`, icon: Wifi },
-                  { label: "Cache", status: "connected", icon: Zap },
+                  { label: "API", status: health?.status || "unavailable", icon: Activity },
+                  { label: "Database", status: health?.services?.postgres || "unavailable", icon: Database },
+                  { label: "WebSocket", status: health?.services?.websocket || "unavailable", icon: Wifi },
+                  { label: "Cache", status: health?.services?.redis || "unavailable", icon: Zap },
                 ].map((s) => (
                   <div key={s.label} className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-800/30">
                     <div className="w-2 h-2 rounded-full bg-green-400" />
@@ -173,6 +201,57 @@ export function AdminDashboard() {
                       <div className="text-[10px] text-green-400">{s.status}</div>
                     </div>
                     <s.icon className="w-3.5 h-3.5 text-gray-600" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Live Trading Control</h2>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  {!tradingControl?.configured ? "Disabled by server configuration" :
+                    tradingControl.halted ? `Emergency halt: ${tradingControl.reason || "No reason supplied"}` :
+                    "Live orders are enabled"}
+                </p>
+              </div>
+              <button
+                disabled={!tradingControl?.configured}
+                onClick={async () => {
+                  if (!tradingControl) return
+                  const halted = !tradingControl.halted
+                  const updated = await api.setTradingControl(
+                    halted, halted ? "Emergency halt from admin panel" : "Trading resumed",
+                  )
+                  setTradingControl({ ...tradingControl, ...updated, accepting_live_orders: !halted })
+                }}
+                className={cn(
+                  "px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-40",
+                  tradingControl?.halted ? "bg-green-600 text-white" : "bg-red-600 text-white",
+                )}
+              >
+                {tradingControl?.halted ? "Resume Trading" : "Emergency Halt"}
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Data Providers</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                {Object.entries(providerHealth?.providers || {}).map(([name, provider]) => (
+                  <div key={name} className="rounded-lg bg-gray-800/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-300">{name.replaceAll("_", " ")}</span>
+                      <span className={cn(
+                        "text-[9px] uppercase",
+                        provider.status === "healthy" ? "text-green-400" :
+                          provider.status === "not_configured" ? "text-gray-500" : "text-red-400",
+                      )}>{provider.status}</span>
+                    </div>
+                    {provider.last_error && (
+                      <p className="mt-1 text-[9px] text-red-400 truncate" title={provider.last_error}>
+                        {provider.last_error}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

@@ -1,6 +1,6 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from app.models.watchlist import Watchlist, WatchlistSymbol
 from app.core.logging import logger

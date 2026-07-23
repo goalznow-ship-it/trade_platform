@@ -1,6 +1,3 @@
-import asyncio
-from typing import Optional, List
-from datetime import datetime, timezone
 from textblob import TextBlob
 from app.core.logging import logger
 

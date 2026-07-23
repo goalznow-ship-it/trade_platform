@@ -51,7 +51,9 @@ sed -i "s/server_name trading.example.com;/server_name $DOMAIN;/g" nginx/nginx.c
 
 # Copy env file
 if [ ! -f backend/.env ]; then
-    cp backend/.env.example backend/.env 2>/dev/null || true
+    cp backend/.env.example backend/.env
+    echo "Created backend/.env. Replace placeholder secrets before deploying."
+    exit 1
 fi
 
 # Generate secure secret key

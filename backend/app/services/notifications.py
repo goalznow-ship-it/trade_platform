@@ -3,7 +3,6 @@ Multi-channel Notification Service
 Supports: in-app WebSocket, Telegram, email
 """
 
-from typing import Optional
 from datetime import datetime, timezone
 from app.core.websocket_manager import ws_manager
 from app.core.logging import logger

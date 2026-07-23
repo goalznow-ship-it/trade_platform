@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 import math
-from typing import Optional, List
-from datetime import datetime, timezone
+from typing import Optional
 from collections import defaultdict
 from app.core.logging import logger
 
@@ -18,11 +17,12 @@ class BacktestService:
         timeframe: str = "1h",
         initial_balance: float = 10000,
         fee_rate: float = 0.0004,
+        slippage_bps: float = 2.0,
         leverage: int = 1,
         risk_per_trade: float = 0.02,
     ) -> dict:
         if len(data) < 100:
-            return {"error": "Insufficient data (need 100+ candles)"}
+            return {"error": "Insufficient data"}
 
         df = pd.DataFrame(data)
         if "time" in df.columns:
@@ -32,7 +32,6 @@ class BacktestService:
 
         from app.services.institutional_scoring import institutional_scorer
         from app.services.smc_engine import smc_engine
-        from app.services.professional_risk import professional_risk
 
         balance = initial_balance
         peak_balance = initial_balance
@@ -55,7 +54,8 @@ class BacktestService:
 
             if signal and signal["action"] != 0 and position is None:
                 position = self._open_position(
-                    signal, current, balance, risk_per_trade, leverage,
+                    signal, current, balance, risk_per_trade, leverage, i,
+                    slippage_bps,
                 )
                 trade_entry_balance = balance
 
@@ -66,7 +66,7 @@ class BacktestService:
 
                 if exit_price:
                     pnl, pnl_pct = self._close_trade(
-                        position, exit_price, fee_rate,
+                        position, exit_price, fee_rate, slippage_bps,
                     )
                     balance += pnl
 
@@ -102,9 +102,6 @@ class BacktestService:
 
             if balance > peak_balance:
                 peak_balance = balance
-
-        if not trades:
-            return {"error": "No trades generated"}
 
         return self._compute_metrics(
             trades, equity_curve, daily_balances, monthly_pnl,
@@ -148,23 +145,27 @@ class BacktestService:
                 "score": abs_score,
                 "classification": score_result.get("classification", "reject"),
             }
-        except Exception as e:
+        except Exception:
             return None
 
     def _open_position(self, signal: dict, current_row, balance: float,
-                       risk_per_trade: float, leverage: int) -> dict:
+                       risk_per_trade: float, leverage: int, entry_index: int,
+                       slippage_bps: float) -> dict:
         entry = signal["entry_price"]
         sl = signal["stop_loss"]
         direction = signal["direction"]
 
         risk_amount = balance * risk_per_trade
         risk_per_unit = abs(entry - sl)
-        position_size = (risk_amount / risk_per_unit) * leverage if risk_per_unit > 0 else 0
+        risk_sized_quantity = risk_amount / risk_per_unit if risk_per_unit > 0 else 0
+        max_quantity = (balance * leverage) / entry if entry > 0 else 0
+        position_size = min(risk_sized_quantity, max_quantity)
 
         if direction == "long":
             side = 1
         else:
             side = -1
+        entry *= 1 + (slippage_bps / 10000) * side
 
         return {
             "entry_price": entry,
@@ -174,7 +175,7 @@ class BacktestService:
             "leverage": leverage,
             "risk_amount": risk_amount,
             "entry_balance": balance,
-            "entry_index": 0,
+            "entry_index": entry_index,
             "take_profit_1": signal.get("take_profit_1"),
             "take_profit_2": signal.get("take_profit_2"),
             "take_profit_3": signal.get("take_profit_3"),
@@ -225,13 +226,17 @@ class BacktestService:
 
         return None, None
 
-    def _close_trade(self, position: dict, exit_price: float, fee_rate: float) -> tuple:
+    def _close_trade(
+        self, position: dict, exit_price: float, fee_rate: float,
+        slippage_bps: float,
+    ) -> tuple:
         ep = position["entry_price"]
         size = position["size"]
         side = position["side"]
 
+        exit_price *= 1 - (slippage_bps / 10000) * side
         gross_pnl = (exit_price - ep) * size * side
-        fee = abs(gross_pnl) * fee_rate
+        fee = (abs(ep * size) + abs(exit_price * size)) * fee_rate
         pnl = gross_pnl - fee
 
         entry_balance = position.get("entry_balance", 10000)

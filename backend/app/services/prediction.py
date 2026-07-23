@@ -1,7 +1,3 @@
-import random
-import math
-from datetime import datetime, timedelta
-from typing import Optional
 from app.services.ai_analysis import ai_engine
 from app.services.market import market_service
 

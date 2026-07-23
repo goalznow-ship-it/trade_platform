@@ -1,8 +1,4 @@
 import ccxt
-import yfinance as yf
-import pandas as pd
-from typing import Optional, List
-from datetime import datetime, timezone
 import asyncio
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
@@ -64,7 +60,7 @@ class MarketService:
                 'change_percent': t['percentage'],
                 'timestamp': t['timestamp'],
             }
-        except Exception as e:
+        except Exception:
             return {}
 
     async def get_orderbook(self, symbol: str, exchange: str = 'binance', limit: int = 50) -> dict:

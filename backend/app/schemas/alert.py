@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any
 from datetime import datetime
-from app.models.alert import AlertType, AlertChannel, AlertCondition
+from app.models.alert import AlertType, AlertCondition
 
 
 class AlertCreate(BaseModel):

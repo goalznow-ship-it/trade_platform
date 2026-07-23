@@ -1,5 +1,5 @@
 import ccxt
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 

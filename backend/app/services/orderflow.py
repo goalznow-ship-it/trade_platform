@@ -13,9 +13,8 @@ Institutional-grade order flow analytics:
 """
 
 import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import List, Dict
 from datetime import datetime, timezone
-from app.services.indicators import indicator_service
 from app.core.logging import logger
 
 

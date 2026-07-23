@@ -2,11 +2,14 @@ import pytest
 import json
 from fastapi.testclient import TestClient
 from app.main import app
+from app.core.security import require_admin
 
 
 def test_websocket_stats():
+    app.dependency_overrides[require_admin] = lambda: object()
     client = TestClient(app)
     resp = client.get("/ws/stats")
+    app.dependency_overrides.pop(require_admin, None)
     assert resp.status_code == 200
     data = resp.json()
     assert "total_clients" in data

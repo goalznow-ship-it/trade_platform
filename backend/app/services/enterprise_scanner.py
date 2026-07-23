@@ -1,8 +1,7 @@
 import asyncio
-from typing import Optional, List, Callable
+from typing import Optional, List
 from app.services.market import market_service
 from app.services.indicators import indicator_service
-from app.services.ai_analysis import ai_engine
 from app.core.logging import logger
 
 

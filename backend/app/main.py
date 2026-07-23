@@ -31,39 +31,43 @@ from app.services.paper_trading import paper_trading_service
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.redis import redis_client
-    await init_db()
+    if settings.ENVIRONMENT.lower() != "production":
+        await init_db()
     await ws_manager.start()
-    await binance_ws.start()
-    top_symbols = await market_coverage.get_top_symbols(30)
-    await binance_ws.subscribe_price(top_symbols)
-    await binance_ws.subscribe_klines(top_symbols[:10], "1m")
-    await binance_ws.subscribe_depth(top_symbols[:5])
-    await alert_service.start()
-    await streaming_service.start()
-    await exchange_manager.start_reconnect_loop("binance")
-    await paper_trading_service.start_monitoring()
+    if settings.ENABLE_BACKGROUND_SERVICES:
+        await binance_ws.start()
+        top_symbols = await market_coverage.get_top_symbols(30)
+        await binance_ws.subscribe_price(top_symbols)
+        await binance_ws.subscribe_klines(top_symbols[:10], "1m")
+        await binance_ws.subscribe_depth(top_symbols[:5])
+        await alert_service.start()
+        await streaming_service.start()
+        await exchange_manager.start_reconnect_loop("binance")
+        await paper_trading_service.start_monitoring()
     try:
         await redis_client.ping()
         logger.info("Redis connected")
     except Exception:
         logger.warning("Redis not available")
-    logger.info(f"Database initialized")
+    logger.info("Database initialized")
     logger.info(f"Server starting on port {settings.PORT}")
     yield
-    await alert_service.stop()
-    await streaming_service.stop()
-    await paper_trading_service.stop_monitoring()
-    await binance_ws.stop()
+    if settings.ENABLE_BACKGROUND_SERVICES:
+        await alert_service.stop()
+        await streaming_service.stop()
+        await paper_trading_service.stop_monitoring()
+        await binance_ws.stop()
+    await exchange_manager.shutdown()
     await ws_manager.stop()
-    logger.info(f"Server shutting down")
+    logger.info("Server shutting down")
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None if settings.ENVIRONMENT.lower() == "production" else "/docs",
+    redoc_url=None if settings.ENVIRONMENT.lower() == "production" else "/redoc",
 )
 
 allowed_origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS else ["*"]
@@ -71,7 +75,7 @@ allowed_origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS else
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials="*" not in allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

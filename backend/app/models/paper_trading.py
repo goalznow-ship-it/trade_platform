@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -53,6 +53,7 @@ class PaperPosition(Base):
     take_profit = Column(Float, nullable=True)
     is_open = Column(Boolean, default=True)
     opened_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_funding_at = Column(DateTime(timezone=True), nullable=True)
     closed_at = Column(DateTime(timezone=True), nullable=True)
 
     account = relationship("PaperAccount", back_populates="positions")

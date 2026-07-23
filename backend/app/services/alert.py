@@ -1,13 +1,12 @@
 import asyncio
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from app.models.alert import Alert, AlertTrigger, AlertType, AlertCondition
+from app.models.alert import Alert, AlertTrigger
 from app.core.logging import logger
 from app.core.websocket_manager import ws_manager
-from app.core.redis import redis_client
 
 
 class AlertService:

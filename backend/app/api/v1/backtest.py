@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from app.core.database import get_db
 from app.services.backtest import backtest_service
 from app.services.market import market_service
@@ -27,6 +27,8 @@ async def run_backtest(
     initial_balance: float = 10000,
     leverage: int = 1,
     risk_per_trade: float = 0.02,
+    fee_rate: float = Query(default=0.0004, ge=0, le=0.01),
+    slippage_bps: float = Query(default=2.0, ge=0, le=100),
     user: User = Depends(get_current_user)
 ):
     sym = symbol.replace("-", "/")
@@ -36,7 +38,8 @@ async def run_backtest(
     result = await backtest_service.run_backtest(
         symbol=sym, data=data, timeframe=timeframe,
         initial_balance=initial_balance, leverage=leverage,
-        risk_per_trade=risk_per_trade,
+        risk_per_trade=risk_per_trade, fee_rate=fee_rate,
+        slippage_bps=slippage_bps,
     )
     return result
 

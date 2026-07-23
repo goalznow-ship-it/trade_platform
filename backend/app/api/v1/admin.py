@@ -1,6 +1,7 @@
-import os, psutil
+import os
+import psutil
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 from pydantic import BaseModel
@@ -9,10 +10,10 @@ from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.websocket_manager import ws_manager
 from app.models.user import User
-from app.models.analysis import Signal, AIAnalysis
+from app.models.analysis import Signal
 from app.models.trade import Trade
 from app.models.market import Symbol
-from app.models.admin import AuditLog, Subscription, Subscription
+from app.models.admin import AuditLog, Subscription
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -26,9 +27,16 @@ class SymbolCreate(BaseModel):
     exchange: str = "binance"
     asset_type: str = "crypto"
 
+class TradingControlRequest(BaseModel):
+    halted: bool
+    reason: str = "Manual administrator action"
+
 # System Health
 @router.get("/health")
-async def system_health(admin: User = Depends(require_admin)):
+async def system_health(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
     from app.core.redis import redis_client
     health = {
         "status": "healthy",
@@ -42,13 +50,25 @@ async def system_health(admin: User = Depends(require_admin)):
         health["services"]["redis"] = "disconnected"
         health["status"] = "degraded"
     try:
-        async with get_db() as session:
-            await session.execute(text("SELECT 1"))
-            health["services"]["postgres"] = "connected"
+        await db.execute(text("SELECT 1"))
+        health["services"]["postgres"] = "connected"
     except Exception:
         health["services"]["postgres"] = "disconnected"
         health["status"] = "degraded"
     health["services"]["websocket"] = f"{ws_manager.stats['total_clients']} clients"
+    from app.services.streaming import streaming_service
+    from app.core.provider_health import provider_health
+    stream_stats = streaming_service.get_stats()
+    provider_stats = provider_health.snapshot()
+    health["services"]["streaming"] = (
+        "running" if stream_stats.get("running") else "stopped"
+    )
+    health["websocket"] = ws_manager.stats
+    health["streaming"] = stream_stats
+    health["providers"] = provider_stats
+    health["services"]["providers"] = {
+        name: provider["status"] for name, provider in provider_stats.items()
+    }
     return health
 
 
@@ -284,8 +304,28 @@ async def brain_assessment(
 
 
 @router.get("/brain/self-learning")
-async def brain_self_learning(admin: User = Depends(require_admin)):
+async def brain_self_learning(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
     from app.services.self_learning import self_learning
+    from app.models.trade import TradeHistory
+    history_result = await db.execute(
+        select(TradeHistory).order_by(TradeHistory.closed_at.desc()).limit(1000)
+    )
+    for trade in reversed(history_result.scalars().all()):
+        self_learning.record_trade({
+            "source_trade_id": trade.id,
+            "symbol": trade.symbol,
+            "direction": trade.side,
+            "entry_price": trade.entry_price,
+            "exit_price": trade.exit_price,
+            "pnl_percent": trade.pnl_percent or 0,
+            "risk_reward": trade.risk_reward or 0,
+            "duration_hours": (trade.duration_minutes or 0) / 60,
+            "actual_outcome": "win" if (trade.pnl or 0) > 0 else "loss",
+            "recorded_at": trade.closed_at.isoformat() if trade.closed_at else None,
+        })
     report = self_learning.get_learning_report()
     return report
 
@@ -301,9 +341,70 @@ async def brain_system(admin: User = Depends(require_admin)):
     }
 
 
+@router.get("/trading/control")
+async def trading_control_status(admin: User = Depends(require_admin)):
+    from app.core.config import settings
+    from app.core.redis import redis_client
+    try:
+        halted = await redis_client.get("trading:kill_switch") == "1"
+        reason = await redis_client.get("trading:kill_switch:reason")
+    except Exception:
+        halted, reason = False, "Redis unavailable"
+    return {
+        "configured": settings.TRADING_ENABLED,
+        "halted": halted,
+        "reason": reason,
+        "accepting_live_orders": settings.TRADING_ENABLED and not halted,
+    }
+
+
+@router.get("/providers/health")
+async def provider_health_status(admin: User = Depends(require_admin)):
+    # Imports ensure all provider facades register their configuration state.
+    from app.services import macro_engine, onchain, social_sentiment  # noqa: F401
+    from app.core.provider_health import provider_health
+    providers = provider_health.snapshot()
+    return {
+        "providers": providers,
+        "healthy": sum(p["status"] == "healthy" for p in providers.values()),
+        "degraded": sum(p["status"] in ("degraded", "circuit_open") for p in providers.values()),
+        "not_configured": sum(p["status"] == "not_configured" for p in providers.values()),
+    }
+
+
+@router.put("/trading/control")
+async def set_trading_control(
+    req: TradingControlRequest,
+    admin: User = Depends(require_admin),
+):
+    from app.core.redis import redis_client
+    try:
+        if req.halted:
+            await redis_client.set("trading:kill_switch", "1")
+            await redis_client.set("trading:kill_switch:reason", req.reason[:500])
+        else:
+            await redis_client.delete("trading:kill_switch", "trading:kill_switch:reason")
+    except Exception as exc:
+        raise HTTPException(503, f"Trading control store unavailable: {exc}")
+    return {"halted": req.halted, "reason": req.reason if req.halted else None}
+
+
 # Audit Logs
 @router.get("/logs")
-async def get_logs(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(100))
+async def get_logs(
+    action: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    query = select(AuditLog)
+    if action:
+        query = query.where(AuditLog.action == action.upper())
+    result = await db.execute(
+        query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+    )
     logs = result.scalars().all()
     return [{"id": l.id, "user_id": l.user_id, "action": l.action, "resource": l.resource, "details": l.details, "ip_address": l.ip_address, "created_at": str(l.created_at)} for l in logs]

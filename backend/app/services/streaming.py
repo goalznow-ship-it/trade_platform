@@ -11,6 +11,7 @@ class StreamingService:
         self._tasks: List[asyncio.Task] = []
         self._running = False
         self._heartbeats: dict[str, float] = {}
+        self._watchdog_task: Optional[asyncio.Task] = None
 
     async def start(self):
         self._running = True
@@ -35,7 +36,7 @@ class StreamingService:
             self._tasks.append(task)
 
         logger.info(f"StreamingService started with {len(workers)} workers")
-        asyncio.create_task(self._watchdog())
+        self._watchdog_task = asyncio.create_task(self._watchdog())
 
     async def stop(self):
         self._running = False
@@ -43,26 +44,28 @@ class StreamingService:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        if self._watchdog_task:
+            self._watchdog_task.cancel()
+            await asyncio.gather(self._watchdog_task, return_exceptions=True)
+            self._watchdog_task = None
         logger.info("StreamingService stopped")
 
     async def _run_worker(self, name: str, coro):
-        while self._running:
-            try:
-                self._heartbeats[name] = datetime.now(timezone.utc).timestamp()
-                await coro
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Streaming worker {name} error: {e}")
-                await asyncio.sleep(5)
+        try:
+            self._heartbeats[name] = datetime.now(timezone.utc).timestamp()
+            await coro
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Streaming worker %s terminated", name)
 
     async def _watchdog(self):
         while self._running:
             await asyncio.sleep(30)
             now = datetime.now(timezone.utc).timestamp()
             for name, last in list(self._heartbeats.items()):
-                if name in ("heartbeat",) and now - last > 15:
-                    logger.warning(f"Streaming worker {name} stale — restarting")
+                if now - last > 330:
+                    logger.warning("Streaming worker %s is stale", name)
             await ws_manager.broadcast(Channel.MARKET, "streaming_heartbeat", {
                 "workers": {k: round(now - v, 1) for k, v in self._heartbeats.items()},
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -184,45 +187,54 @@ class StreamingService:
             await asyncio.sleep(60)
 
     async def _stream_fear_greed(self):
-        import random
         while self._running:
             try:
-                value = random.randint(10, 90)
-                classification = (
-                    "extreme_fear" if value <= 25 else
-                    "fear" if value <= 45 else
-                    "neutral" if value <= 55 else
-                    "greed" if value <= 75 else
-                    "extreme_greed"
-                )
-                await ws_manager.broadcast(Channel.FEAR_GREED, "fear_greed_update", {
-                    "data": {"value": value, "classification": classification},
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                import httpx
+                async with httpx.AsyncClient(timeout=10) as client:
+                    response = await client.get("https://api.alternative.me/fng/?limit=1")
+                    response.raise_for_status()
+                    data = response.json()["data"][0]
+                if data:
+                    await ws_manager.broadcast(Channel.FEAR_GREED, "fear_greed_update", {
+                        "data": data,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
             except Exception:
-                pass
+                logger.exception("Fear/greed stream failed")
             await asyncio.sleep(60)
 
     async def _stream_breadth(self, symbols: List[str]):
-        import random
         while self._running:
             try:
-                advancing = random.randint(10, 25)
-                declining = len(symbols) - advancing
+                tickers = await asyncio.gather(
+                    *(self._ticker_or_none(symbol) for symbol in symbols),
+                    return_exceptions=False,
+                )
+                changes = [t.get("change_percent", 0) for t in tickers if t]
+                advancing = sum(1 for change in changes if change > 0)
+                unchanged = sum(1 for change in changes if change == 0)
+                declining = sum(1 for change in changes if change < 0)
                 breadth_ratio = advancing / max(declining, 1)
                 await ws_manager.broadcast(Channel.BREADTH, "breadth_update", {
                     "data": {
                         "advancing": advancing,
                         "declining": declining,
-                        "unchanged": max(0, len(symbols) - advancing - declining),
+                        "unchanged": unchanged,
                         "breadth_ratio": round(breadth_ratio, 2),
                         "total_symbols": len(symbols),
                     },
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
             except Exception:
-                pass
+                logger.exception("Market breadth stream failed")
             await asyncio.sleep(60)
+
+    async def _ticker_or_none(self, symbol: str):
+        from app.services.market import market_service
+        try:
+            return await market_service.get_ticker(symbol)
+        except Exception:
+            return None
 
     async def _stream_signals(self, symbols: List[str]):
         from app.services.institutional_signals import institutional_signal_generator

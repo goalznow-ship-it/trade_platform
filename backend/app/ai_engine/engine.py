@@ -2,7 +2,6 @@
 AI Signal Engine - generates complete trade setups with entry zones, targets, and analysis
 """
 
-import numpy as np
 from typing import Optional, List
 from app.services.ai_analysis import ai_engine as core_ai
 from app.services.market import market_service

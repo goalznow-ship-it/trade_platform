@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from app.services.market import market_service
 from app.core.cache import cache_get, cache_set
 
@@ -66,9 +66,10 @@ async def get_symbols():
 async def get_fear_greed():
     import httpx
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+            resp.raise_for_status()
             data = resp.json()
             return data['data'][0]
-    except Exception:
-        return {"value": "50", "value_classification": "Neutral"}
+    except Exception as exc:
+        raise HTTPException(503, f"Fear and greed provider unavailable: {exc}")

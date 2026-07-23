@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Dict, Set, Optional, Any, Callable
 from datetime import datetime, timezone
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from jose import jwt, JWTError
 from app.core.config import settings
 from app.core.redis import redis_client
@@ -132,6 +132,9 @@ class WebSocketManager:
     async def authenticate(self, client: WebSocketClient, token: str) -> bool:
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            if payload.get("type") != "access":
+                await client.send_json({"event": "error", "data": {"message": "Invalid token type"}})
+                return False
             user_id = payload.get("sub")
             if not user_id:
                 await client.send_json({"event": "error", "data": {"message": "Invalid token"}})
@@ -151,6 +154,12 @@ class WebSocketManager:
         except JWTError:
             await client.send_json({"event": "error", "data": {"message": "Invalid token"}})
             return False
+
+    async def mark_authenticated(self, client: WebSocketClient, user_id: int) -> None:
+        client.user_id = user_id
+        client.state = ConnectionState.AUTHENTICATED
+        self.user_clients.setdefault(user_id, set()).add(client.client_id)
+        await client.send_json({"event": "authenticated", "data": {"user_id": user_id}})
 
     async def subscribe(self, client: WebSocketClient, channel: str, symbols: list = None):
         if not client.is_authenticated:
@@ -222,9 +231,12 @@ class WebSocketManager:
             if client:
                 await client.send_json(payload)
 
-    async def handle_heartbeat(self, client: WebSocketClient):
+    async def handle_heartbeat(self, client: WebSocketClient, data: Optional[dict] = None):
         client.last_heartbeat = time.time()
-        await client.send_json({"event": "pong", "data": {"server_time": datetime.now(timezone.utc).isoformat()}})
+        response = {"server_time": datetime.now(timezone.utc).isoformat()}
+        if data and "t" in data:
+            response["t"] = data["t"]
+        await client.send_json({"event": "pong", "data": response})
 
     async def handle_message(self, client: WebSocketClient, raw: str):
         allowed, _ = self.rate_limiter.check(f"ws:{client.client_id}", 30, 1)
@@ -272,7 +284,7 @@ class WebSocketManager:
         await self.unsubscribe(client, channel)
 
     async def _handle_ping(self, client: WebSocketClient, data: dict):
-        await self.handle_heartbeat(client)
+        await self.handle_heartbeat(client, data)
 
     async def _handle_pong(self, client: WebSocketClient, data: dict):
         client.last_heartbeat = time.time()

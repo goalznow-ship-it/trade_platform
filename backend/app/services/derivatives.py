@@ -12,7 +12,7 @@ Comprehensive derivatives market analysis including:
 - Aggregated snapshot and async streaming
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
 import asyncio
 import math

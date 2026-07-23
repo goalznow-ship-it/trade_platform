@@ -1,9 +1,12 @@
 import time
+import secrets
 from typing import Dict, Tuple
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime, timezone
+from app.core.redis import redis_client
+from app.core.logging import logger
 
 
 class InMemoryRateLimiter:
@@ -26,6 +29,32 @@ class InMemoryRateLimiter:
 
 
 rate_limiter = InMemoryRateLimiter()
+
+
+class DistributedRateLimiter:
+    async def check(
+        self, key: str, max_requests: int, window_seconds: int,
+    ) -> Tuple[bool, int]:
+        now = time.time()
+        redis_key = f"rate:{key}"
+        member = f"{now}:{secrets.token_hex(6)}"
+        try:
+            async with redis_client.pipeline(transaction=True) as pipe:
+                pipe.zremrangebyscore(redis_key, 0, now - window_seconds)
+                pipe.zcard(redis_key)
+                pipe.zadd(redis_key, {member: now})
+                pipe.expire(redis_key, window_seconds)
+                _, count, _, _ = await pipe.execute()
+            if count >= max_requests:
+                await redis_client.zrem(redis_key, member)
+                return False, 0
+            return True, max_requests - int(count) - 1
+        except Exception as exc:
+            logger.warning("Redis rate limiter unavailable, using local fallback: %s", exc)
+            return rate_limiter.check(key, max_requests, window_seconds)
+
+
+distributed_rate_limiter = DistributedRateLimiter()
 
 
 class DailyUsageTracker:
@@ -82,7 +111,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{request.url.path}"
 
-        allowed, remaining = rate_limiter.check(key, self.max_requests, self.window_seconds)
+        allowed, remaining = await distributed_rate_limiter.check(
+            key, self.max_requests, self.window_seconds,
+        )
 
         if not allowed:
             return JSONResponse(

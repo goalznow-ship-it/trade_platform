@@ -3,11 +3,9 @@ Signal Performance Tracking & Analytics
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select
 from app.models.analysis import Signal
-from app.core.logging import logger
 
 class PerformanceService:
     async def get_stats(self, db: AsyncSession, days: int = 30) -> dict:

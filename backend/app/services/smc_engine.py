@@ -13,7 +13,7 @@ Smart Money Concepts implementation:
 - Session Range
 """
 import numpy as np
-from typing import List, Dict, Optional, Tuple
+from typing import Optional
 
 
 class SMCEngine:
@@ -37,9 +37,9 @@ class SMCEngine:
         liquidity_pools = self._liquidity_pools(highs, lows, closes)
         liquidity_sweep = self._liquidity_sweep(highs, lows, closes)
         premium_discount = self._premium_discount_zones(highs, lows, closes)
-        equal_highs_lows = self._equal_highs_lows(highs, lows)
+        equal_highs_lows = self._equal_highs_lows(highs, lows, closes)
         displacement = self._displacement(data)
-        inducement = self._inducement(highs, lows, closes)
+        inducement = self._inducement(highs, lows, closes, opens)
         internal_structure = self._internal_structure(highs, lows, closes)
         external_structure = self._external_structure(highs, lows, closes, opens)
         session_range = self._session_range(highs, lows, closes)
@@ -295,7 +295,7 @@ class SMCEngine:
             "in_premium": position > 0.75,
         }
 
-    def _equal_highs_lows(self, highs, lows) -> dict:
+    def _equal_highs_lows(self, highs, lows, closes) -> dict:
         equal_highs = []
         equal_lows = []
         tolerance = 0.001
@@ -334,7 +334,7 @@ class SMCEngine:
 
         return {"detected": False}
 
-    def _inducement(self, highs, lows, closes) -> Optional[dict]:
+    def _inducement(self, highs, lows, closes, opens) -> Optional[dict]:
         if len(highs) < 20:
             return None
 

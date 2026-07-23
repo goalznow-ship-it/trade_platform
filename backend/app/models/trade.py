@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -26,6 +26,9 @@ class Trade(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_order_id", name="uq_orders_user_client_order"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(Integer, index=True, nullable=False)
@@ -38,7 +41,9 @@ class Order(Base):
     quantity = Column(Float, nullable=False)
     filled_quantity = Column(Float, default=0.0)
     status = Column(String(20), default="pending")
+    exchange = Column(String(20), default="binance", nullable=False)
     exchange_order_id = Column(String(100), nullable=True)
+    client_order_id = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

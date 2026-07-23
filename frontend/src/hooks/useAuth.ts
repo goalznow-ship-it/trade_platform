@@ -26,7 +26,7 @@ interface AuthState {
   isLoading: boolean
   login: (username: string, password: string) => Promise<void>
   register: (username: string, email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   loadUser: () => Promise<void>
 }
 
@@ -38,18 +38,28 @@ export const useAuth = create<AuthState>((set) => ({
   login: async (username, password) => {
     const res = await api.login(username, password)
     localStorage.setItem("token", res.access_token)
-    set({ user: res.user, token: res.access_token })
+    localStorage.setItem("refresh_token", res.refresh_token)
+    set({ user: res.user, token: res.access_token, isLoading: false })
   },
 
   register: async (username, email, password) => {
     await api.register({ username, email, password })
     const res = await api.login(username, password)
     localStorage.setItem("token", res.access_token)
-    set({ user: res.user, token: res.access_token })
+    localStorage.setItem("refresh_token", res.refresh_token)
+    set({ user: res.user, token: res.access_token, isLoading: false })
   },
 
-  logout: () => {
+  logout: async () => {
+    const accessToken = localStorage.getItem("token")
+    const refreshToken = localStorage.getItem("refresh_token")
+    try {
+      await api.logout(accessToken, refreshToken)
+    } catch {
+      // Local logout must still complete if the session already expired.
+    }
     localStorage.removeItem("token")
+    localStorage.removeItem("refresh_token")
     set({ user: null, token: null })
   },
 
@@ -64,6 +74,7 @@ export const useAuth = create<AuthState>((set) => ({
       set({ user, token, isLoading: false })
     } catch {
       localStorage.removeItem("token")
+      localStorage.removeItem("refresh_token")
       set({ user: null, token: null, isLoading: false })
     }
   },

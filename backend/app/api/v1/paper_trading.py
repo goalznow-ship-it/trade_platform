@@ -1,18 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.paper_trading import PaperAccount, PaperPosition, PaperOrder
+from app.models.paper_trading import PaperPosition, PaperOrder
 from app.services.paper_trading import paper_trading_service
 from app.schemas.paper_trading import (
     PaperOrderCreate, PaperAccountResponse, PaperPositionResponse,
     PaperOrderResponse, PaperResetResponse,
 )
 from typing import Optional
-from datetime import datetime, timezone
 
 router = APIRouter(prefix="/paper", tags=["Paper Trading"])
 

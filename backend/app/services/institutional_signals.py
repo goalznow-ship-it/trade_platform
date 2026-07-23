@@ -11,7 +11,6 @@ Integrates:
 Produces comprehensive signals with all required fields.
 """
 import asyncio
-import math
 from datetime import datetime, timezone
 from typing import Optional, List
 from app.services.market import market_service

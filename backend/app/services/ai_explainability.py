@@ -1,5 +1,4 @@
-from typing import Optional, List
-from app.services.indicators import indicator_service
+from typing import Optional
 from app.core.logging import logger
 
 

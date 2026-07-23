@@ -13,7 +13,6 @@ from app.services.smc_engine import smc_engine
 from app.services.professional_risk import professional_risk
 from app.services.institutional_scoring import institutional_scorer
 from app.services.market import market_service
-from app.core.logging import logger
 
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
@@ -21,7 +20,7 @@ router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 @router.get("/signal/{symbol}")
 async def get_institutional_signal(
     symbol: str,
-    timeframe: str = Query("1h", regex="^(1w|1d|4h|1h|15m|5m)$"),
+    timeframe: str = Query("1h", pattern="^(1w|1d|4h|1h|15m|5m)$"),
     capital: float = Query(10000, ge=100),
     risk_percent: float = Query(0.02, ge=0.001, le=0.1),
     user: dict = Depends(get_current_user),
@@ -43,7 +42,6 @@ async def scan_institutional(
     user: dict = Depends(get_current_user),
 ):
     """Scan top symbols for institutional-grade signals"""
-    from app.services.market_coverage import market_coverage
     results = await institutional_signal_engine.scan_all(
         min_score=min_score,
         limit=limit,
@@ -64,7 +62,7 @@ async def get_multi_timeframe(
 @router.get("/smc/{symbol}")
 async def get_smc_analysis(
     symbol: str,
-    timeframe: str = Query("1h", regex="^(1w|1d|4h|1h|15m|5m)$"),
+    timeframe: str = Query("1h", pattern="^(1w|1d|4h|1h|15m|5m)$"),
     user: dict = Depends(get_current_user),
 ):
     """Complete SMC/ICT analysis for a symbol"""
@@ -81,7 +79,7 @@ async def get_smc_analysis(
 @router.get("/score/{symbol}")
 async def get_institutional_score(
     symbol: str,
-    timeframe: str = Query("1h", regex="^(1w|1d|4h|1h|15m|5m)$"),
+    timeframe: str = Query("1h", pattern="^(1w|1d|4h|1h|15m|5m)$"),
     user: dict = Depends(get_current_user),
 ):
     """Institutional 100-point scoring for a symbol"""
@@ -133,7 +131,7 @@ async def calculate_kelly(
 @router.get("/risk/validate")
 async def validate_trade(
     symbol: str = Query(...),
-    direction: str = Query(..., regex="^(long|short)$"),
+    direction: str = Query(..., pattern="^(long|short)$"),
     entry_price: float = Query(..., gt=0),
     stop_loss: float = Query(..., gt=0),
     take_profit: float = Query(..., gt=0),

@@ -1,4 +1,3 @@
-from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.journal import TradeJournal

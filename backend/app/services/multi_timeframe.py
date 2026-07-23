@@ -19,11 +19,10 @@ Rules:
 - 5M gives execution timing
 """
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Optional
 from app.services.market import market_service
 from app.services.institutional_scoring import institutional_scorer
 from app.services.smc_engine import smc_engine
-from app.core.logging import logger
 
 TIMEFRAMES = ["1w", "1d", "4h", "1h", "15m", "5m"]
 

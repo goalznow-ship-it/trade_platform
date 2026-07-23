@@ -1,11 +1,11 @@
 import asyncio
-import math
-from typing import Optional, List, Dict
-from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, func
 from sqlalchemy.orm import selectinload
 from app.models.paper_trading import PaperAccount, PaperPosition, PaperOrder
+from app.models.trade import TradeHistory
 from app.core.logging import logger
 from app.core.websocket_manager import ws_manager, Channel
 from app.services.market import market_service
@@ -68,6 +68,8 @@ class PaperTradingService:
 
     async def reset_account(self, user_id: int, db: AsyncSession) -> PaperAccount:
         account = await self.get_or_create_account(user_id, db)
+        await db.execute(delete(PaperOrder).where(PaperOrder.account_id == account.id))
+        await db.execute(delete(PaperPosition).where(PaperPosition.account_id == account.id))
         account.balance = account.initial_balance
         account.equity = account.initial_balance
         account.free_margin = account.initial_balance
@@ -134,7 +136,11 @@ class PaperTradingService:
                                   live_price: Optional[float], db: AsyncSession) -> dict:
         price = live_price
         if not price:
-            price = order.price or 50000.0
+            price = order.price
+        if not price:
+            order.status = "rejected"
+            await db.commit()
+            return {"order": order, "position": None, "error": "Live or user-supplied price unavailable"}
         slippage = self._compute_slippage(order.symbol, order.quantity, order.side, price)
         fill_price = price * (1 + slippage) if order.side == "buy" else price * (1 - slippage)
 
@@ -147,20 +153,20 @@ class PaperTradingService:
             order.filled_quantity = 0
             await db.commit()
             return {"order": order, "position": None, "error": "Insufficient margin"}
+        if order.side == "sell" and margin_required > account.free_margin:
+            order.status = "rejected"
+            await db.commit()
+            return {"order": order, "position": None, "error": "Insufficient margin"}
 
         order.status = "filled"
         order.filled_quantity = order.quantity
         order.executed_price = fill_price
         order.executed_at = datetime.now(timezone.utc)
 
-        if order.side == "buy":
-            account.free_margin -= margin_required
-            account.used_margin += margin_required
-            position_side = "long"
-        else:
-            account.free_margin -= margin_required
-            account.used_margin += margin_required
-            position_side = "short"
+        account.free_margin -= margin_required
+        account.used_margin += margin_required
+        account.balance -= commission
+        position_side = "long" if order.side == "buy" else "short"
 
         position = PaperPosition(
             account_id=account.id,
@@ -173,11 +179,16 @@ class PaperTradingService:
             margin=margin_required,
             stop_loss=order.stop_price if order.side == "sell" else None,
             take_profit=order.price if order.side == "buy" else None,
-            commission_paid=commission,
         )
         position.liquidation_price = self._compute_liquidation_price(position, account)
         db.add(position)
-        account.equity = account.balance + sum(p.unrealized_pnl for p in account.positions if p.is_open)
+        pnl_result = await db.execute(
+            select(func.coalesce(func.sum(PaperPosition.unrealized_pnl), 0.0)).where(
+                PaperPosition.account_id == account.id,
+                PaperPosition.is_open == True,
+            )
+        )
+        account.equity = account.balance + float(pnl_result.scalar_one())
         await db.commit()
 
         await self._broadcast_update(account, position, order)
@@ -239,10 +250,10 @@ class PaperTradingService:
         position.mark_price = exit_price
         position.closed_at = datetime.now(timezone.utc)
 
-        account.balance += position.margin + pnl
-        account.equity = account.balance
-        account.free_margin += position.margin
+        account.balance += pnl
         account.used_margin -= position.margin
+        account.equity = account.balance
+        account.free_margin = account.equity - account.used_margin
         account.total_trades += 1
         account.total_pnl += pnl
         if pnl > 0:
@@ -254,6 +265,50 @@ class PaperTradingService:
             if pnl < account.worst_trade:
                 account.worst_trade = pnl
         account.win_rate = (account.win_count / account.total_trades * 100) if account.total_trades > 0 else 0
+        opened_at = position.opened_at
+        if opened_at and opened_at.tzinfo is None:
+            opened_at = opened_at.replace(tzinfo=timezone.utc)
+        duration_minutes = int(
+            (position.closed_at - opened_at).total_seconds() / 60
+        ) if opened_at else 0
+        pnl_percent = (
+            pnl / max(position.margin, 0.00000001) * 100
+        )
+        history = TradeHistory(
+            user_id=user_id,
+            symbol=position.symbol,
+            side=position.side,
+            type="paper",
+            quantity=position.size,
+            entry_price=position.entry_price,
+            exit_price=exit_price,
+            pnl=pnl,
+            pnl_percent=pnl_percent,
+            roi=pnl_percent,
+            leverage=position.leverage,
+            duration_minutes=duration_minutes,
+            stop_loss=position.stop_loss,
+            take_profit=position.take_profit,
+            risk_reward=abs(pnl) / max(position.margin, 0.00000001),
+            reason="paper_position_closed",
+            exchange="paper",
+            closed_at=position.closed_at,
+        )
+        db.add(history)
+        await db.flush()
+        from app.services.self_learning import self_learning
+        self_learning.record_trade({
+            "source_trade_id": history.id,
+            "symbol": history.symbol,
+            "direction": history.side,
+            "entry_price": history.entry_price,
+            "exit_price": history.exit_price,
+            "pnl_percent": history.pnl_percent,
+            "risk_reward": history.risk_reward,
+            "duration_hours": duration_minutes / 60,
+            "actual_outcome": "win" if pnl > 0 else "loss",
+            "entry_time": opened_at.isoformat() if opened_at else None,
+        })
         self._update_account_metrics(account)
 
         await db.commit()
@@ -300,8 +355,8 @@ class PaperTradingService:
     async def _monitor_loop(self):
         while self._monitoring:
             try:
-                from app.core.database import AsyncSessionLocal
-                async with AsyncSessionLocal() as db:
+                from app.core.database import async_session_factory
+                async with async_session_factory() as db:
                     result = await db.execute(
                         select(PaperPosition).where(PaperPosition.is_open == True)
                         .options(selectinload(PaperPosition.account))
@@ -332,6 +387,9 @@ class PaperTradingService:
                                 pos.realized_pnl = liq_pnl
                                 pos.closed_at = datetime.now(timezone.utc)
                                 account.balance += liq_pnl
+                                account.used_margin = max(0.0, account.used_margin - pos.margin)
+                                account.equity = account.balance
+                                account.free_margin = account.equity - account.used_margin
                                 account.total_trades += 1
                                 account.loss_count += 1
                                 account.total_pnl += liq_pnl
@@ -357,10 +415,17 @@ class PaperTradingService:
                                 continue
 
                         funding_hours = FUNDING_INTERVAL_HOURS
-                        pos_age = (datetime.now(timezone.utc) - pos.opened_at).total_seconds() / 3600
-                        if pos_age >= funding_hours:
+                        now = datetime.now(timezone.utc)
+                        funding_anchor = pos.last_funding_at or pos.opened_at
+                        if funding_anchor.tzinfo is None:
+                            funding_anchor = funding_anchor.replace(tzinfo=timezone.utc)
+                        funding_age = (now - funding_anchor).total_seconds() / 3600
+                        if funding_age >= funding_hours:
                             funding_fee = self._compute_funding_fee(pos, live_price)
                             account.balance -= funding_fee
+                            account.equity -= funding_fee
+                            account.free_margin -= funding_fee
+                            pos.last_funding_at = now
 
                     await db.commit()
             except Exception as e:
@@ -406,9 +471,9 @@ class PaperTradingService:
                     "status": order.status,
                     "executed_price": order.executed_price,
                 }
-            await ws_manager.broadcast(Channel.SIGNALS, "paper_trade_update", data)
-        except Exception:
-            pass
+            await ws_manager.send_to_user(account.user_id, "paper_trade_update", data, Channel.POSITIONS)
+        except Exception as exc:
+            logger.exception("Paper trade broadcast failed: %s", exc)
 
 
 paper_trading_service = PaperTradingService()

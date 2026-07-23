@@ -2,7 +2,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.database import Base, get_db
-from tests.conftest import test_async_session_factory, override_get_db
+from tests.conftest import override_get_db
 
 app.dependency_overrides[get_db] = override_get_db
 

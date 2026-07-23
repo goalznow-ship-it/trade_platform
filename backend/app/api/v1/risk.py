@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.risk import risk_service
-from app.schemas.risk import RiskProfileCreate, RiskProfileResponse, RiskSnapshotResponse, RiskDashboardResponse
+from app.schemas.risk import RiskProfileCreate, RiskProfileResponse, RiskSnapshotResponse
 
 router = APIRouter(prefix="/risk", tags=["Risk Management"])
 

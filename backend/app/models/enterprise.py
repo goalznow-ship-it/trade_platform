@@ -1,7 +1,5 @@
-from sqlalchemy import Column, Integer, Float, String, Boolean, DateTime, JSON, ForeignKey, Text, Enum as SAEnum
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, Float, String, Boolean, DateTime, JSON, Text
 from sqlalchemy.sql import func
-import enum
 from app.core.database import Base
 
 

@@ -1,11 +1,12 @@
 import pandas as pd
 import numpy as np
-from typing import Optional
 
 class IndicatorService:
     @staticmethod
     def _to_series(data: list, field: str = 'close'):
-        return pd.Series([d[field] for d in data])
+        if not data:
+            return pd.Series(dtype=float)
+        return pd.to_numeric(pd.Series([d[field] for d in data]), errors="coerce")
 
     @staticmethod
     def sma(data: list, period: int = 20, field: str = 'close') -> list:
@@ -95,6 +96,8 @@ class IndicatorService:
 
     @staticmethod
     def supertrend(data: list, period: int = 10, multiplier: float = 3.0) -> dict:
+        if not data:
+            return {'supertrend': [], 'direction': [], 'current_direction': 'unavailable'}
         high = IndicatorService._to_series(data, 'high')
         low = IndicatorService._to_series(data, 'low')
         close = IndicatorService._to_series(data)
@@ -124,15 +127,21 @@ class IndicatorService:
 
     @staticmethod
     def vwap(data: list) -> list:
+        if not data:
+            return []
         df = pd.DataFrame(data)
-        vwap = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
+        denominator = df['volume'].cumsum().replace(0, np.nan)
+        vwap = (df['close'] * df['volume']).cumsum() / denominator
         return vwap.dropna().tolist()
 
     @staticmethod
     def obv(data: list) -> list:
+        if not data:
+            return []
         close = IndicatorService._to_series(data)
         volume = IndicatorService._to_series(data, 'volume')
-        obv = (volume * ((close.diff() > 0).astype(int) * 2 - 1)).cumsum()
+        direction = np.sign(close.diff()).fillna(0)
+        obv = (volume * direction).cumsum()
         return obv.dropna().tolist()
 
     @staticmethod
@@ -174,10 +183,16 @@ class IndicatorService:
 
     @staticmethod
     def volume_profile(data: list, num_bins: int = 10) -> dict:
+        if not data or num_bins < 1:
+            return {'bins': [], 'poc': {}}
         df = pd.DataFrame(data)
         price_min = df['low'].min()
         price_max = df['high'].max()
         bin_size = (price_max - price_min) / num_bins
+        if bin_size == 0:
+            volume = float(df['volume'].sum())
+            item = {'price_low': float(price_min), 'price_high': float(price_max), 'volume': volume}
+            return {'bins': [item], 'poc': item}
         bins = []
         for i in range(num_bins):
             lower = price_min + i * bin_size

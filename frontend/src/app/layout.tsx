@@ -1,8 +1,6 @@
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
 import "./globals.css"
-
-const inter = Inter({ subsets: ["latin"] })
+import { AuthGuard } from "@/components/AuthGuard"
 
 export const metadata: Metadata = {
   title: "TradeAnalyst Pro - AI Trading Platform",
@@ -12,8 +10,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-[#0d1117] text-gray-100 antialiased`}>
-        {children}
+      <body className="bg-[#0d1117] text-gray-100 antialiased font-sans">
+        <AuthGuard>{children}</AuthGuard>
       </body>
     </html>
   )

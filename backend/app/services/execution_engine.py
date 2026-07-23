@@ -5,10 +5,8 @@ Pre-trade validation gate that enforces ALL checks before trade execution.
 Every trade must pass every check to be approved.
 """
 
-import asyncio
-import math
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from app.core.logging import logger
 
 try:
@@ -74,7 +72,7 @@ class ExecutionEngine:
         correlation_check = await self.check_correlation(symbol, portfolio)
         checks["correlation"] = correlation_check
 
-        risk_check = await self.check_risk(symbol, direction, entry, sl, tp, leverage, balance)
+        risk_check = await self.check_risk(symbol, direction, entry, sl, tp, leverage, balance, quantity)
         checks["risk"] = risk_check
 
         margin_check = await self.check_margin(leverage, quantity * price if quantity else 0, balance)
@@ -104,16 +102,16 @@ class ExecutionEngine:
 
     async def check_trend_alignment(self, symbol: str, direction: str, timeframe: str = "1h") -> Dict:
         if not HAS_SMC_ENGINE or not HAS_MARKET_SERVICE:
-            return {"check": "trend_alignment", "passed": True, "reason": "Skipped — SMC engine or market service unavailable"}
+            return {"check": "trend_alignment", "passed": False, "reason": "SMC engine or market service unavailable"}
 
         try:
             data = await market_service.get_ohlcv(symbol, "binance", timeframe, 100)
             if not data or len(data) < 30:
-                return {"check": "trend_alignment", "passed": True, "reason": "Insufficient data, skipped"}
+                return {"check": "trend_alignment", "passed": False, "reason": "Insufficient market data"}
 
             smc_result = smc_engine.analyze(data)
             if "error" in smc_result:
-                return {"check": "trend_alignment", "passed": True, "reason": f"SMC analysis unavailable: {smc_result['error']}"}
+                return {"check": "trend_alignment", "passed": False, "reason": f"SMC analysis unavailable: {smc_result['error']}"}
 
             trend = smc_result.get("trend", "ranging")
             structure = smc_result.get("structure", {})
@@ -160,16 +158,16 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_trend_alignment error for {symbol}: {e}")
-            return {"check": "trend_alignment", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "trend_alignment", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_liquidity(self, symbol: str) -> Dict:
         if not HAS_MARKET_SERVICE:
-            return {"check": "liquidity", "passed": True, "reason": "Skipped — market service unavailable"}
+            return {"check": "liquidity", "passed": False, "reason": "Market service unavailable"}
 
         try:
             ob = await market_service.get_orderbook(symbol, "binance", 50)
             if not ob or not ob.get("bids") or not ob.get("asks"):
-                return {"check": "liquidity", "passed": True, "reason": "Order book unavailable, skipped"}
+                return {"check": "liquidity", "passed": False, "reason": "Order book unavailable"}
 
             total_bid_vol = sum(b[1] for b in ob["bids"])
             total_ask_vol = sum(a[1] for a in ob["asks"])
@@ -201,16 +199,16 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_liquidity error for {symbol}: {e}")
-            return {"check": "liquidity", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "liquidity", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_spread(self, symbol: str, max_spread_pct: float = 0.001) -> Dict:
         if not HAS_MARKET_SERVICE:
-            return {"check": "spread", "passed": True, "reason": "Skipped — market service unavailable"}
+            return {"check": "spread", "passed": False, "reason": "Market service unavailable"}
 
         try:
             ticker = await market_service.get_ticker(symbol)
             if not ticker or ticker.get("bid") is None or ticker.get("ask") is None:
-                return {"check": "spread", "passed": True, "reason": "Ticker unavailable, skipped"}
+                return {"check": "spread", "passed": False, "reason": "Ticker unavailable"}
 
             bid = ticker["bid"]
             ask = ticker["ask"]
@@ -232,16 +230,16 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_spread error for {symbol}: {e}")
-            return {"check": "spread", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "spread", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_funding(self, symbol: str) -> Dict:
         if not HAS_MARKET_SERVICE:
-            return {"check": "funding", "passed": True, "reason": "Skipped — market service unavailable"}
+            return {"check": "funding", "passed": False, "reason": "Market service unavailable"}
 
         try:
             funding = await market_service.get_funding_rate(symbol)
             if not funding or funding.get("funding_rate") is None:
-                return {"check": "funding", "passed": True, "reason": "Funding rate unavailable, skipped"}
+                return {"check": "funding", "passed": False, "reason": "Funding rate unavailable"}
 
             fr = funding["funding_rate"]
 
@@ -264,7 +262,7 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_funding error for {symbol}: {e}")
-            return {"check": "funding", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "funding", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_correlation(self, symbol: str, portfolio: Dict) -> Dict:
         if not portfolio:
@@ -304,10 +302,10 @@ class ExecutionEngine:
 
     async def check_risk(
         self, symbol: str, direction: str, entry: float, sl: float,
-        tp: float, leverage: int, balance: float
+        tp: float, leverage: int, balance: float, quantity: float = 0,
     ) -> Dict:
         if not HAS_PROFESSIONAL_RISK:
-            return {"check": "risk", "passed": True, "reason": "Skipped — professional_risk unavailable"}
+            return {"check": "risk", "passed": False, "reason": "Professional risk engine unavailable"}
 
         try:
             if not entry or entry <= 0:
@@ -330,7 +328,8 @@ class ExecutionEngine:
                 except Exception:
                     pass
 
-            risk_pct = abs(entry - sl) / entry * leverage * 100
+            stop_distance_pct = abs(entry - sl) / entry * 100
+            requested_risk_pct = abs(entry - sl) * quantity / balance * 100
 
             rr = 0
             if tp and sl:
@@ -352,26 +351,34 @@ class ExecutionEngine:
                 capital=balance,
                 entry_price=entry,
                 stop_loss=sl,
-                risk_percent=abs(entry - sl) / entry,
+                risk_percent=professional_risk.MAX_RISK_PER_TRADE,
                 leverage=leverage,
                 atr_value=atr_val,
             )
 
-            passed = validation.get("passed", False)
+            quantity_within_risk = (
+                quantity > 0
+                and requested_risk_pct <= professional_risk.MAX_RISK_PER_TRADE * 100
+            )
+            passed = validation.get("passed", False) and quantity_within_risk
 
             return {
                 "check": "risk",
                 "passed": passed,
-                "risk_percent": round(risk_pct, 2),
+                "stop_distance_percent": round(stop_distance_pct, 2),
+                "requested_risk_percent": round(requested_risk_pct, 2),
                 "risk_reward": round(rr, 2),
                 "position_sizing": sizing,
                 "validation_checks": validation.get("checks", []),
-                "reason": "All risk checks passed" if passed
-                else f"Risk check failed: {validation.get('checks', [{}])[-1].get('reason', 'unknown')}",
+                "reason": "All risk checks passed" if passed else (
+                    f"Requested loss {requested_risk_pct:.2f}% exceeds position risk limit"
+                    if not quantity_within_risk
+                    else f"Risk check failed: {validation.get('checks', [{}])[-1].get('reason', 'unknown')}"
+                ),
             }
         except Exception as e:
             logger.error(f"check_risk error: {e}")
-            return {"check": "risk", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "risk", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_margin(self, leverage: int, position_size_value: float, balance: float) -> Dict:
         try:
@@ -399,7 +406,7 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_margin error: {e}")
-            return {"check": "margin", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "margin", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_leverage(self, symbol: str, requested_leverage: int, max_leverage: int = 125) -> Dict:
         try:
@@ -434,11 +441,11 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_leverage error: {e}")
-            return {"check": "leverage", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "leverage", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_exchange_filters(self, symbol: str, quantity: float, price: float) -> Dict:
         if not HAS_MARKET_SERVICE:
-            return {"check": "exchange_filters", "passed": True, "reason": "Skipped — market service unavailable"}
+            return {"check": "exchange_filters", "passed": False, "reason": "Market service unavailable"}
 
         try:
             import ccxt
@@ -449,7 +456,7 @@ class ExecutionEngine:
             markets = ex.load_markets()
 
             if symbol not in markets:
-                return {"check": "exchange_filters", "passed": True, "reason": f"Symbol {symbol} not found in exchange markets, skipped"}
+                return {"check": "exchange_filters", "passed": False, "reason": f"Symbol {symbol} not found in exchange markets"}
 
             market = markets[symbol]
             limits = market.get("limits", {})
@@ -510,7 +517,7 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_exchange_filters error for {symbol}: {e}")
-            return {"check": "exchange_filters", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "exchange_filters", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def check_liquidation_distance(self, entry: float, sl: float, leverage: int) -> Dict:
         try:
@@ -523,7 +530,7 @@ class ExecutionEngine:
             liq_price = self._estimate_liquidation_price(entry, sl, leverage)
 
             if liq_price is None:
-                return {"check": "liquidation_distance", "passed": True, "reason": "Cannot estimate liquidation price, skipped"}
+                return {"check": "liquidation_distance", "passed": False, "reason": "Cannot estimate liquidation price"}
 
             dist_pct = abs(liq_price - entry) / entry * 100
             sl_dist_pct = abs(entry - sl) / entry * 100
@@ -548,7 +555,7 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.error(f"check_liquidation_distance error: {e}")
-            return {"check": "liquidation_distance", "passed": True, "reason": f"Check failed, skipped: {str(e)}"}
+            return {"check": "liquidation_distance", "passed": False, "reason": f"Check failed: {str(e)}"}
 
     async def get_trade_approval(self, trade_request: Dict) -> Dict:
         validation = await self.validate_trade(trade_request)

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from app.core.security import get_current_user, require_subscription
+from app.core.security import require_subscription
 from app.models.user import User
 from app.services.enterprise_signals import enterprise_signal_engine
 from app.services.prediction import prediction_engine

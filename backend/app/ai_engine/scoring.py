@@ -9,8 +9,7 @@ Weighted scoring formula:
   News Impact            15%
 """
 
-import numpy as np
-from typing import Optional, List
+from typing import Optional
 
 class SignalScorer:
     WEIGHTS = {

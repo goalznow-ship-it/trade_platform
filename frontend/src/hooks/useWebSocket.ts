@@ -36,6 +36,7 @@ export function useWebSocketV2(token?: string) {
   const reconnectCountRef = useRef(0)
   const backoffRef = useRef(INITIAL_BACKOFF)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const intentionalCloseRef = useRef(false)
   const lastMessageRef = useRef<number | null>(null)
   const seqRef = useRef<Record<string, number>>({})
 
@@ -86,6 +87,7 @@ export function useWebSocketV2(token?: string) {
 
   const connect = useCallback(() => {
     cleanup()
+    intentionalCloseRef.current = false
     const url = token ? `${WS_URL}/ws/v2?token=${token}` : `${WS_URL}/ws/v2`
     const ws = new WebSocket(url)
     wsRef.current = ws
@@ -113,7 +115,7 @@ export function useWebSocketV2(token?: string) {
 
     ws.onclose = () => {
       updateQuality({ status: "disconnected" })
-      doReconnect()
+      if (!intentionalCloseRef.current) doReconnect()
     }
 
     ws.onerror = () => {
@@ -196,6 +198,7 @@ export function useWebSocketV2(token?: string) {
   }, [])
 
   const disconnect = useCallback(() => {
+    intentionalCloseRef.current = true
     cleanup()
     subscribedRef.current.clear()
     pendingRef.current = []
@@ -236,7 +239,11 @@ export function useWebSocket(symbol: string) {
     if (!symbol) return
 
     const connect = () => {
-      const ws = new WebSocket(`${WS_URL}/ws/v2/ticker/${symbol.replace("/", "-")}`)
+      const token = localStorage.getItem("token")
+      if (!token) return
+      const ws = new WebSocket(
+        `${WS_URL}/ws/v2/ticker/${symbol.replace("/", "-")}?token=${encodeURIComponent(token)}`,
+      )
       wsRef.current = ws
 
       ws.onopen = () => {

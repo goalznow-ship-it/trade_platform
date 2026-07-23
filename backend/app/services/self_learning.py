@@ -10,11 +10,10 @@ Weight adjustment uses proportional allocation:
 - All weights re-normalized to sum to 1.0
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
 import math
 import statistics
-from collections import defaultdict, deque
 from app.core.logging import logger
 
 
@@ -29,6 +28,13 @@ class SelfLearningEngine:
         self.current_weights = dict(self.default_weights)
 
     def record_trade(self, trade_data: Dict) -> None:
+        source_trade_id = trade_data.get("source_trade_id")
+        if source_trade_id is not None and any(
+            item.get("source_trade_id") == source_trade_id
+            for item in self.trade_history
+        ):
+            return
+        trade_data = dict(trade_data)
         trade_data["id"] = len(self.trade_history) + 1
         if "entry_time" not in trade_data:
             trade_data["entry_time"] = datetime.now(timezone.utc).isoformat()

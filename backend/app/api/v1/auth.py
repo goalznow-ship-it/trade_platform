@@ -1,17 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, get_current_user
+from app.core.security import (
+    create_access_token, create_refresh_token, decode_token, get_current_user,
+    hash_password, is_token_revoked, revoke_token, verify_password,
+)
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 class RegisterRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
     email: str
-    password: str
+    password: str = Field(min_length=10, max_length=128)
 
 class LoginRequest(BaseModel):
     username: str
@@ -22,6 +25,13 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: dict
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+class LogoutRequest(BaseModel):
+    access_token: str | None = None
+    refresh_token: str | None = None
 
 @router.post("/register")
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
@@ -49,7 +59,8 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(401, "Account disabled")
 
-    user.last_login = __import__('datetime').datetime.utcnow()
+    from datetime import datetime, timezone
+    user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
     return TokenResponse(
@@ -84,12 +95,37 @@ async def get_me(user: User = Depends(get_current_user)):
     }
 
 @router.post("/refresh")
-async def refresh_token(token: str):
-    from app.core.security import decode_token
-    payload = decode_token(token)
-    if payload.get("type") != "refresh":
+async def refresh_token(
+    req: RefreshRequest | None = Body(default=None),
+    token: str | None = Query(default=None, deprecated=True),
+    db: AsyncSession = Depends(get_db),
+):
+    supplied_token = req.refresh_token if req else token
+    if not supplied_token:
+        raise HTTPException(422, "refresh_token is required")
+    payload = decode_token(supplied_token)
+    if payload.get("type") != "refresh" or await is_token_revoked(payload):
         raise HTTPException(401, "Invalid token type")
+    result = await db.execute(select(User).where(User.id == int(payload["sub"])))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(401, "User not found or inactive")
+    await revoke_token(supplied_token)
     return {
-        "access_token": create_access_token({"sub": payload["sub"]}),
+        "access_token": create_access_token({"sub": str(user.id), "admin": user.is_admin}),
+        "refresh_token": create_refresh_token({"sub": str(user.id)}),
         "token_type": "bearer",
     }
+
+@router.post("/logout", status_code=204)
+async def logout(
+    req: LogoutRequest,
+    user: User = Depends(get_current_user),
+):
+    if req.access_token:
+        await revoke_token(req.access_token)
+    if req.refresh_token:
+        payload = decode_token(req.refresh_token)
+        if payload.get("sub") != str(user.id):
+            raise HTTPException(403, "Token does not belong to current user")
+        await revoke_token(req.refresh_token)

@@ -9,12 +9,10 @@ Connects to Binance WebSocket and broadcasts through our ws_manager
 
 import asyncio
 import json
-import time
 from typing import Dict, Set, Optional
 from datetime import datetime, timezone
 import aiohttp
 from app.core.websocket_manager import ws_manager
-from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
 BINANCE_WS_BASE = "wss://fstream.binance.com/ws"

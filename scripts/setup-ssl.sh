@@ -37,14 +37,10 @@ else
     sed -i "s/server_name .*;/server_name $DOMAIN;/g" nginx/nginx.conf
 fi
 
-# Stop nginx if running to free port 80
-docker compose -f docker/docker-compose.yml stop nginx 2>/dev/null || true
-
 # Run certbot to get certificate
 docker run --rm -v "$(pwd)/nginx/letsencrypt:/etc/letsencrypt" \
-    -v "$(pwd)/nginx/ssl:/etc/nginx/ssl" \
-    -p 80:80 \
-    certbot/certbot certonly --standalone \
+    certbot/certbot certonly --webroot \
+    --webroot-path /etc/letsencrypt/webroot \
     --non-interactive \
     --agree-tos \
     --email "$EMAIL" \
@@ -52,8 +48,8 @@ docker run --rm -v "$(pwd)/nginx/letsencrypt:/etc/letsencrypt" \
     --cert-name trading
 
 # Copy certificates to ssl directory
-cp "nginx/letsencrypt/live/$DOMAIN/fullchain.pem" nginx/ssl/cert.pem
-cp "nginx/letsencrypt/live/$DOMAIN/privkey.pem" nginx/ssl/key.pem
+ln -sfn "../letsencrypt/live/trading/fullchain.pem" nginx/ssl/cert.pem
+ln -sfn "../letsencrypt/live/trading/privkey.pem" nginx/ssl/key.pem
 
 echo ""
 echo "=== SSL Certificate Installed Successfully ==="

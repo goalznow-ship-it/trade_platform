@@ -1,23 +1,13 @@
 import pytest
-import asyncio
 from typing import AsyncGenerator, Generator
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.core.database import Base, get_db
 from app.main import app
-from app.core.config import settings
-
-TEST_DATABASE_URL = settings.DATABASE_URL
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_trading.db"
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-test_async_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+db_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +20,7 @@ async def setup_database():
 
 
 async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with test_async_session_factory() as session:
+    async with db_session_factory() as session:
         try:
             yield session
         finally:
@@ -49,7 +39,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with test_async_session_factory() as session:
+    async with db_session_factory() as session:
         yield session
 
 

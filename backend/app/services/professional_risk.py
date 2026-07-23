@@ -11,10 +11,8 @@ Position sizing and risk management:
 - Liquidation distance
 - Risk category classification
 """
-import math
-from typing import Optional, Dict, Any
+from typing import Optional
 from app.services.indicators import indicator_service
-from app.core.logging import logger
 
 
 class ProfessionalRiskEngine:
@@ -42,15 +40,12 @@ class ProfessionalRiskEngine:
 
         max_risk_amount = capital * risk_pct
 
-        if leverage and leverage > 1:
-            effective_risk = risk_per_unit * leverage
-            position_size = max_risk_amount / (entry_price * risk_per_unit * leverage)
-        else:
-            position_size = max_risk_amount / (entry_price * risk_per_unit)
-            leverage = 1
+        leverage = leverage or 1
+        position_size = max_risk_amount / (entry_price * risk_per_unit)
+        position_size = min(position_size, (capital * leverage) / entry_price)
 
         position_size = max(0, position_size)
-        max_risk_pct = risk_per_unit * leverage * 100
+        max_risk_pct = risk_per_unit * 100
 
         recommended_leverage = self._recommended_leverage(risk_per_unit, atr_value) if not leverage or leverage == 1 else leverage
 
@@ -159,10 +154,10 @@ class ProfessionalRiskEngine:
             checks.append({"check": "balance", "passed": False, "reason": "Insufficient balance"})
             passed = False
 
-        risk_pct = abs(entry_price - stop_loss) / entry_price * leverage * 100
-        if risk_pct > self.MAX_RISK_PER_TRADE * 100:
-            checks.append({"check": "max_risk", "passed": False,
-                            "reason": f"Risk {risk_pct:.1f}% exceeds max {self.MAX_RISK_PER_TRADE * 100:.0f}%"})
+        risk_pct = abs(entry_price - stop_loss) / entry_price * 100
+        if risk_pct >= 50:
+            checks.append({"check": "stop_distance", "passed": False,
+                            "reason": f"Stop distance {risk_pct:.1f}% is invalid"})
             passed = False
 
         if take_profit and stop_loss:

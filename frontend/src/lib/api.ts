@@ -2,7 +2,24 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+let refreshPromise: Promise<string | null> | null = null
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem("refresh_token")
+  if (!refreshToken) return null
+  const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  localStorage.setItem("token", data.access_token)
+  localStorage.setItem("refresh_token", data.refresh_token)
+  return data.access_token
+}
+
+async function request<T>(endpoint: string, options?: RequestInit, retried = false): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
   const headers: Record<string, string> = {
     ...(options?.headers as Record<string, string>),
@@ -13,6 +30,16 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   }
 
   const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers })
+  if (res.status === 401 && typeof window !== "undefined" && !retried && endpoint !== "/api/v1/auth/refresh") {
+    refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null })
+    const accessToken = await refreshPromise
+    if (accessToken) return request<T>(endpoint, options, true)
+  }
+  if (res.status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem("token")
+    localStorage.removeItem("refresh_token")
+    if (!window.location.pathname.startsWith("/login")) window.location.assign("/login")
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || "Request failed")
@@ -33,18 +60,24 @@ export const api = {
 
   me: () => request<any>("/api/v1/auth/me"),
 
+  logout: (accessToken: string | null, refreshToken: string | null) =>
+    request<void>("/api/v1/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ access_token: accessToken, refresh_token: refreshToken }),
+    }),
+
   // Market
   getOHLCV: (symbol: string, timeframe = "1h", limit = 200) =>
-    request<any[]>(`/api/v1/market/ohlcv/${symbol}?timeframe=${timeframe}&limit=${limit}`),
+    request<any[]>(`/api/v1/market/ohlcv/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
 
   getTicker: (symbol: string) =>
-    request<any>(`/api/v1/market/ticker/${symbol}`),
+    request<any>(`/api/v1/market/ticker/${encodeURIComponent(symbol)}`),
 
   getOverview: () => request<any>("/api/v1/market/overview"),
 
   getFearGreed: () => request<any>("/api/v1/market/fear-greed"),
 
-  searchSymbols: (q: string) => request<any[]>(`/api/v1/market/search?q=${q}`),
+  searchSymbols: (q: string) => request<any[]>(`/api/v1/market/search?q=${encodeURIComponent(q)}`),
 
   getSymbols: () => request<any[]>("/api/v1/market/symbols"),
 
@@ -81,6 +114,10 @@ export const api = {
     request<any>("/api/v1/trade/order", { method: "POST", body: JSON.stringify(data) }),
 
   getPositions: () => request<any[]>("/api/v1/trade/positions"),
+  reconcileOrders: (exchange = "binance") =>
+    request<any>(`/api/v1/trade/orders/reconcile?exchange=${encodeURIComponent(exchange)}`, {
+      method: "POST",
+    }),
 
   getBalance: () => request<any>("/api/v1/trade/balance"),
 
@@ -89,7 +126,7 @@ export const api = {
 
   getTradeHistory: (params?: { skip?: number; limit?: number; symbol?: string }) => {
     const q = new URLSearchParams()
-    if (params?.skip) q.set("skip", String(params.skip))
+    if (params?.skip) q.set("offset", String(params.skip))
     if (params?.limit) q.set("limit", String(params.limit))
     if (params?.symbol) q.set("symbol", params.symbol)
     return request<any[]>("/api/v1/trade/history?" + q.toString())
@@ -99,7 +136,7 @@ export const api = {
 
   exportTradeHistory: () => {
     const token = localStorage.getItem("token")
-    const url = `${API_URL}/api/v1/trade/history/export`
+    const url = `${API_URL}/api/v1/trade/history/export/csv`
     return fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.blob())
   },
 
@@ -143,10 +180,10 @@ export const api = {
       method: "POST", body: JSON.stringify({ symbol }),
     }),
 
-  removeWatchlistSymbol: (watchlistId: number, symbolId: number) =>
-    request(`/api/v1/watchlists/${watchlistId}/symbols/${symbolId}`, { method: "DELETE" }),
+  removeWatchlistSymbol: (watchlistId: number, symbol: string) =>
+    request(`/api/v1/watchlists/${watchlistId}/symbols/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
 
-  reorderWatchlistSymbols: (watchlistId: number, symbols: { id: number; sort_order: number }[]) =>
+  reorderWatchlistSymbols: (watchlistId: number, symbols: string[]) =>
     request(`/api/v1/watchlists/${watchlistId}/symbols/reorder`, {
       method: "PUT", body: JSON.stringify({ symbols }),
     }),
@@ -237,6 +274,12 @@ export const api = {
   // Admin
   getAdminStats: () => request<any>("/api/v1/admin/stats"),
   getAdminHealth: () => request<any>("/api/v1/admin/health"),
+  getTradingControl: () => request<any>("/api/v1/admin/trading/control"),
+  getProviderHealth: () => request<any>("/api/v1/admin/providers/health"),
+  setTradingControl: (halted: boolean, reason: string) =>
+    request<any>("/api/v1/admin/trading/control", {
+      method: "PUT", body: JSON.stringify({ halted, reason }),
+    }),
   getAdminUsers: () => request<any[]>("/api/v1/admin/users"),
   updateUser: (id: number, data: any) =>
     request(`/api/v1/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
