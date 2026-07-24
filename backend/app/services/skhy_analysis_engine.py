@@ -13,7 +13,6 @@ class SkhyAnalysisEngine:
         ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200) for tf in TIMEFRAMES}
         ohlcv_results = await asyncio.gather(*ohlcv_tasks.values())
         ohlcv_data = dict(zip(ohlcv_tasks.keys(), ohlcv_results))
-
         snapshot = await skhy_market_data.get_snapshot()
 
         tf_analysis = {}
@@ -24,8 +23,7 @@ class SkhyAnalysisEngine:
                 continue
             indicators = skhy_indicators.analyze(data)
             structure = skhy_structure.analyze(data)
-            tf_result = self._analyze_timeframe(data, indicators, structure, tf)
-            tf_analysis[tf] = tf_result
+            tf_analysis[tf] = self._analyze_timeframe(data, indicators, structure, tf)
 
         alignment = self._compute_alignment(tf_analysis)
         scores = self._compute_scores(tf_analysis, alignment, snapshot)
@@ -34,828 +32,813 @@ class SkhyAnalysisEngine:
         support_resistance = self._compute_support_resistance(ohlcv_data, snapshot)
         elliott_wave = self._detect_elliott_wave(ohlcv_data)
         fibonacci = self._compute_fibonacci_levels(ohlcv_data, snapshot)
+        detected_structure = self._detect_dominant_structure(ohlcv_data, snapshot)
+        channel_lines = self._detect_channel(ohlcv_data)
+        breakout_zone = self._detect_breakout_zone(ohlcv_data, snapshot, tf_analysis)
+        scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci)
+        target_hierarchy = self._compute_target_hierarchy(ohlcv_data, snapshot, scenario_paths, fibonacci, support_resistance)
+        time_estimates = self._compute_time_estimates(ohlcv_data)
+        activation_conditions = self._compute_activation_conditions(triggers, tf_analysis, snapshot)
+        confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure)
 
         return {
-            "symbol": "SKHYUSDT",
-            "exchange": "Binance Futures",
-            "market": "USDT Perpetual",
+            "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "snapshot": snapshot,
-            "timeframes": tf_analysis,
-            "alignment": alignment,
-            "scores": scores,
-            "triggers": triggers,
-            "patterns": patterns,
-            "support_resistance": support_resistance,
-            "elliott_wave": elliott_wave,
-            "fibonacci": fibonacci,
-            "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers),
+            "snapshot": snapshot, "timeframes": tf_analysis, "alignment": alignment, "scores": scores,
+            "triggers": triggers, "patterns": patterns, "support_resistance": support_resistance,
+            "elliott_wave": elliott_wave, "fibonacci": fibonacci,
+            "detected_structure": detected_structure, "channel_lines": channel_lines,
+            "breakout_zone": breakout_zone, "scenario_paths": scenario_paths,
+            "target_hierarchy": target_hierarchy, "time_estimates": time_estimates,
+            "activation_conditions": activation_conditions, "confidence_breakdown": confidence_breakdown,
+            "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
         }
 
-    def _analyze_timeframe(self, data: list, indicators: dict, structure: dict, tf: str) -> dict:
-        if not data:
-            return {"error": "No data", "signal": "WAIT"}
-        close = data[-1]["close"] if data else 0
+    def _analyze_timeframe(self, data, indicators, structure, tf):
+        if not data: return {"error": "No data", "signal": "WAIT"}
+        close = data[-1]["close"]
         interp = indicators.get("interpretation", {})
-
-        trend = interp.get("trend", {})
-        momentum = interp.get("momentum", {})
-        volume_info = interp.get("volume", {})
+        trend = interp.get("trend", {}); momentum = interp.get("momentum", {}); volume_info = interp.get("volume", {})
         overall = interp.get("overall", "neutral")
-
-        bullish_score = 0
-        bearish_score = 0
-
-        if trend.get("bias") == "bullish":
-            bullish_score += 25
-        elif trend.get("bias") == "bearish":
-            bearish_score += 25
-        if momentum.get("rsi") in ("bullish", "oversold"):
-            bullish_score += 15
-        elif momentum.get("rsi") in ("bearish", "overbought"):
-            bearish_score += 15
-        if momentum.get("macd") == "bullish":
-            bullish_score += 10
-        elif momentum.get("macd") == "bearish":
-            bearish_score += 10
-        if volume_info.get("cmf") == "bullish":
-            bullish_score += 10
-        elif volume_info.get("cmf") == "bearish":
-            bearish_score += 10
-        if trend.get("supertrend") == "up":
-            bullish_score += 15
-        elif trend.get("supertrend") == "down":
-            bearish_score += 15
-
+        bullish_score = bearish_score = 0
+        if trend.get("bias") == "bullish": bullish_score += 25
+        elif trend.get("bias") == "bearish": bearish_score += 25
+        if momentum.get("rsi") in ("bullish", "oversold"): bullish_score += 15
+        elif momentum.get("rsi") in ("bearish", "overbought"): bearish_score += 15
+        if momentum.get("macd") == "bullish": bullish_score += 10
+        elif momentum.get("macd") == "bearish": bearish_score += 10
+        if volume_info.get("cmf") == "bullish": bullish_score += 10
+        elif volume_info.get("cmf") == "bearish": bearish_score += 10
+        if trend.get("supertrend") == "up": bullish_score += 15
+        elif trend.get("supertrend") == "down": bearish_score += 15
         ms = structure.get("market_structure", {})
-        if ms.get("trend") == "bullish":
-            bullish_score += 15
-        elif ms.get("trend") == "bearish":
-            bearish_score += 15
-
+        if ms.get("trend") == "bullish": bullish_score += 15
+        elif ms.get("trend") == "bearish": bearish_score += 15
         total = bullish_score + bearish_score
         bullish_pct = round(bullish_score / total * 100) if total > 0 else 50
         bearish_pct = round(bearish_score / total * 100) if total > 0 else 50
-
-        support = self._find_support(data)
-        resistance = self._find_resistance(data)
-
+        support = self._find_support(data); resistance = self._find_resistance(data)
         signal = "STRONG_LONG" if bullish_pct >= 75 else "LONG" if bullish_pct >= 60 else "STRONG_SHORT" if bearish_pct >= 75 else "SHORT" if bearish_pct >= 60 else "WAIT"
-
         volatility = round(np.std([d["close"] for d in data[-20:]]) / np.mean([d["close"] for d in data[-20:]]), 4) if len(data) >= 20 else 0
-
-        momentum_val = momentum.get("rsi", "neutral")
-        volume_val = volume_info.get("relative_volume", "normal")
-
-        bos = structure.get("break_of_structure", [])
-        choch = structure.get("change_of_character", [])
-
+        bos = structure.get("break_of_structure", []); choch = structure.get("change_of_character", [])
         return {
-            "signal": signal,
-            "trend": overall,
-            "market_structure": ms.get("trend", "undefined"),
-            "bullish_score": bullish_pct,
-            "bearish_score": bearish_pct,
-            "momentum": momentum_val,
-            "volume": volume_val,
-            "volatility": volatility,
-            "support": support,
-            "resistance": resistance,
-            "bos": len(bos),
-            "bos_details": bos[-3:] if bos else [],
-            "choch": len(choch),
-            "choch_details": choch[-3:] if choch else [],
-            "liquidity": structure.get("liquidity", {}),
-            "pattern": self._detect_tf_pattern(data, tf),
-            "close": close,
+            "signal": signal, "trend": overall, "market_structure": ms.get("trend", "undefined"),
+            "bullish_score": bullish_pct, "bearish_score": bearish_pct,
+            "momentum": momentum.get("rsi", "neutral"), "volume": volume_info.get("relative_volume", "normal"),
+            "volatility": volatility, "support": support, "resistance": resistance,
+            "bos": len(bos), "bos_details": bos[-3:] if bos else [], "choch": len(choch),
+            "choch_details": choch[-3:] if choch else [], "liquidity": structure.get("liquidity", {}),
+            "pattern": self._detect_tf_pattern(data, tf), "close": close,
         }
 
-    def _find_support(self, data: list) -> float:
-        if len(data) < 20:
-            return min(d["low"] for d in data) if data else 0
+    def _find_support(self, data):
+        if len(data) < 20: return min(d["low"] for d in data) if data else 0
         lows = [d["low"] for d in data[-50:]]
         return sorted(set(round(l, 2) for l in lows))[0] if sorted(set(round(l, 2) for l in lows)) else min(lows)
 
-    def _find_resistance(self, data: list) -> float:
-        if len(data) < 20:
-            return max(d["high"] for d in data) if data else 0
+    def _find_resistance(self, data):
+        if len(data) < 20: return max(d["high"] for d in data) if data else 0
         highs = [d["high"] for d in data[-50:]]
         return sorted(set(round(h, 2) for h in highs))[-1] if sorted(set(round(h, 2) for h in highs)) else max(highs)
 
-    def _detect_tf_pattern(self, data: list, tf: str) -> dict:
-        if len(data) < 30:
-            return {"name": "none", "status": "insufficient_data"}
-        closes = [d["close"] for d in data[-30:]]
-        highs = [d["high"] for d in data[-30:]]
-        lows = [d["low"] for d in data[-30:]]
+    def _detect_tf_pattern(self, data, tf):
+        if len(data) < 30: return {"name": "none", "status": "insufficient_data"}
+        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; lows = [d["low"] for d in data[-30:]]
         mid = len(closes) // 2
-        first_half = np.mean(closes[:mid])
-        second_half = np.mean(closes[mid:])
-        if second_half > first_half * 1.03 and max(highs[-5:]) > max(highs[-10:-5]):
-            return {"name": "ascending", "status": "forming"}
-        if second_half < first_half * 0.97 and min(lows[-5:]) < min(lows[-10:-5]):
-            return {"name": "descending", "status": "forming"}
+        first_half = np.mean(closes[:mid]); second_half = np.mean(closes[mid:])
+        if second_half > first_half * 1.03 and max(highs[-5:]) > max(highs[-10:-5]): return {"name": "ascending", "status": "forming"}
+        if second_half < first_half * 0.97 and min(lows[-5:]) < min(lows[-10:-5]): return {"name": "descending", "status": "forming"}
         return {"name": "ranging", "status": "neutral"}
 
-    def _compute_alignment(self, tf_analysis: dict) -> dict:
+    def _compute_alignment(self, tf_analysis):
         signals = [v.get("signal", "WAIT") for v in tf_analysis.values() if "signal" in v]
-        if not signals:
-            return {"confidence": 0, "status": "NO_DATA"}
-
-        long_count = sum(1 for s in signals if s in ("LONG", "STRONG_LONG"))
-        short_count = sum(1 for s in signals if s in ("SHORT", "STRONG_SHORT"))
-        wait_count = sum(1 for s in signals if s == "WAIT")
+        if not signals: return {"confidence": 0, "status": "NO_DATA"}
+        long_count = sum(1 for s in signals if s in ("LONG","STRONG_LONG"))
+        short_count = sum(1 for s in signals if s in ("SHORT","STRONG_SHORT"))
         total = len(signals)
-
-        h4 = tf_analysis.get("4h", {}).get("signal", "WAIT")
-        h1 = tf_analysis.get("1h", {}).get("signal", "WAIT")
-        h4_h1_aligned = (h4 in ("LONG", "STRONG_LONG") and h1 in ("LONG", "STRONG_LONG")) or \
-                         (h4 in ("SHORT", "STRONG_SHORT") and h1 in ("SHORT", "STRONG_SHORT"))
+        h4 = tf_analysis.get("4h", {}).get("signal", "WAIT"); h1 = tf_analysis.get("1h", {}).get("signal", "WAIT")
+        h4_h1_aligned = (h4 in ("LONG","STRONG_LONG") and h1 in ("LONG","STRONG_LONG")) or (h4 in ("SHORT","STRONG_SHORT") and h1 in ("SHORT","STRONG_SHORT"))
         d1 = tf_analysis.get("1d", {}).get("signal", "WAIT")
         conflicts = []
-
-        if h4 not in ("LONG", "STRONG_LONG", "SHORT", "STRONG_SHORT", "WAIT"):
-            conflicts.append("4H trend unclear")
-        if h4 in ("LONG", "STRONG_LONG") and h1 in ("SHORT", "STRONG_SHORT"):
-            conflicts.append("4H bullish but 1H bearish")
-        if h4 in ("SHORT", "STRONG_SHORT") and h1 in ("LONG", "STRONG_LONG"):
-            conflicts.append("4H bearish but 1H bullish")
-        if d1 == "WAIT" and h4 != "WAIT":
-            conflicts.append("Daily trend neutral")
-
+        if h4 in ("LONG","STRONG_LONG") and h1 in ("SHORT","STRONG_SHORT"): conflicts.append("4H bullish but 1H bearish")
+        if h4 in ("SHORT","STRONG_SHORT") and h1 in ("LONG","STRONG_LONG"): conflicts.append("4H bearish but 1H bullish")
+        if d1 == "WAIT" and h4 != "WAIT": conflicts.append("Daily trend neutral")
         primary_direction = "long" if long_count > short_count else "short" if short_count > long_count else "neutral"
         confidence = round((max(long_count, short_count) / total) * 100) if total > 0 else 0
-
         return {
-            "primary_direction": primary_direction,
-            "confidence": min(confidence, 100),
-            "long_timeframes": long_count,
-            "short_timeframes": short_count,
-            "wait_timeframes": wait_count,
-            "total_timeframes": total,
-            "h4_h1_aligned": h4_h1_aligned,
-            "d1_filter": d1,
-            "conflicts": conflicts,
+            "primary_direction": primary_direction, "confidence": min(confidence, 100),
+            "long_timeframes": long_count, "short_timeframes": short_count, "total_timeframes": total,
+            "h4_h1_aligned": h4_h1_aligned, "d1_filter": d1, "conflicts": conflicts,
             "status": "ALIGNED" if confidence >= 60 and h4_h1_aligned and not conflicts else "CONFLICTING" if conflicts else "LOW_CONFIDENCE",
         }
 
-    def _compute_scores(self, tf_analysis: dict, alignment: dict, snapshot: dict) -> dict:
+    def _compute_scores(self, tf_analysis, alignment, snapshot):
         tf_count = sum(1 for v in tf_analysis.values() if "signal" in v)
-        if tf_count == 0:
-            return {"overall": 0, "status": "NO_DATA"}
-
-        trend_score = 0
-        structure_score = 0
-        momentum_score = 0
-        volume_score = 0
-        liquidity_score = 0
-        pattern_score = 0
-        futures_score = 0
-        orderflow_score = 0
-        multitimeframe_score = alignment["confidence"]
-        risk_score = 50
-
-        for tf, v in tf_analysis.items():
-            if "trend" not in v:
-                continue
-            if v.get("trend") == "bullish":
-                trend_score += 12
-            elif v.get("trend") == "bearish":
-                trend_score += 12
-            else:
-                trend_score += 5
-            if v.get("market_structure") == "bullish":
-                structure_score += 12
-            elif v.get("market_structure") == "bearish":
-                structure_score += 12
-            else:
-                structure_score += 5
+        if tf_count == 0: return {"overall": 0, "status": "NO_DATA"}
+        trend_score=structure_score=momentum_score=volume_score=liquidity_score=pattern_score=futures_score=orderflow_score=0
+        multitimeframe_score = alignment["confidence"]; risk_score = 50
+        for v in tf_analysis.values():
+            if "trend" not in v: continue
+            trend_score += 12 if v.get("trend") == "bullish" else 12 if v.get("trend") == "bearish" else 5
+            structure_score += 12 if v.get("market_structure") == "bullish" else 12 if v.get("market_structure") == "bearish" else 5
             mom = v.get("momentum", "neutral")
-            if mom in ("bullish", "oversold"):
-                momentum_score += 10
-            elif mom in ("bearish", "overbought"):
-                momentum_score += 10
-            else:
-                momentum_score += 5
+            momentum_score += 10 if mom in ("bullish","oversold") else 10 if mom in ("bearish","overbought") else 5
             vol = v.get("volume", "normal")
-            if vol in ("high", "above_average"):
-                volume_score += 12
-            else:
-                volume_score += 5
+            volume_score += 12 if vol in ("high","above_average") else 5
             liq = v.get("liquidity", {})
-            if liq.get("nearest_above") or liq.get("nearest_below"):
-                liquidity_score += 10
-            else:
-                liquidity_score += 5
-            if v.get("bos", 0) > 0 or v.get("choch", 0) > 0:
-                pattern_score += 10
-            else:
-                pattern_score += 5
-
+            liquidity_score += 10 if liq.get("nearest_above") or liq.get("nearest_below") else 5
+            pattern_score += 10 if v.get("bos",0) > 0 or v.get("choch",0) > 0 else 5
         tf_count = max(tf_count, 1)
-        trend_score = min(trend_score // tf_count, 100)
-        structure_score = min(structure_score // tf_count, 100)
-        momentum_score = min(momentum_score // tf_count, 100)
-        volume_score = min(volume_score // tf_count, 100)
-        liquidity_score = min(liquidity_score // tf_count, 100)
-        pattern_score = min(pattern_score // tf_count, 100)
-
+        trend_score = min(trend_score//tf_count,100); structure_score = min(structure_score//tf_count,100)
+        momentum_score = min(momentum_score//tf_count,100); volume_score = min(volume_score//tf_count,100)
+        liquidity_score = min(liquidity_score//tf_count,100); pattern_score = min(pattern_score//tf_count,100)
         funding = snapshot.get("funding", {})
         if funding:
             fr = funding.get("funding_rate", 0)
-            if fr is not None:
-                if abs(fr) < 0.0001:
-                    futures_score = 50
-                elif fr > 0:
-                    futures_score = 60
-                else:
-                    futures_score = 40
-
+            if fr is not None: futures_score = 50 if abs(fr) < 0.0001 else 60 if fr > 0 else 40
         oi = snapshot.get("open_interest", {})
-        oi_val = oi.get("open_interest")
-        if oi_val:
-            futures_score = min(futures_score + 10, 100)
-
+        if oi.get("open_interest"): futures_score = min(futures_score + 10, 100)
         ls = snapshot.get("long_short_ratio", {})
         lsr = ls.get("long_short_ratio", 1)
-        if lsr > 1.5:
-            orderflow_score += 30
-        elif lsr < 0.7:
-            orderflow_score += 30
-        else:
-            orderflow_score += 15
+        orderflow_score += 30 if lsr > 1.5 else 30 if lsr < 0.7 else 15
         taker = snapshot.get("taker_buy_sell_ratio", {})
-        if taker.get("buy_sell_ratio", 1) > 1.2:
-            orderflow_score += 20
-            futures_score += 10
-        elif taker.get("buy_sell_ratio", 0) < 0.8:
-            orderflow_score += 20
-            futures_score += 10
-        else:
-            orderflow_score += 10
-
+        tbr = taker.get("buy_sell_ratio", 1)
+        if tbr > 1.2: orderflow_score += 20; futures_score += 10
+        elif tbr < 0.8: orderflow_score += 20; futures_score += 10
+        else: orderflow_score += 10
         risk_score = risk_score - (10 if alignment.get("conflicts") else 0) + (10 if alignment.get("h4_h1_aligned") else 0)
-
-        overall = round((trend_score * 0.15 + structure_score * 0.12 + momentum_score * 0.12 +
-                         volume_score * 0.10 + liquidity_score * 0.10 + pattern_score * 0.08 +
-                         futures_score * 0.10 + orderflow_score * 0.08 + multitimeframe_score * 0.10 +
-                         risk_score * 0.05))
-
+        overall = round((trend_score*0.15 + structure_score*0.12 + momentum_score*0.12 + volume_score*0.10 +
+                         liquidity_score*0.10 + pattern_score*0.08 + futures_score*0.10 + orderflow_score*0.08 +
+                         multitimeframe_score*0.10 + risk_score*0.05))
         status = "STRONG_TRADE_READY" if overall >= 80 else "TRADE_READY" if overall >= 70 else "WATCHLIST" if overall >= 50 else "WAIT"
-
-        long_prob = round(trend_score * 0.3 + momentum_score * 0.2 + volume_score * 0.1 + (100 - structure_score) * 0.1 + multitimeframe_score * 0.3)
+        long_prob = round(trend_score*0.3 + momentum_score*0.2 + volume_score*0.1 + (100-structure_score)*0.1 + multitimeframe_score*0.3)
         short_prob = 100 - long_prob
-
         return {
-            "trend_score": trend_score,
-            "structure_score": structure_score,
-            "momentum_score": momentum_score,
-            "volume_score": volume_score,
-            "liquidity_score": liquidity_score,
-            "pattern_score": pattern_score,
-            "futures_score": futures_score,
-            "orderflow_score": orderflow_score,
-            "multitimeframe_score": multitimeframe_score,
-            "risk_score": risk_score,
-            "overall": overall,
-            "status": status,
-            "long_probability": min(max(long_prob, 0), 100),
-            "short_probability": min(max(short_prob, 0), 100),
-            "signal_confidence": overall,
+            "trend_score": trend_score, "structure_score": structure_score, "momentum_score": momentum_score,
+            "volume_score": volume_score, "liquidity_score": liquidity_score, "pattern_score": pattern_score,
+            "futures_score": futures_score, "orderflow_score": orderflow_score,
+            "multitimeframe_score": multitimeframe_score, "risk_score": risk_score,
+            "overall": overall, "status": status, "long_probability": min(max(long_prob,0),100),
+            "short_probability": min(max(short_prob,0),100), "signal_confidence": overall,
         }
 
-    def _compute_triggers(self, tf_analysis: dict, alignment: dict, scores: dict, snapshot: dict) -> dict:
-        h4 = tf_analysis.get("4h", {})
-        h1 = tf_analysis.get("1h", {})
-        m15 = tf_analysis.get("15m", {})
-        d1 = tf_analysis.get("1d", {})
-
-        close_4h = h4.get("close", 0)
-        close_1h = h1.get("close", 0)
-        res_1h = h1.get("resistance", 0)
-        sup_1h = h1.get("support", 0)
-        res_4h = h4.get("resistance", 0)
-        sup_4h = h4.get("support", 0)
-
-        h4_trend = h4.get("trend", "neutral")
-        h1_trend = h1.get("trend", "neutral")
-        h4_structure = h4.get("market_structure", "undefined")
-        h1_structure = h1.get("market_structure", "undefined")
-
-        long_trigger_price = round(res_1h * 1.005, 2) if res_1h else round(close_1h * 1.02, 2)
-        short_trigger_price = round(sup_1h * 0.995, 2) if sup_1h else round(close_1h * 0.98, 2)
-
-        long_conditions = []
-        short_conditions = []
-
-        if h4_trend in ("bullish", "neutral"):
-            long_conditions.append("4H strukturu alışı dəstəkləyir")
-        else:
-            long_conditions.append("4H trendi aşağı - təsdiq üçün GÖZLƏ")
-
-        if h1_trend in ("bullish", "neutral"):
-            long_conditions.append("1H momentum alışı dəstəkləyir")
-        else:
-            long_conditions.append("1H aşağı trenddə - dönüş gözlənilir")
-
-        if res_1h:
-            long_conditions.append(f"1H şamı ${long_trigger_price} üzərində bağlanmalı")
+    def _compute_triggers(self, tf_analysis, alignment, scores, snapshot):
+        h4 = tf_analysis.get("4h", {}); h1 = tf_analysis.get("1h", {}); m15 = tf_analysis.get("15m", {})
+        close_4h = h4.get("close",0); close_1h = h1.get("close",0)
+        res_1h = h1.get("resistance",0); sup_1h = h1.get("support",0)
+        h4_trend = h4.get("trend","neutral"); h1_trend = h1.get("trend","neutral")
+        long_trigger_price = round(res_1h*1.005,2) if res_1h else round(close_1h*1.02,2)
+        short_trigger_price = round(sup_1h*0.995,2) if sup_1h else round(close_1h*0.98,2)
+        long_conditions = []; short_conditions = []
+        if h4_trend in ("bullish","neutral"): long_conditions.append("4H strukturu alışı dəstəkləyir")
+        else: long_conditions.append("4H trendi aşağı - təsdiq üçün GÖZLƏ")
+        if h1_trend in ("bullish","neutral"): long_conditions.append("1H momentum alışı dəstəkləyir")
+        else: long_conditions.append("1H aşağı trenddə - dönüş gözlənilir")
+        if res_1h: long_conditions.append(f"1H şamı ${long_trigger_price} üzərində bağlanmalı")
         long_conditions.append("Partlayış şamında həcm 1.5x ortalamadan yuxarı")
         long_conditions.append("Partlayışda OI artmalı")
         taker = snapshot.get("taker_buy_sell_ratio", {})
-        if taker.get("buy_sell_ratio", 1) < 1.0:
-            long_conditions.append("Taker alış nisbəti 1.0 üzərində güclənməlidir")
-
-        if h4_trend in ("bearish", "neutral"):
-            short_conditions.append("4H strukturu satışı dəstəkləyir")
-        else:
-            short_conditions.append("4H trendi yuxarı - dönüş üçün GÖZLƏ")
-
-        if h1_trend in ("bearish", "neutral"):
-            short_conditions.append("1H momentum satışı dəstəkləyir")
-        else:
-            short_conditions.append("1H yuxarı trenddə - dönüş gözlənilir")
-
-        if sup_1h:
-            short_conditions.append(f"1H şamı ${short_trigger_price} altında bağlanmalı")
+        if taker.get("buy_sell_ratio",1) < 1.0: long_conditions.append("Taker alış nisbəti 1.0 üzərində güclənməlidir")
+        if h4_trend in ("bearish","neutral"): short_conditions.append("4H strukturu satışı dəstəkləyir")
+        else: short_conditions.append("4H trendi yuxarı - dönüş üçün GÖZLƏ")
+        if h1_trend in ("bearish","neutral"): short_conditions.append("1H momentum satışı dəstəkləyir")
+        else: short_conditions.append("1H yuxarı trenddə - dönüş gözlənilir")
+        if sup_1h: short_conditions.append(f"1H şamı ${short_trigger_price} altında bağlanmalı")
         short_conditions.append("Qırılma şamında həcm 1.5x ortalamadan yuxarı")
         short_conditions.append("Qırılmada OI artmalı")
-        if taker.get("buy_sell_ratio", 1) > 1.0:
-            short_conditions.append("Taker satış nisbəti 1.0 üzərində güclənməlidir")
-
-        bullish_invalidation = round(close_1h * 0.98, 2) if close_1h else 0
-        bearish_invalidation = round(close_1h * 1.02, 2) if close_1h else 0
-
+        if taker.get("buy_sell_ratio",1) > 1.0: short_conditions.append("Taker satış nisbəti 1.0 üzərində güclənməlidir")
+        bullish_invalidation = round(close_1h*0.98,2) if close_1h else 0
+        bearish_invalidation = round(close_1h*1.02,2) if close_1h else 0
         if h4_trend == "bullish":
-            bullish_invalidation = round(h4.get("support", close_4h * 0.95), 2)
-            bearish_invalidation = round(h4.get("resistance", close_4h * 1.05), 2)
-
+            bullish_invalidation = round(h4.get("support", close_4h*0.95),2)
+            bearish_invalidation = round(h4.get("resistance", close_4h*1.05),2)
         return {
-            "long_trigger_price": long_trigger_price,
-            "long_trigger_conditions": long_conditions,
-            "short_trigger_price": short_trigger_price,
-            "short_trigger_conditions": short_conditions,
-            "bullish_invalidation": bullish_invalidation,
-            "bearish_invalidation": bearish_invalidation,
+            "long_trigger_price": long_trigger_price, "long_trigger_conditions": long_conditions,
+            "short_trigger_price": short_trigger_price, "short_trigger_conditions": short_conditions,
+            "bullish_invalidation": bullish_invalidation, "bearish_invalidation": bearish_invalidation,
             "entry_ready": scores["overall"] >= 70 and alignment["h4_h1_aligned"],
         }
 
-    def _detect_patterns(self, ohlcv_data: dict) -> list:
+    # ─── PATTERN DETECTION ───
+    def _detect_patterns(self, ohlcv_data):
         patterns = []
         for tf in TIMEFRAMES:
             data = ohlcv_data.get(tf, [])
-            if len(data) < 50:
-                continue
-            closes = [d["close"] for d in data]
-            highs = [d["high"] for d in data]
-            lows = [d["low"] for d in data]
-            volumes = [d["volume"] for d in data]
+            if len(data) < 50: continue
             recent = data[-30:]
-
-            p = self._check_bull_flag(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_bear_flag(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_double_top(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_double_bottom(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_triangle(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_abcd(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_rectangle(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_wedge(recent, tf)
-            if p:
-                patterns.append(p)
-            p = self._check_head_shoulders(recent, tf)
-            if p:
-                patterns.append(p)
+            for check in [self._check_bull_flag, self._check_bear_flag, self._check_double_top,
+                          self._check_double_bottom, self._check_triangle, self._check_abcd,
+                          self._check_rectangle, self._check_wedge, self._check_head_shoulders]:
+                p = check(recent, tf)
+                if p: patterns.append(p)
         return patterns
 
-    def _check_bull_flag(self, data: list, tf: str) -> dict:
-        if len(data) < 15:
-            return None
-        pole = data[:8]
-        flag = data[8:]
+    def _check_bull_flag(self, data, tf):
+        if len(data) < 15: return None
+        pole = data[:8]; flag = data[8:]
         pole_rise = pole[-1]["close"] - pole[0]["close"]
         if pole_rise > 0 and pole_rise / pole[0]["close"] > 0.03:
-            flag_highs = [d["high"] for d in flag]
-            flag_lows = [d["low"] for d in flag]
+            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
-                return {
-                    "name": "Bull Flag", "timeframe": tf, "status": "DETECTED",
-                    "completion": 70, "breakout_level": max(flag_highs),
-                    "breakdown_level": min(flag_lows), "measured_target": round(flag[-1]["close"] + pole_rise, 2),
-                    "invalidation": min(flag_lows), "probability": 60, "reliability": "medium",
-                }
+                return {"name":"Bull Flag","timeframe":tf,"status":"DETECTED","completion":70,
+                        "breakout_level":max(flag_highs),"measured_target":round(flag[-1]["close"]+pole_rise,2),
+                        "invalidation":min(flag_lows),"probability":60,"reliability":"medium"}
         return None
 
-    def _check_bear_flag(self, data: list, tf: str) -> dict:
-        if len(data) < 15:
-            return None
-        pole = data[:8]
-        flag = data[8:]
+    def _check_bear_flag(self, data, tf):
+        if len(data) < 15: return None
+        pole = data[:8]; flag = data[8:]
         pole_drop = pole[0]["close"] - pole[-1]["close"]
         if pole_drop > 0 and pole_drop / pole[0]["close"] > 0.03:
-            flag_highs = [d["high"] for d in flag]
-            flag_lows = [d["low"] for d in flag]
+            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
-                return {
-                    "name": "Bear Flag", "timeframe": tf, "status": "DETECTED",
-                    "completion": 70, "breakout_level": min(flag_lows),
-                    "breakdown_level": max(flag_highs), "measured_target": round(flag[-1]["close"] - pole_drop, 2),
-                    "invalidation": max(flag_highs), "probability": 60, "reliability": "medium",
-                }
+                return {"name":"Bear Flag","timeframe":tf,"status":"DETECTED","completion":70,
+                        "breakout_level":min(flag_lows),"measured_target":round(flag[-1]["close"]-pole_drop,2),
+                        "invalidation":max(flag_highs),"probability":60,"reliability":"medium"}
         return None
 
-    def _check_double_top(self, data: list, tf: str) -> dict:
-        if len(data) < 20:
-            return None
-        highs = [d["high"] for d in data]
-        mid = len(highs) // 2
-        left_high = max(highs[:mid])
-        right_high = max(highs[mid:])
-        if abs(left_high - right_high) / left_high < 0.015:
+    def _check_double_top(self, data, tf):
+        if len(data) < 20: return None
+        highs = [d["high"] for d in data]; mid = len(highs)//2
+        left = max(highs[:mid]); right = max(highs[mid:])
+        if abs(left-right)/left < 0.015:
             neckline = min(d["low"] for d in data)
-            return {
-                "name": "Double Top", "timeframe": tf, "status": "DETECTED",
-                "completion": 50, "breakdown_level": neckline,
-                "measured_target": round(neckline - (left_high - neckline), 2),
-                "invalidation": max(left_high, right_high) * 1.01, "probability": 55, "reliability": "medium",
-            }
+            return {"name":"Double Top","timeframe":tf,"status":"DETECTED","completion":50,
+                    "breakdown_level":neckline,"measured_target":round(neckline-(left-neckline),2),
+                    "invalidation":max(left,right)*1.01,"probability":55,"reliability":"medium"}
         return None
 
-    def _check_double_bottom(self, data: list, tf: str) -> dict:
-        if len(data) < 20:
-            return None
-        lows_list = [d["low"] for d in data]
-        mid = len(lows_list) // 2
-        left_low = min(lows_list[:mid])
-        right_low = min(lows_list[mid:])
-        if abs(left_low - right_low) / left_low < 0.015:
+    def _check_double_bottom(self, data, tf):
+        if len(data) < 20: return None
+        lows = [d["low"] for d in data]; mid = len(lows)//2
+        left = min(lows[:mid]); right = min(lows[mid:])
+        if abs(left-right)/left < 0.015:
             neckline = max(d["high"] for d in data)
-            return {
-                "name": "Double Bottom", "timeframe": tf, "status": "DETECTED",
-                "completion": 50, "breakout_level": neckline,
-                "measured_target": round(neckline + (neckline - left_low), 2),
-                "invalidation": min(left_low, right_low) * 0.99, "probability": 55, "reliability": "medium",
-            }
+            return {"name":"Double Bottom","timeframe":tf,"status":"DETECTED","completion":50,
+                    "breakout_level":neckline,"measured_target":round(neckline+(neckline-left),2),
+                    "invalidation":min(left,right)*0.99,"probability":55,"reliability":"medium"}
         return None
 
-    def _check_triangle(self, data: list, tf: str) -> dict:
-        if len(data) < 15:
-            return None
-        highs = [d["high"] for d in data[-15:]]
-        lows = [d["low"] for d in data[-15:]]
-        h_slope = (highs[-1] - highs[0]) / len(highs)
-        l_slope = (lows[-1] - lows[0]) / len(lows)
+    def _check_triangle(self, data, tf):
+        if len(data) < 15: return None
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
+        h_slope = (highs[-1]-highs[0])/len(highs); l_slope = (lows[-1]-lows[0])/len(lows)
         if abs(h_slope) < 0.001 and l_slope > 0:
-            return {"name": "Ascending Triangle", "timeframe": tf, "status": "FORMING",
-                    "breakout_level": max(highs), "probability": 50, "reliability": "medium",
-                    "measured_target": round(max(highs) + (max(highs) - min(lows)), 2), "invalidation": min(lows) * 0.99}
+            return {"name":"Ascending Triangle","timeframe":tf,"status":"FORMING","breakout_level":max(highs),
+                    "measured_target":round(max(highs)+(max(highs)-min(lows)),2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium"}
         if h_slope < 0 and abs(l_slope) < 0.001:
-            return {"name": "Descending Triangle", "timeframe": tf, "status": "FORMING",
-                    "breakdown_level": min(lows), "probability": 50, "reliability": "medium",
-                    "measured_target": round(min(lows) - (max(highs) - min(lows)), 2), "invalidation": max(highs) * 1.01}
+            return {"name":"Descending Triangle","timeframe":tf,"status":"FORMING","breakdown_level":min(lows),
+                    "measured_target":round(min(lows)-(max(highs)-min(lows)),2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium"}
         if h_slope < 0 and l_slope > 0:
-            return {"name": "Symmetrical Triangle", "timeframe": tf, "status": "FORMING",
-                    "probability": 45, "reliability": "medium",
-                    "invalidation": max(highs) if abs(max(highs) - data[-1]["close"]) < abs(min(lows) - data[-1]["close"]) else min(lows)}
+            return {"name":"Symmetrical Triangle","timeframe":tf,"status":"FORMING","probability":45,"reliability":"medium",
+                    "invalidation":max(highs) if abs(max(highs)-data[-1]["close"]) < abs(min(lows)-data[-1]["close"]) else min(lows)}
         return None
 
-    def _check_abcd(self, data: list, tf: str) -> dict:
-        if len(data) < 20:
-            return None
+    def _check_abcd(self, data, tf):
+        if len(data) < 20: return None
         closes = [d["close"] for d in data[-20:]]
-        if len(closes) < 10:
-            return None
-        a, b, c, d_val = closes[0], closes[5], closes[10], closes[-1]
-        ab_move = abs(b - a)
-        bc_move = abs(c - b)
-        if ab_move > 0 and bc_move / ab_move > 0.6 and bc_move / ab_move < 0.9:
-            target = d_val + (ab_move - bc_move) * (1 if b > a else -1)
-            return {"name": "ABCD Pattern", "timeframe": tf, "status": "FORMING",
-                    "completion": 80, "measured_target": round(target, 2), "probability": 50, "reliability": "low"}
+        if len(closes) < 10: return None
+        a,b,c,dv = closes[0],closes[5],closes[10],closes[-1]
+        ab = abs(b-a); bc = abs(c-b)
+        if ab > 0 and bc/ab > 0.6 and bc/ab < 0.9:
+            target = dv + (ab-bc)*(1 if b>a else -1)
+            return {"name":"ABCD Pattern","timeframe":tf,"status":"FORMING","completion":80,
+                    "measured_target":round(target,2),"probability":50,"reliability":"low"}
         return None
 
-    def _check_rectangle(self, data: list, tf: str) -> dict:
-        if len(data) < 15:
-            return None
-        highs = [d["high"] for d in data[-15:]]
-        lows = [d["low"] for d in data[-15:]]
-        top = max(highs)
-        bottom = min(lows)
-        h_range = max(highs) - min(highs)
-        l_range = max(lows) - min(lows)
-        if abs(top - np.mean(highs[-5:])) / top < 0.01 and abs(bottom - np.mean(lows[-5:])) / bottom < 0.01:
-            return {"name": "Rectangle", "timeframe": tf, "status": "FORMING",
-                    "breakout_level": top, "breakdown_level": bottom,
-                    "measured_target": round(top + (top - bottom), 2), "probability": 45, "reliability": "low"}
+    def _check_rectangle(self, data, tf):
+        if len(data) < 15: return None
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
+        top = max(highs); bottom = min(lows)
+        if abs(top-np.mean(highs[-5:]))/top < 0.01 and abs(bottom-np.mean(lows[-5:]))/bottom < 0.01:
+            return {"name":"Rectangle","timeframe":tf,"status":"FORMING","breakout_level":top,"breakdown_level":bottom,
+                    "measured_target":round(top+(top-bottom),2),"probability":45,"reliability":"low"}
         return None
 
-    def _check_wedge(self, data: list, tf: str) -> dict:
-        if len(data) < 15:
-            return None
-        highs = [d["high"] for d in data[-15:]]
-        lows = [d["low"] for d in data[-15:]]
-        h_slope = (highs[-1] - highs[0]) / len(highs) if len(highs) > 1 else 0
-        l_slope = (lows[-1] - lows[0]) / len(lows) if len(lows) > 1 else 0
+    def _check_wedge(self, data, tf):
+        if len(data) < 15: return None
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
+        h_slope = (highs[-1]-highs[0])/len(highs) if len(highs)>1 else 0
+        l_slope = (lows[-1]-lows[0])/len(lows) if len(lows)>1 else 0
         if h_slope < 0 and l_slope < 0 and h_slope > l_slope:
-            return {"name": "Falling Wedge", "timeframe": tf, "status": "FORMING",
-                    "breakout_level": max(highs), "probability": 50, "reliability": "medium",
-                    "measured_target": round(max(highs) + (max(highs) - min(lows)) * 0.5, 2), "invalidation": min(lows) * 0.99}
+            return {"name":"Falling Wedge","timeframe":tf,"status":"FORMING","breakout_level":max(highs),
+                    "measured_target":round(max(highs)+(max(highs)-min(lows))*0.5,2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium"}
         if h_slope > 0 and l_slope > 0 and h_slope > l_slope:
-            return {"name": "Rising Wedge", "timeframe": tf, "status": "FORMING",
-                    "breakdown_level": min(lows), "probability": 50, "reliability": "medium",
-                    "measured_target": round(min(lows) - (max(highs) - min(lows)) * 0.5, 2), "invalidation": max(highs) * 1.01}
+            return {"name":"Rising Wedge","timeframe":tf,"status":"FORMING","breakdown_level":min(lows),
+                    "measured_target":round(min(lows)-(max(highs)-min(lows))*0.5,2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium"}
         return None
 
-    def _check_head_shoulders(self, data: list, tf: str) -> dict:
-        if len(data) < 20:
-            return None
-        highs = [d["high"] for d in data[-20:]]
-        mid = len(highs) // 2
-        left_shoulder = max(highs[:mid // 2]) if highs[:mid // 2] else 0
-        head = max(highs[mid // 2:mid + mid // 2]) if highs[mid // 2:mid + mid // 2] else 0
-        right_shoulder = max(highs[mid + mid // 2:]) if highs[mid + mid // 2:] else 0
-        if head > left_shoulder and head > right_shoulder and abs(left_shoulder - right_shoulder) / head < 0.05:
+    def _check_head_shoulders(self, data, tf):
+        if len(data) < 20: return None
+        highs = [d["high"] for d in data[-20:]]; mid = len(highs)//2
+        ls = max(highs[:mid//2]) if highs[:mid//2] else 0
+        hd = max(highs[mid//2:mid+mid//2]) if highs[mid//2:mid+mid//2] else 0
+        rs = max(highs[mid+mid//2:]) if highs[mid+mid//2:] else 0
+        if hd > ls and hd > rs and abs(ls-rs)/hd < 0.05:
             neckline = min(d["low"] for d in data[-20:])
-            return {"name": "Head and Shoulders", "timeframe": tf, "status": "DETECTED",
-                    "breakdown_level": neckline, "probability": 55, "reliability": "medium",
-                    "measured_target": round(neckline - (head - neckline), 2), "invalidation": head * 1.01}
-        if left_shoulder > 0 and head > 0 and right_shoulder > 0:
-            inv_left = min(d["low"] for d in data[-20:])
-            if left_shoulder < head and right_shoulder < head and abs(left_shoulder - right_shoulder) / head < 0.05:
-                neckline = max(d["high"] for d in data[-20:])
-                return {"name": "Inverse Head and Shoulders", "timeframe": tf, "status": "DETECTED",
-                        "breakout_level": neckline, "probability": 55, "reliability": "medium",
-                        "measured_target": round(neckline + (neckline - inv_left), 2), "invalidation": min(highs) * 0.99}
+            return {"name":"Head and Shoulders","timeframe":tf,"status":"DETECTED","breakdown_level":neckline,
+                    "measured_target":round(neckline-(hd-neckline),2),"invalidation":hd*1.01,"probability":55,"reliability":"medium"}
+        if ls > 0 and hd > 0 and rs > 0 and ls < hd and rs < hd and abs(ls-rs)/hd < 0.05:
+            neckline = max(d["high"] for d in data[-20:])
+            return {"name":"Inverse Head and Shoulders","timeframe":tf,"status":"DETECTED","breakout_level":neckline,
+                    "measured_target":round(neckline+(neckline-min(d["low"] for d in data[-20:])),2),"invalidation":min(highs)*0.99,"probability":55,"reliability":"medium"}
         return None
 
-    def _compute_support_resistance(self, ohlcv_data: dict, snapshot: dict) -> dict:
-        all_lows = []
-        all_highs = []
-        for tf, data in ohlcv_data.items():
-            if len(data) < 20:
-                continue
-            all_lows.extend([d["low"] for d in data[-50:]])
-            all_highs.extend([d["high"] for d in data[-50:]])
-
-        if not all_lows or not all_highs:
-            return {"error": "Insufficient data"}
-
-        price = snapshot.get("ticker", {}).get("price", 0) or all_highs[-1] if all_highs else 0
-
+    # ─── SUPPORT / RESISTANCE ───
+    def _compute_support_resistance(self, ohlcv_data, snapshot):
+        all_lows = []; all_highs = []
+        for data in ohlcv_data.values():
+            if len(data) < 20: continue
+            all_lows.extend(d["low"] for d in data[-50:])
+            all_highs.extend(d["high"] for d in data[-50:])
+        if not all_lows or not all_highs: return {"error":"Insufficient data"}
+        price = snapshot.get("ticker",{}).get("price",0) or all_highs[-1] if all_highs else 0
         nearest_support = max([l for l in all_lows if l < price], default=min(all_lows)) if all_lows else 0
         strongest_support = min(all_lows) if all_lows else 0
         nearest_resistance = min([h for h in all_highs if h > price], default=max(all_highs)) if all_highs else 0
         strongest_resistance = max(all_highs) if all_highs else 0
-
         return {
-            "nearest_support": round(nearest_support, 2),
-            "strongest_support": round(strongest_support, 2),
-            "nearest_resistance": round(nearest_resistance, 2),
-            "strongest_resistance": round(strongest_resistance, 2),
-            "distance_to_support": round(price - nearest_support, 2) if price else 0,
-            "distance_to_resistance": round(nearest_resistance - price, 2) if price else 0,
-            "liquidity_above": [{"price": round(h, 2), "strength": 2} for h in sorted(set(round(h, 1) for h in all_highs[-10:]), reverse=True)[:5]],
-            "liquidity_below": [{"price": round(l, 2), "strength": 2} for l in sorted(set(round(l, 1) for l in all_lows[-10:]))[:5]],
+            "nearest_support":round(nearest_support,2),"strongest_support":round(strongest_support,2),
+            "nearest_resistance":round(nearest_resistance,2),"strongest_resistance":round(strongest_resistance,2),
+            "distance_to_support":round(price-nearest_support,2) if price else 0,
+            "distance_to_resistance":round(nearest_resistance-price,2) if price else 0,
+            "liquidity_above":[{"price":round(h,2),"strength":2} for h in sorted(set(round(h,1) for h in all_highs[-10:]),reverse=True)[:5]],
+            "liquidity_below":[{"price":round(l,2),"strength":2} for l in sorted(set(round(l,1) for l in all_lows[-10:]))[:5]],
         }
 
-    def _detect_elliott_wave(self, ohlcv_data: dict) -> dict:
+    # ─── ELLIOTT WAVE ───
+    def _detect_elliott_wave(self, ohlcv_data):
         data_1h = ohlcv_data.get("1h", [])
-        if len(data_1h) < 100:
-            return {"status": "insufficient_data", "waves": []}
-
-        closes = [d["close"] for d in data_1h]
-        highs = [d["high"] for d in data_1h]
-        lows = [d["low"] for d in data_1h]
-
-        waves = []
-        i = 0
-        swing_threshold = 0.015
-        while i < len(closes) - 20:
-            if i == 0:
-                i += 10
-                continue
-            local_high = max(highs[max(0,i-10):i+10])
-            local_low = min(lows[max(0,i-10):i+10])
-            local_high_idx = highs.index(local_high) if local_high in highs else i
-            local_low_idx = lows.index(local_low) if local_low in lows else i
-            if local_high_idx > local_low_idx:
-                waves.append({"type": "wave_up", "start": local_low, "end": local_high, "index": local_high_idx})
-            else:
-                waves.append({"type": "wave_down", "start": local_high, "end": local_low, "index": local_low_idx})
+        if len(data_1h) < 100: return {"status":"insufficient_data","waves":[]}
+        highs = [d["high"] for d in data_1h]; lows = [d["low"] for d in data_1h]
+        waves = []; i = 0
+        while i < len(highs)-20:
             i += 10
-            if len(waves) >= 8:
-                break
-
-        impulse_count = 0
-        corrective_count = 0
-        for w in waves:
-            move_pct = abs(w["end"] - w["start"]) / w["start"]
-            if move_pct > swing_threshold * 2:
-                impulse_count += 1
-            else:
-                corrective_count += 1
-
-        wave_direction = "impulsive_up" if impulse_count > corrective_count * 1.5 else "impulsive_down" if corrective_count > impulse_count * 1.5 else "corrective"
-        completion = min(impulse_count * 12.5, 100) if waves else 0
-
+            local_h = max(highs[max(0,i-10):i+10]); local_l = min(lows[max(0,i-10):i+10])
+            hi = highs.index(local_h) if local_h in highs else i
+            li = lows.index(local_l) if local_l in lows else i
+            waves.append({"type":"wave_up" if hi > li else "wave_down","start":local_l if hi > li else local_h,
+                          "end":local_h if hi > li else local_l,"index":hi if hi > li else li})
+            if len(waves) >= 8: break
+        impulse = sum(1 for w in waves if abs(w["end"]-w["start"])/w["start"] > 0.03)
+        corrective = len(waves) - impulse
+        direction = "impulsive_up" if impulse > corrective*1.5 else "impulsive_down" if corrective > impulse*1.5 else "corrective"
         return {
-            "status": "detected" if len(waves) >= 5 else "forming",
-            "waves": waves[-8:],
-            "impulse_count": impulse_count,
-            "corrective_count": corrective_count,
-            "wave_direction": wave_direction,
-            "completion": completion,
-            "description_az": "Yüksələn impuls dalğası" if wave_direction == "impulsive_up" else "Enən impuls dalğası" if wave_direction == "impulsive_down" else "Korrektiv hərəkət",
+            "status":"detected" if len(waves)>=5 else "forming","waves":waves[-8:],
+            "impulse_count":impulse,"corrective_count":corrective,"wave_direction":direction,
+            "completion":min(impulse*12.5,100) if waves else 0,
+            "description_az":"Yüksələn impuls dalğası" if direction=="impulsive_up" else "Enən impuls dalğası" if direction=="impulsive_down" else "Korrektiv hərəkət",
         }
 
-    def _compute_fibonacci_levels(self, ohlcv_data: dict, snapshot: dict) -> dict:
+    # ─── FIBONACCI ───
+    def _compute_fibonacci_levels(self, ohlcv_data, snapshot):
         data_1h = ohlcv_data.get("1h", [])
-        if len(data_1h) < 30:
-            return {"status": "insufficient_data"}
+        if len(data_1h) < 30: return {"status":"insufficient_data"}
         recent = data_1h[-50:]
-        high = max(d["high"] for d in recent)
-        low = min(d["low"] for d in recent)
-        range_price = high - low
-        if range_price <= 0:
-            return {"status": "insufficient_range"}
-        price = snapshot.get("ticker", {}).get("price", 0) or recent[-1]["close"]
+        high = max(d["high"] for d in recent); low = min(d["low"] for d in recent)
+        rg = high - low
+        if rg <= 0: return {"status":"insufficient_range"}
+        price = snapshot.get("ticker",{}).get("price",0) or recent[-1]["close"]
         levels = {}
-        for level in [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.414, 1.618, 2.0, 2.272, 2.618, 3.618]:
-            val = high - range_price * level
-            levels[str(level)] = round(val, 2)
-        extension_levels = {}
-        for ext in [0.382, 0.618, 1.0, 1.272, 1.414, 1.618, 2.0, 2.272, 2.618]:
-            if price > high:
-                ext_val = high + range_price * ext
-            elif price < low:
-                ext_val = low - range_price * ext
-            else:
-                ext_val = high + range_price * ext
-            extension_levels[str(ext)] = round(ext_val, 2)
-
+        for lev in [0,0.236,0.382,0.5,0.618,0.786,1,1.272,1.414,1.618,2.0,2.272,2.618,3.618]:
+            levels[str(lev)] = round(high - rg*lev, 2)
+        ext_up = {}
+        for e in [0.382,0.618,1.0,1.272,1.414,1.618,2.0,2.272,2.618,3.618]:
+            ext_up[str(e)] = round(high + rg*e, 2)
+        ext_down = {}
+        for e in [0.382,0.618,1.0,1.272,1.414,1.618,2.0,2.272,2.618,3.618]:
+            ext_down[str(e)] = round(low - rg*e, 2)
         nearest_support_fib = max(v for v in levels.values() if v < price) if any(v < price for v in levels.values()) else low
         nearest_resistance_fib = min(v for v in levels.values() if v > price) if any(v > price for v in levels.values()) else high
-
         return {
-            "status": "calculated",
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "range": round(range_price, 2),
-            "retracement_levels": levels,
-            "extension_levels": extension_levels,
-            "nearest_support_fib": round(nearest_support_fib, 2),
-            "nearest_resistance_fib": round(nearest_resistance_fib, 2),
-            "current_price_zone": "oversold_fib" if price <= low + range_price * 0.236 else "overbought_fib" if price >= high - range_price * 0.236 else "middle_fib",
-            "description_az": f"Qiymət Fib 0.618-ə yaxınlaşır alış zonası" if price <= low + range_price * 0.382 else f"Qiymət Fib 0.618-dən yuxarı satış zonası" if price >= high - range_price * 0.382 else "Qiymət Fib orta zonasında",
+            "status":"calculated","high":round(high,2),"low":round(low,2),"range":round(rg,2),
+            "retracement_levels":levels,"extension_up":ext_up,"extension_down":ext_down,
+            "nearest_support_fib":round(nearest_support_fib,2),"nearest_resistance_fib":round(nearest_resistance_fib,2),
+            "current_price_zone":"oversold_fib" if price <= low+rg*0.236 else "overbought_fib" if price >= high-rg*0.236 else "middle_fib",
+            "description_az":"Qiymət Fib 0.618-ə yaxınlaşır alış zonası" if price <= low+rg*0.382 else "Qiymət Fib 0.618-dən yuxarı satış zonası" if price >= high-rg*0.382 else "Qiymət Fib orta zonasında",
         }
 
-    def _generate_explanation(self, tf_analysis: dict, alignment: dict, scores: dict, triggers: dict) -> str:
-        h4 = tf_analysis.get("4h", {})
-        h1 = tf_analysis.get("1h", {})
-        d1 = tf_analysis.get("1d", {})
-        m15 = tf_analysis.get("15m", {})
+    # ─── STRUCTURE DETECTION ───
+    def _detect_dominant_structure(self, ohlcv_data, snapshot):
+        data_1h = ohlcv_data.get("1h", [])
+        data_4h = ohlcv_data.get("4h", [])
+        primary = data_4h if len(data_4h)>=50 else data_1h
+        if len(primary) < 50: return {"status":"insufficient_data","type":"none"}
+        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]
+        closes = [d["close"] for d in primary[-60:]]
 
-        h4_trend = h4.get("trend", "məlum deyil")
-        h1_trend = h1.get("trend", "məlum deyil")
-        d1_trend = d1.get("trend", "məlum deyil")
+        swing_highs = []; swing_lows = []
+        for i in range(2, len(highs)-2):
+            if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                swing_highs.append({"price":highs[i],"index":i})
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                swing_lows.append({"price":lows[i],"index":i})
 
+        if len(swing_highs) < 3 or len(swing_lows) < 3:
+            return {"status":"partial","type":"insufficient_swings"}
+
+        h_prices = [s["price"] for s in swing_highs[:6]]
+        l_prices = [s["price"] for s in swing_lows[:6]]
+        h_slope = (h_prices[-1]-h_prices[0])/len(h_prices) if len(h_prices)>1 else 0
+        l_slope = (l_prices[-1]-l_prices[0])/len(l_prices) if len(l_prices)>1 else 0
+
+        structure_type = "neutral"
+        structure_label_az = "Neytral"
+
+        if h_slope < -0.01 and l_slope < -0.01:
+            structure_type = "descending_channel"
+            structure_label_az = "Enən kanal"
+        elif h_slope > 0.01 and l_slope > 0.01:
+            structure_type = "ascending_channel"
+            structure_label_az = "Yüksələn kanal"
+        elif h_slope < -0.005 and l_slope > 0.005:
+            structure_type = "symmetrical_triangle"
+            structure_label_az = "Simmetrik üçbucaq"
+        elif abs(h_slope) < 0.005 and l_slope > 0.005:
+            structure_type = "ascending_triangle"
+            structure_label_az = "Yüksələn üçbucaq"
+        elif h_slope < -0.005 and abs(l_slope) < 0.005:
+            structure_type = "descending_triangle"
+            structure_label_az = "Enən üçbucaq"
+        elif len(swing_highs) >= 4 and len(swing_lows) >= 4:
+            h_recent = swing_highs[-4:]; l_recent = swing_lows[-4:]
+            h_bias = sum(1 for i in range(1,len(h_recent)) if h_recent[i]["price"] < h_recent[i-1]["price"])
+            l_bias = sum(1 for i in range(1,len(l_recent)) if l_recent[i]["price"] < l_recent[i-1]["price"])
+            if h_bias >= 3 and l_bias >= 3:
+                structure_type = "descending_channel"
+                structure_label_az = "Enən kanal"
+            elif h_bias <= 1 and l_bias <= 1:
+                structure_type = "ascending_channel"
+                structure_label_az = "Yüksələn kanal"
+
+        ch_top = max(h_prices); ch_bottom = min(l_prices)
+        price = snapshot.get("ticker",{}).get("price",0) or closes[-1]
+
+        breakout_status = "daxilində"
+        if price > ch_top * 1.01: breakout_status = "yuxarı breakout"
+        elif price < ch_bottom * 0.99: breakout_status = "aşağı breakout"
+
+        obs = 0; accum = True
+        for i in range(1, len(closes)):
+            if closes[i] > closes[i-1] and primary[i].get("volume",0) > np.mean([d.get("volume",0) for d in primary[max(0,i-20):i+1]]):
+                obs += 1
+            elif closes[i] < closes[i-1] and primary[i].get("volume",0) > np.mean([d.get("volume",0) for d in primary[max(0,i-20):i+1]]):
+                obs -= 1
+        if obs > 5: accum = True
+        elif obs < -5: accum = False
+
+        return {
+            "status":"detected","type":structure_type,"label_az":structure_label_az,
+            "swing_highs":swing_highs[-6:],"swing_lows":swing_lows[-6:],
+            "channel_top":round(ch_top,2),"channel_bottom":round(ch_bottom,2),
+            "channel_mid":round((ch_top+ch_bottom)/2,2),
+            "breakout_status":breakout_status,
+            "accumulation_zone":accum,"distribution_zone":not accum,
+            "swing_count":len(swing_highs)+len(swing_lows),
+            "description_az":f"{structure_label_az} - Qiymət kanal {breakout_status}. {'Yığım zonası müşahidə olunur.' if accum else 'Paylanma zonası müşahidə olunur.'}",
+        }
+
+    # ─── CHANNEL LINES ───
+    def _detect_channel(self, ohlcv_data):
+        data_4h = ohlcv_data.get("4h", [])
+        data_1h = ohlcv_data.get("1h", [])
+        primary = data_4h if len(data_4h) >= 60 else data_1h
+        if len(primary) < 50: return {"status":"insufficient_data","upper":[],"lower":[],"mid":[]}
+        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]
+
+        swing_highs = []; swing_lows = []
+        for i in range(2, len(highs)-2):
+            if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                swing_highs.append({"price":highs[i],"time":primary[i]["time"],"index":i})
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                swing_lows.append({"price":lows[i],"time":primary[i]["time"],"index":i})
+
+        if len(swing_highs) < 3 or len(swing_lows) < 3:
+            return {"status":"partial","upper":[],"lower":[],"mid":[]}
+
+        sh = swing_highs[:5]; sl = swing_lows[:5]
+        x_h = np.array([s["index"] for s in sh])
+        y_h = np.array([s["price"] for s in sh])
+        x_l = np.array([s["index"] for s in sl])
+        y_l = np.array([s["price"] for s in sl])
+
+        try:
+            h_slope, h_intercept = np.polyfit(x_h, y_h, 1)
+            l_slope, l_intercept = np.polyfit(x_l, y_l, 1)
+            mid_slope = (h_slope + l_slope) / 2
+            mid_intercept = (h_intercept + l_intercept) / 2
+        except:
+            return {"status":"error","upper":[],"lower":[],"mid":[]}
+
+        def project(slope, intercept, idx):
+            return slope * idx + intercept
+
+        up_line = [{"time":primary[i]["time"],"value":round(project(h_slope, h_intercept, i),2),
+                    "index":i} for i in range(len(primary)) if 0 <= i < len(primary)]
+        low_line = [{"time":primary[i]["time"],"value":round(project(l_slope, l_intercept, i),2),
+                     "index":i} for i in range(len(primary)) if 0 <= i < len(primary)]
+        mid_line = [{"time":primary[i]["time"],"value":round(project(mid_slope, mid_intercept, i),2),
+                     "index":i} for i in range(len(primary)) if 0 <= i < len(primary)]
+
+        return {
+            "status":"calculated","upper":up_line[-40:],"lower":low_line[-40:],"mid":mid_line[-40:],
+            "upper_slope":round(h_slope,6),"lower_slope":round(l_slope,6),
+            "swing_highs":[{"time":primary[s["index"]]["time"],"price":s["price"],"index":s["index"]} for s in swing_highs[:6]],
+            "swing_lows":[{"time":primary[s["index"]]["time"],"price":s["price"],"index":s["index"]} for s in swing_lows[:6]],
+        }
+
+    # ─── BREAKOUT ZONE ───
+    def _detect_breakout_zone(self, ohlcv_data, snapshot, tf_analysis):
+        h1 = ohlcv_data.get("1h", [])
+        h4 = ohlcv_data.get("4h", [])
+        primary = h4 if len(h4) >= 50 else h1
+        if len(primary) < 40: return {"status":"insufficient_data"}
+        price = snapshot.get("ticker",{}).get("price",0) or primary[-1]["close"]
+        highs = [d["high"] for d in primary[-40:]]; lows = [d["low"] for d in primary[-40:]]
+        res = max(highs[:20]); sup = min(lows[:20])
+        zone_top = round(res*1.005,2); zone_bottom = round(sup*0.995,2)
+        test_count = sum(1 for d in primary[-40:] if d["high"] >= res*0.995 and d["high"] <= res*1.005) + \
+                     sum(1 for d in primary[-40:] if d["low"] <= sup*1.005 and d["low"] >= sup*0.995)
+        h1_signal = tf_analysis.get("1h",{}).get("signal","WAIT")
+        h4_signal = tf_analysis.get("4h",{}).get("signal","WAIT")
+        is_bullish_breakout_ready = price >= zone_bottom * 0.995 and h4_signal in ("LONG","STRONG_LONG","WAIT")
+        is_bearish_breakout_ready = price <= zone_top * 1.005 and h4_signal in ("SHORT","STRONG_SHORT","WAIT")
+        return {
+            "status":"calculated","zone_top":zone_top,"zone_bottom":zone_bottom,
+            "zone_mid":round((zone_top+zone_bottom)/2,2),"test_count":test_count,
+            "current_price_zone":"inside_zone" if zone_bottom <= price <= zone_top else "above_zone" if price > zone_top else "below_zone",
+            "bullish_breakout_ready":is_bullish_breakout_ready,"bearish_breakout_ready":is_bearish_breakout_ready,
+            "bullish_breakout_conditions":[
+                f"1H şamı ${zone_top} üzərində bağlanmalı",
+                "Həcm 1.5x ortalamadan yuxarı olmalı",
+                "OI artımı müşahidə olunmalı",
+                "Retest uğurlu olmalı (geridönüb zone top-u test etməli)",
+            ],
+            "bearish_breakout_conditions":[
+                f"1H şamı ${zone_bottom} altında bağlanmalı",
+                "Satış həcmi 1.5x ortalamadan yuxarı",
+                "OI artımı müşahidə olunmalı",
+                "Retest uğurlu olmalı (geridönüb zone bottom-u test etməli)",
+            ],
+            "description_az":f"Breakout zonası ${zone_bottom}-${zone_top}. {test_count} dəfə test edilib. {'Bullish breakout hazırdır.' if is_bullish_breakout_ready else ''} {'Bearish breakout hazırdır.' if is_bearish_breakout_ready else ''}",
+        }
+
+    # ─── SCENARIO PATHS ───
+    def _compute_scenario_paths(self, tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci):
+        price = snapshot.get("ticker",{}).get("price",0) or 155
+        h4_trend = tf_analysis.get("4h",{}).get("trend","neutral")
+        h1_trend = tf_analysis.get("1h",{}).get("trend","neutral")
+        long_prob = scores.get("long_probability",50)
+        short_prob = scores.get("short_probability",50)
+        confidence = scores.get("signal_confidence",0)
+        fib = fibonacci
+        fib_up = fib.get("extension_up",{}) if isinstance(fib.get("extension_up"), dict) else {}
+        fib_down = fib.get("extension_down",{}) if isinstance(fib.get("extension_down"), dict) else {}
+        lt_price = triggers.get("long_trigger_price",0)
+        st_price = triggers.get("short_trigger_price",0)
+
+        def path_points(start_price, direction, steps=5):
+            pts = [{"time_offset":0,"price":start_price,"label":"Başlanğıc","phase":"start"}]
+            if direction == "up":
+                r1 = round(start_price * 1.01, 2)
+                r2 = round(start_price * 1.025, 2)
+                r3 = round(start_price * 1.04, 2)
+                r4 = round(start_price * 1.06, 2)
+                r5 = round(start_price * 1.085, 2)
+                pts.append({"time_offset":1,"price":r1,"label":"Breakout","phase":"breakout"})
+                pts.append({"time_offset":2,"price":round((r1+r2)/2,2),"label":"Retest","phase":"retest"})
+                pts.append({"time_offset":3,"price":r2,"label":"İlk impuls","phase":"impulse1"})
+                pts.append({"time_offset":4,"price":round((r2+r3)/2,2),"label":"Pullback","phase":"pullback"})
+                pts.append({"time_offset":5,"price":r3,"label":"TP1","phase":"tp1"})
+                pts.append({"time_offset":7,"price":round((r3+r4)/2,2),"label":"TP2","phase":"tp2"})
+                pts.append({"time_offset":10,"price":r4,"label":"TP3","phase":"tp3"})
+                pts.append({"time_offset":15,"price":r5,"label":"Final","phase":"final"})
+            else:
+                r1 = round(start_price * 0.99, 2)
+                r2 = round(start_price * 0.975, 2)
+                r3 = round(start_price * 0.96, 2)
+                r4 = round(start_price * 0.94, 2)
+                r5 = round(start_price * 0.915, 2)
+                pts.append({"time_offset":1,"price":r1,"label":"Breakdown","phase":"breakout"})
+                pts.append({"time_offset":2,"price":round((r1+r2)/2,2),"label":"Retest","phase":"retest"})
+                pts.append({"time_offset":3,"price":r2,"label":"İlk impuls","phase":"impulse1"})
+                pts.append({"time_offset":4,"price":round((r2+r3)/2,2),"label":"Pullback","phase":"pullback"})
+                pts.append({"time_offset":5,"price":r3,"label":"TP1","phase":"tp1"})
+                pts.append({"time_offset":7,"price":round((r3+r4)/2,2),"label":"TP2","phase":"tp2"})
+                pts.append({"time_offset":10,"price":r4,"label":"TP3","phase":"tp3"})
+                pts.append({"time_offset":15,"price":r5,"label":"Final","phase":"final"})
+            return pts
+
+        def fakeout_path(start_price, direction, steps=4):
+            pts = [{"time_offset":0,"price":start_price,"label":"Başlanğıc","phase":"start"}]
+            if direction == "up":
+                fake_high = round(start_price * 1.025, 2)
+                pivot = round(start_price * 0.98, 2)
+                pts.append({"time_offset":1,"price":fake_high,"label":"Yalançı breakout","phase":"fake_breakout"})
+                pts.append({"time_offset":2,"price":round((fake_high+pivot)/2,2),"label":"Dönüş","phase":"reversal"})
+                pts.append({"time_offset":3,"price":pivot,"label":"Tələ","phase":"trap"})
+                pts.append({"time_offset":4,"price":round(pivot*0.98,2),"label":"Aşağı davam","phase":"continuation"})
+            else:
+                fake_low = round(start_price * 0.975, 2)
+                pivot = round(start_price * 1.02, 2)
+                pts.append({"time_offset":1,"price":fake_low,"label":"Yalançı breakdown","phase":"fake_breakout"})
+                pts.append({"time_offset":2,"price":round((fake_low+pivot)/2,2),"label":"Dönüş","phase":"reversal"})
+                pts.append({"time_offset":3,"price":pivot,"label":"Tələ","phase":"trap"})
+                pts.append({"time_offset":4,"price":round(pivot*1.02,2),"label":"Yuxarı davam","phase":"continuation"})
+            return pts
+
+        main_dir = "up" if long_prob >= short_prob else "down"
+        main_label = "LONG" if main_dir == "up" else "SHORT"
+        alt_dir = "down" if main_dir == "up" else "up"
+        alt_label = "SHORT" if alt_dir == "down" else "LONG"
+
+        main_path = path_points(price, main_dir)
+        alt_path = path_points(price, alt_dir)
+        fake_path = fakeout_path(price, main_dir)
+
+        return {
+            "main_scenario":{
+                "direction":main_label,"direction_az":"ALIŞ" if main_label=="LONG" else "SATIŞ",
+                "probability":max(long_prob,short_prob),
+                "path_points":main_path,
+                "description_az":f"Əsas ehtimal olunan ssenari: {main_label}. Hədəf: ${main_path[-1]['price']}",
+            },
+            "alternative_scenario":{
+                "direction":alt_label,"direction_az":"SATIŞ" if alt_label=="SHORT" else "ALIŞ",
+                "probability":min(long_prob,short_prob),
+                "path_points":alt_path,
+                "description_az":f"Alternativ ssenari: {alt_label}. Hədəf: ${alt_path[-1]['price']}",
+            },
+            "fakeout_scenario":{
+                "direction":f"FAKEOUT - {main_label}","direction_az":f"YALANÇI - {main_label}",
+                "probability":20,
+                "path_points":fake_path,
+                "description_az":f"Yalançı breakout riski: qiymət əvvəl {main_dir.upper()} istiqamətdə çıxıb geri dönər.",
+            },
+        }
+
+    # ─── TARGET HIERARCHY ───
+    def _compute_target_hierarchy(self, ohlcv_data, snapshot, scenario_paths, fibonacci, sr):
+        price = snapshot.get("ticker",{}).get("price",0) or 155
+        fib_up = fibonacci.get("extension_up",{}); fib_down = fibonacci.get("extension_down",{})
+        sr_high = sr.get("strongest_resistance", price*1.1); sr_low = sr.get("strongest_support", price*0.9)
+        main = scenario_paths.get("main_scenario",{})
+        main_dir = "up" if main.get("direction") == "LONG" else "down"
+        pts = main.get("path_points",[])
+        path_targets = [p["price"] for p in pts if "TP" in p.get("phase","") or "Final" in p.get("phase","")]
+
+        targets = []
+        if main_dir == "up":
+            fib_keys = ["1.272","1.618","2.0","2.618","3.618"]
+            fib_vals = []
+            for k in fib_keys:
+                v = fib_up.get(k)
+                if v and v > price: fib_vals.append((k, v))
+            for i, (k, v) in enumerate(fib_vals):
+                is_near = any(abs(v-t)/t < 0.05 for t in path_targets) if path_targets else False
+                targets.append({
+                    "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
+                    "distance_pct":round((v-price)/price*100,1) if price else 0,
+                    "probability":max(30, 80 - i*15),"source":"Fibonacci extension",
+                    "time_estimate":"4-8 saat" if i==0 else "1-2 gün" if i<=2 else "3-7 gün",
+                    "invalidation":round(price*0.97,2) if i==0 else round(price*0.95,2),
+                })
+        else:
+            fib_keys = ["1.272","1.618","2.0","2.618","3.618"]
+            fib_vals = []
+            for k in fib_keys:
+                v = fib_down.get(k)
+                if v and v < price: fib_vals.append((k, v))
+            for i, (k, v) in enumerate(fib_vals):
+                is_near = any(abs(v-t)/t < 0.05 for t in path_targets) if path_targets else False
+                targets.append({
+                    "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
+                    "distance_pct":round((price-v)/price*100,1) if price else 0,
+                    "probability":max(30, 80 - i*15),"source":"Fibonacci extension",
+                    "time_estimate":"4-8 saat" if i==0 else "1-2 gün" if i<=2 else "3-7 gün",
+                    "invalidation":round(price*1.03,2) if i==0 else round(price*1.05,2),
+                })
+
+        if main_dir == "up":
+            sr_target = {"level":"TP-SR","price":round(sr_high,2),"type":"Müqavimət","distance_pct":round((sr_high-price)/price*100,1) if price else 0,"probability":50,"source":"Support/Resistance","time_estimate":"1-2 gün","invalidation":round(price*0.95,2)}
+        else:
+            sr_target = {"level":"TP-SR","price":round(sr_low,2),"type":"Dəstək","distance_pct":round((price-sr_low)/price*100,1) if price else 0,"probability":50,"source":"Support/Resistance","time_estimate":"1-2 gün","invalidation":round(price*1.05,2)}
+        targets.append(sr_target)
+
+        return {
+            "targets":targets,
+            "primary_direction":main_dir,
+            "description_az":"{} hədəflər: {}".format("Yuxarı" if main_dir=="up" else "Aşağı", ", ".join("${}({})".format(t["price"], t["type"]) for t in targets[:3])),
+        }
+
+    # ─── TIME ESTIMATES ───
+    def _compute_time_estimates(self, ohlcv_data):
+        h1 = ohlcv_data.get("1h", [])
+        if len(h1) < 50: return {"status":"insufficient_data"}
+        closes = [d["close"] for d in h1[-100:]]
+        daily_volatility = np.std(closes) / np.mean(closes) if closes else 0.02
+        avg_range = np.mean([d["high"]-d["low"] for d in h1[-50:]]) if len(h1)>=50 else 0.1
+        atr = avg_range
+        price = closes[-1] if closes else 155
+        pct_per_candle = atr / price * 100 if price else 0.1
+        candles_per_tp1 = max(4, int(2.0 / max(pct_per_candle, 0.05)))
+        candles_per_tp2 = max(8, int(4.0 / max(pct_per_candle, 0.05)))
+        candles_per_tp3 = max(16, int(8.0 / max(pct_per_candle, 0.05)))
+        return {
+            "status":"calculated","avg_candle_range":round(avg_range,2),"daily_volatility":round(daily_volatility,4),
+            "tp1_estimate_hours":max(1, round(candles_per_tp1*1.5)),"tp2_estimate_hours":max(2, round(candles_per_tp2*1.5)),
+            "tp3_estimate_hours":max(4, round(candles_per_tp3*1.5)),
+            "avg_hourly_speed_pct":round(pct_per_candle,3),
+            "description_az":f"TP1: ~{max(1, round(candles_per_tp1*1.5))} saat, TP2: ~{max(2, round(candles_per_tp2*1.5))} saat, TP3: ~{max(4, round(candles_per_tp3*1.5))} saat",
+        }
+
+    # ─── ACTIVATION CONDITIONS ───
+    def _compute_activation_conditions(self, triggers, tf_analysis, snapshot):
+        h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{})
+        price = snapshot.get("ticker",{}).get("price",0) or 155
+        taker = snapshot.get("taker_buy_sell_ratio",{})
+        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)
+        vol = h1.get("volume","normal")
+        return {
+            "bullish":{
+                "conditions":[
+                    {"name":"Qiymət səviyyəsi","check":f"1H close > ${lt}","met":price > lt if lt else False,"required":True},
+                    {"name":"Həcm təsdiqi","check":"Volume > 1.5x SMA","met":vol in ("high","above_average"),"required":True},
+                    {"name":"OI artımı","check":"OI breakout zamanı artır","met":False,"required":True},
+                    {"name":"Taker alış","check":"Taker buy/sell > 1.0","met":taker.get("buy_sell_ratio",0) > 1.0,"required":False},
+                ],
+                "all_required_met":price > lt if lt else False,
+                "status":"hazırdır" if (price > lt if lt else False) else "gözlənilir",
+            },
+            "bearish":{
+                "conditions":[
+                    {"name":"Qiymət səviyyəsi","check":f"1H close < ${st}","met":price < st if st else False,"required":True},
+                    {"name":"Həcm təsdiqi","check":"Sell volume > 1.5x SMA","met":vol in ("high","above_average"),"required":True},
+                    {"name":"OI artımı","check":"OI qırılma zamanı artır","met":False,"required":True},
+                    {"name":"Taker satış","check":"Taker sell/buy > 1.0","met":taker.get("buy_sell_ratio",0) < 1.0,"required":False},
+                ],
+                "all_required_met":price < st if st else False,
+                "status":"hazırdır" if (price < st if st else False) else "gözlənilir",
+            },
+        }
+
+    # ─── CONFIDENCE BREAKDOWN ───
+    def _compute_confidence_breakdown(self, scores, tf_analysis, patterns, detected_structure):
+        signal_conf = scores.get("signal_confidence",0)
+        pattern_conf = 0
+        if patterns:
+            pattern_conf = min(int(np.mean([p.get("probability",50) for p in patterns])), 100)
+        structure_conf = scores.get("structure_score",0)
+        breakout_conf = 0
+        if detected_structure.get("status") == "detected":
+            breakout_conf = min(50 + len(patterns)*5, 100)
+        direction_conf = max(scores.get("long_probability",0), scores.get("short_probability",0))
+        target_conf = min(30 + signal_conf//2, 100)
+        return {
+            "signal_confidence":signal_conf,
+            "direction_probability":direction_conf,
+            "pattern_confidence":pattern_conf,
+            "structure_confidence":structure_conf,
+            "breakout_confidence":breakout_conf,
+            "target_confidence":target_conf,
+            "overall_assessment":"yüksək" if signal_conf >= 70 else "orta" if signal_conf >= 50 else "aşağı",
+        }
+
+    # ─── EXPLANATION ───
+    def _generate_explanation(self, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone):
+        h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{}); d1 = tf_analysis.get("1d",{})
+        h4_trend = h4.get("trend","məlum deyil"); h1_trend = h1.get("trend","məlum deyil"); d1_trend = d1.get("trend","məlum deyil")
         lines = [f"SKHYUSDT analizi:"]
-
-        if d1_trend != "neutral":
-            lines.append(f"Günlük trend {d1_trend}-dir.")
-        if h4_trend != "neutral":
-            lines.append(f"4H {h4_trend} struktur.")
-
-        h1_dir = "yüksələn" if h1_trend == "bullish" else "enən" if h1_trend == "bearish" else "neytral"
-        lines.append(f"1H {h1_dir}. Qiymət EMA göstəricilərinə nəzərən {'yuxarı' if h1.get('trend') == 'bullish' else 'aşağı'}.")
-
-        m15_mom = m15.get("momentum", "neytral")
-        if m15_mom in ("bearish", "overbought"):
-            lines.append("15M-də satış momentumu zəifləyir." if m15_mom == "bearish" else "15M-də həddən artıq satış zonası.")
-        elif m15_mom in ("bullish", "oversold"):
-            lines.append("15M-də alış momentumu var." if m15_mom == "bullish" else "15M-də həddən artıq alış zonası.")
-
-        lt = triggers.get("long_trigger_price", 0)
-        st = triggers.get("short_trigger_price", 0)
+        struct_label = detected_structure.get("label_az","")
+        if struct_label: lines.append(f"Aşkarlanan struktur: {struct_label}.")
+        if d1_trend != "neutral": lines.append(f"Günlük trend {d1_trend}-dir.")
+        if h4_trend != "neutral": lines.append(f"4H {h4_trend} struktur.")
+        h1_dir = "yüksələn" if h1_trend=="bullish" else "enən" if h1_trend=="bearish" else "neytral"
+        lines.append(f"1H {h1_dir}.")
+        bz = breakout_zone
+        if bz.get("status")=="calculated":
+            lines.append(f"Breakout zonası: ${bz['zone_bottom']}-${bz['zone_top']}, {bz['test_count']} dəfə test edilib.")
+        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)
         if lt and alignment.get("primary_direction") != "short":
-            lines.append(f"${lt} üzərində 1H bağlanış və artan həcm gəlmədən LONG təsdiqlənmir.")
+            lines.append(f"${lt} üzərində 1H bağlanış və artan həcm gəlmədən ALIŞ təsdiqlənmir.")
         if st and alignment.get("primary_direction") != "long":
-            lines.append(f"${st} aşağı qırılarsa və OI artarsa SHORT ssenarisi güclənəcək.")
-
-        if scores.get("status") == "WAIT":
-            lines.append("Gözləmə tövsiyə olunur - təsdiq gözlənilir.")
-        elif scores.get("status") == "WATCHLIST":
-            lines.append("İzləmə siyahısı - trigger yaxınlaşdıqda dəyərləndir.")
-
-        if alignment.get("conflicts"):
-            lines.append(f"Ziddiyyət: {'; '.join(alignment['conflicts'])}")
-
+            lines.append(f"${st} aşağı qırılarsa və OI artarsa SATIŞ ssenarisi güclənəcək.")
+        if scores.get("status")=="WAIT": lines.append("Gözləmə tövsiyə olunur - təsdiq gözlənilir.")
+        elif scores.get("status")=="WATCHLIST": lines.append("İzləmə siyahısı - trigger yaxınlaşdıqda dəyərləndir.")
+        if alignment.get("conflicts"): lines.append(f"Ziddiyyət: {'; '.join(alignment['conflicts'])}")
         return "\n".join(lines) if lines else "Məlumat yoxdur."
 
+    # ─── SCENARIOS ENDPOINT ───
     async def get_scenarios(self) -> dict:
         analysis = await self.get_full_analysis()
-        tf = analysis.get("timeframes", {})
-        triggers = analysis.get("triggers", {})
-        scores = analysis.get("scores", {})
-        sr = analysis.get("support_resistance", {})
-        snapshot = analysis.get("snapshot", {})
-        price = snapshot.get("ticker", {}).get("price", 0)
-        h4 = tf.get("4h", {})
-        h1 = tf.get("1h", {})
-
-        h4_vol = h4.get("volatility", 0.02) or 0.02
-        atr_val = price * h4_vol if price else 0
-
-        main_scenario = self._build_main_scenario(tf, triggers, scores, price, atr_val, sr)
-        alt_scenario = self._build_alt_scenario(tf, triggers, scores, price, atr_val, sr, main_scenario)
-        risk_scenario = self._build_risk_scenario(tf, triggers, scores, price, atr_val, sr, main_scenario)
-
         return {
-            "main_scenario": main_scenario,
-            "alternative_scenario": alt_scenario,
-            "risk_fakeout_scenario": risk_scenario,
-        }
-
-    def _build_main_scenario(self, tf, triggers, scores, price, atr, sr) -> dict:
-        h4_trend = tf.get("4h", {}).get("trend", "neutral")
-        h1_trend = tf.get("1h", {}).get("trend", "neutral")
-        primary = scores.get("long_probability", 50) >= 50 and "long" or "short"
-        long_bias = scores.get("long_probability", 50) >= 50
-        dir_label = "LONG" if long_bias else "SHORT"
-        direction = "up" if long_bias else "down"
-
-        if long_bias:
-            activation = f"1H close above ${triggers.get('long_trigger_price', 0)} with volume confirmation"
-            targets = [
-                f"TP1: ${round(price + atr * 1.5, 2) if price else 0}",
-                f"TP2: ${round(price + atr * 3.0, 2) if price else 0}",
-                f"TP3: ${round(price + atr * 5.0, 2) if price else 0}",
-            ]
-            invalidation = f"Below ${triggers.get('bullish_invalidation', 0)}"
-            reasons = ["Higher timeframe structure supports", "Momentum favoring buyers", "Volume confirmation expected"]
-            risks = ["Resistance overhead", "Funding may flip negative"]
-        else:
-            activation = f"1H close below ${triggers.get('short_trigger_price', 0)} with volume confirmation"
-            targets = [
-                f"TP1: ${round(price - atr * 1.5, 2) if price else 0}",
-                f"TP2: ${round(price - atr * 3.0, 2) if price else 0}",
-                f"TP3: ${round(price - atr * 5.0, 2) if price else 0}",
-            ]
-            invalidation = f"Above ${triggers.get('bearish_invalidation', 0)}"
-            reasons = ["Higher timeframe structure bearish", "Momentum favoring sellers", "Breakdown with volume"]
-            risks = ["Support below", "Short squeeze potential"]
-
-        return {
-            "direction": dir_label,
-            "activation_trigger": activation,
-            "probability": max(scores.get("long_probability", 50), scores.get("short_probability", 50)) if long_bias else max(scores.get("short_probability", 50), scores.get("long_probability", 50)),
-            "projected_path": f"Price moves {direction} over next 10-20 candles, targeting {targets[0]} initially",
-            "target_zones": targets,
-            "invalidation": invalidation,
-            "expected_duration": "1-2 days" if direction == "up" else "1-2 days",
-            "supporting_reasons": reasons,
-            "opposing_risks": risks,
-        }
-
-    def _build_alt_scenario(self, tf, triggers, scores, price, atr, sr, main) -> dict:
-        opposite_dir = "SHORT" if main["direction"] == "LONG" else "LONG"
-        opposite_prob = scores.get("short_probability", 50) if main["direction"] == "LONG" else scores.get("long_probability", 50)
-        return {
-            "direction": opposite_dir,
-            "activation_trigger": f"Failure at trigger level, reversal to {opposite_dir.lower()} side",
-            "probability": opposite_prob,
-            "projected_path": f"Rejection at key level drives price in opposite direction over 5-10 candles",
-            "target_zones": [f"~${round(price * (0.95 if opposite_dir == 'LONG' else 1.05), 2)}"],
-            "invalidation": main["invalidation"],
-            "expected_duration": "12-24 hours",
-            "supporting_reasons": ["Failure at key level", "Divergence signal", "Order flow shift"],
-            "opposing_risks": ["Main scenario still valid", "Low volume reversal"],
-        }
-
-    def _build_risk_scenario(self, tf, triggers, scores, price, atr, sr, main) -> dict:
-        return {
-            "direction": f"FAKEOUT - {main['direction']} TRAP",
-            "activation_trigger": f"Initial {main['direction'].lower()} breakout, then immediate reversal below/above trigger",
-            "probability": 20,
-            "projected_path": f"Liquidity sweep + fake breakout, trapping {main['direction'].lower()} traders, then sharp reversal",
-            "target_zones": [f"Stop hunt +50% beyond invalidation"],
-            "invalidation": "Holding above/below main trigger level",
-            "expected_duration": "4-8 hours",
-            "supporting_reasons": ["Large position buildup", "Spoofing detection", "Liquidity grab"],
-            "opposing_risks": ["Majority wrong", "Low probability"],
+            "main_scenario": analysis.get("scenario_paths",{}).get("main_scenario",{}),
+            "alternative_scenario": analysis.get("scenario_paths",{}).get("alternative_scenario",{}),
+            "risk_fakeout_scenario": analysis.get("scenario_paths",{}).get("fakeout_scenario",{}),
+            "target_hierarchy": analysis.get("target_hierarchy",{}),
+            "time_estimates": analysis.get("time_estimates",{}),
+            "activation_conditions": analysis.get("activation_conditions",{}),
+            "confidence_breakdown": analysis.get("confidence_breakdown",{}),
         }
 
 
