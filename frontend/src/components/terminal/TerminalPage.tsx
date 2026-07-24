@@ -60,16 +60,24 @@ export function TerminalPage() {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [explain, setExplain] = useState<ExplainData | null>(null)
   const [signal, setSignal] = useState<InstitutionalSignal | null>(null)
+  const [aiAnalysis, setAiAnalysis] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const institutional = await api
-          .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
-          .catch(() => null)
+        const [institutional, ai] = await Promise.all([
+          api
+            .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
+            .catch(() => null),
+          api
+            .getAIAnalysis(selectedSymbol, selectedTimeframe)
+            .catch(() => null),
+        ])
         setSignal(institutional)
+        setAiAnalysis(ai)
+
         if (institutional) {
           const direction = institutional.direction
           const score = institutional.institutional_score
@@ -80,9 +88,13 @@ export function TerminalPage() {
               factorScores[key] = value / weight
             }
           }
+
+          const aiConf = ai?.confidence || institutional.confidence || score?.abs_score
+          const aiDir = ai?.combined_direction || direction
+
           setAnalysis({
-            prediction: institutional.error ? "neutral" : direction,
-            confidence: institutional.confidence ?? score?.abs_score,
+            prediction: institutional.error ? "neutral" : (aiDir as string),
+            confidence: typeof aiConf === "number" ? aiConf : undefined,
             current_price: institutional.current_price,
             long_probability: score?.long_probability,
             short_probability: score?.short_probability,
@@ -93,6 +105,9 @@ export function TerminalPage() {
               ...(institutional.indicators || {}),
               macd: institutional.indicators?.macd_histogram,
             },
+            summary: ai?.components?.elliott_wave
+              ? `Elliott Wave: ${(ai.components.elliott_wave as Record<string, unknown>).count === "impulse" ? "İmpuls dalğası" : "Korrektiv dalğa"}. ${(ai.components.candlestick_patterns as Record<string, unknown>)?.total_count || 0} şam naxışı aşkarlandı.`
+              : undefined,
           })
           setExplain(institutional.error ? null : {
             reasons: institutional.reasons || [],
@@ -114,6 +129,29 @@ export function TerminalPage() {
               resistance: institutional.entry_zone?.max,
             },
           })
+        } else if (ai && !ai.error) {
+          const aiDir = (ai.combined_direction as string) || "neutral"
+          const aiConf = ai.confidence as number || 50
+          const score = ai.institutional_score as Record<string, unknown> || {}
+          const scores = score.scores as Record<string, number> || {}
+          const factorScores: Record<string, number> = {}
+          const weights = score.weights as Record<string, number> || {}
+          for (const [key, value] of Object.entries(scores)) {
+            const weight = weights[key]
+            if (typeof value === "number" && typeof weight === "number" && weight > 0) {
+              factorScores[key] = value / weight
+            }
+          }
+          setAnalysis({
+            prediction: aiDir,
+            confidence: typeof aiConf === "number" ? aiConf : 50,
+            current_price: ai.current_price as number || 0,
+            long_probability: (ai.institutional_score as Record<string, number>)?.long_probability || 50,
+            short_probability: (ai.institutional_score as Record<string, number>)?.short_probability || 50,
+            risk_level: (ai.institutional_score as Record<string, string>)?.risk_level || "medium",
+            scores: factorScores,
+            details: (ai.institutional_score as Record<string, unknown>)?.details as Record<string, unknown> || {},
+          })
         } else {
           setAnalysis(null)
           setExplain(null)
@@ -132,7 +170,7 @@ export function TerminalPage() {
     || tickers[selectedSymbol.replace("/", "-")]
   const livePrice = ticker?.price && ticker.price > 0
     ? ticker.price
-    : signal?.current_price
+    : signal?.current_price || (aiAnalysis?.current_price as number)
   const displayedAnalysis = analysis
     ? { ...analysis, current_price: livePrice }
     : analysis
@@ -142,7 +180,13 @@ export function TerminalPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Chart Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          <AIChart analysis={displayedAnalysis} explain={explain} signal={signal} livePrice={livePrice} />
+          <AIChart
+            analysis={displayedAnalysis}
+            explain={explain}
+            signal={signal}
+            livePrice={livePrice}
+            aiAnalysis={aiAnalysis as Record<string, unknown> as AIChartProps["aiAnalysis"]}
+          />
 
           {/* Bottom Panel - AI Forecast + Summary */}
           <div className="border-t border-gray-800 bg-gray-950/80 p-3">
@@ -156,14 +200,18 @@ export function TerminalPage() {
         <div className="w-80 lg:w-96 border-l border-gray-800 overflow-y-auto flex-shrink-0">
           <div className="border-b border-gray-800">
             <div className="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
-              AI Prediction Engine
+              AI Analiz Mühərriki
             </div>
           </div>
-          <AIPredictionPanel analysis={displayedAnalysis} loading={loading} />
+          <AIPredictionPanel
+            analysis={displayedAnalysis}
+            aiAnalysis={aiAnalysis as Record<string, unknown> as AIAnalysisExtendedProps["aiAnalysis"]}
+            loading={loading}
+          />
 
           <div className="border-b border-gray-800">
             <div className="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-900/50">
-              Trade Decision
+              Ticarət Qərarı
             </div>
           </div>
           <div className="p-3">
@@ -173,4 +221,12 @@ export function TerminalPage() {
       </div>
     </div>
   )
+}
+
+// Temp type for the cast
+interface AIChartProps {
+  aiAnalysis?: Record<string, unknown> | null
+}
+interface AIAnalysisExtendedProps {
+  aiAnalysis?: Record<string, unknown> | null
 }

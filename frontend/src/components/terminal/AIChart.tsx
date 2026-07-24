@@ -19,6 +19,23 @@ const TIMEFRAMES = [
   { id: "1w", label: "1W" },
 ]
 
+const PATTERN_LABELS: Record<string, { az: string; color: string; icon: string }> = {
+  "Doji": { az: "Doji", color: "#f59e0b", icon: "◆" },
+  "Hammer": { az: "Çəkic", color: "#22c55e", icon: "🔨" },
+  "Shooting Star": { az: "Axan Ulduz", color: "#ef4444", icon: "⭐" },
+  "Bullish Engulfing": { az: "Yüksələn Uduş", color: "#22c55e", icon: "⬆" },
+  "Bearish Engulfing": { az: "Enən Uduş", color: "#ef4444", icon: "⬇" },
+  "Morning Star": { az: "Səhər Ulduzu", color: "#22c55e", icon: "🌟" },
+  "Evening Star": { az: "Axşam Ulduzu", color: "#ef4444", icon: "🌆" },
+  "Marubozu": { az: "Marubozu", color: "#a855f7", icon: "▮" },
+  "Dragonfly Doji": { az: "İynəcə Doji", color: "#22c55e", icon: "⟂" },
+  "Piercing Line": { az: "Deşici Xətt", color: "#22c55e", icon: "↗" },
+  "Dark Cloud Cover": { az: "Qara Bulud", color: "#ef4444", icon: "↘" },
+  "Volume Climax": { az: "Həcm Piki", color: "#f59e0b", icon: "📊" },
+  "Three Black Crows": { az: "Üç Qara Qarğa", color: "#ef4444", icon: "▼" },
+  "Three White Soldiers": { az: "Üç Ağ Əsgər", color: "#22c55e", icon: "▲" },
+}
+
 interface RawOHLCVItem {
   time: number
   open: number
@@ -96,16 +113,48 @@ interface AIChartProps {
     execution?: { approved?: boolean }
   } | null
   livePrice?: number
+  aiAnalysis?: {
+    confidence?: number
+    direction?: string
+    combined_direction?: string
+    components?: {
+      candlestick_patterns?: {
+        patterns?: Array<{ name: string; type: string; signal: string; price: number; strength: string }>
+        pattern_direction?: string
+        pattern_score?: number
+        total_count?: number
+      }
+      fibonacci?: {
+        retracements?: Array<{ level: number; price: number }>
+        all_levels?: Array<{ level: number; price: number; type: string }>
+        golden_zone?: { low: number; high: number }
+        nearest_bullish_target?: { level: number; price: number }
+        nearest_bearish_target?: { level: number; price: number }
+      }
+      elliott_wave?: {
+        count?: string
+        waves?: Array<{ name: string; type: string; description: string }>
+        current_phase?: string
+      }
+      liquidity_zones?: {
+        zones?: Array<{ type: string; price?: number; price_low?: number; price_high?: number; source: string; strength: string }>
+        nearest_support?: number
+        nearest_resistance?: number
+      }
+      trend_lines?: {
+        support_lines?: Array<Record<string, unknown>>
+        resistance_lines?: Array<Record<string, unknown>>
+      }
+    }
+  } | null
 }
 
-export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) {
+export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AIChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
   const { selectedSymbol, selectedTimeframe, setSymbol, setTimeframe } = useMarketStore()
   const [candleData, setCandleData] = useState<OHLCVItem[]>([])
-  // state setter only — loading value not used in render
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loading, setLoading] = useState(true)
   const [price, setPrice] = useState<string>("")
   const latestCandle = candleData[candleData.length - 1]
@@ -197,38 +246,106 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
         text: candleBullish ? "ŞAM ↑" : "ŞAM ↓",
       }])
     }
+
+    // Pattern markers
+    const patterns = aiAnalysis?.components?.candlestick_patterns?.patterns || []
+    const patternMarkers: SeriesMarker<Time>[] = []
+    for (const p of patterns) {
+      const idx = candleData.length - 1 + (p as unknown as Record<string, number>).index
+      if (idx >= 0 && idx < candleData.length) {
+        const pl = PATTERN_LABELS[p.name]
+        patternMarkers.push({
+          time: candleData[idx].time,
+          position: p.type === "bullish" ? "belowBar" : p.type === "bearish" ? "aboveBar" : "aboveBar",
+          color: pl?.color || "#9ca3af",
+          shape: p.type === "bullish" ? "arrowUp" : "arrowDown" as "arrowUp" | "arrowDown",
+          text: pl?.az || p.name,
+        })
+      }
+    }
+    if (patternMarkers.length > 0 && candleSeriesRef.current) {
+      createSeriesMarkers(candleSeriesRef.current, patternMarkers)
+    }
+
+    // Fibonacci levels
+    const fib = aiAnalysis?.components?.fibonacci
+    if (fib && candleSeriesRef.current) {
+      const fibLevels = fib.retracements || []
+      for (const lvl of fibLevels) {
+        if (lvl.price > 0) {
+          candleSeriesRef.current.createPriceLine({
+            price: lvl.price,
+            color: lvl.level === 0.618 ? "#a855f7" : "#6366f1",
+            lineWidth: lvl.level === 0.618 || lvl.level === 0.382 ? 1 : 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `Fib ${(lvl.level * 100).toFixed(0)}%`,
+          })
+        }
+      }
+    }
+
+    // Liquidity zones
+    const liqZones = aiAnalysis?.components?.liquidity_zones
+    if (liqZones && candleSeriesRef.current) {
+      if (liqZones.nearest_support && liqZones.nearest_support > 0) {
+        candleSeriesRef.current.createPriceLine({
+          price: liqZones.nearest_support,
+          color: "#22c55e",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: "Likvidlik Dəstək",
+        })
+      }
+      if (liqZones.nearest_resistance && liqZones.nearest_resistance > 0) {
+        candleSeriesRef.current.createPriceLine({
+          price: liqZones.nearest_resistance,
+          color: "#ef4444",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: "Likvidlik Müqavimət",
+        })
+      }
+    }
+
+    // Signal levels
     if (lastCandle && signal && !signal.error && signal.confidence !== undefined
         && signal.confidence >= 70 && candleSeriesRef.current) {
-      const isBullish = signal.direction === "long"
       const lastTime = lastCandle.time
       const levels = [
-        { price: signal.entry_zone?.min, title: "ENTRY LOW", color: "#3b82f6", style: LineStyle.Dashed },
-        { price: signal.entry_zone?.max, title: "ENTRY HIGH", color: "#60a5fa", style: LineStyle.Dashed },
-        { price: signal.stop_loss, title: "STOP LOSS", color: "#ef4444", style: LineStyle.Solid },
-        { price: signal.take_profit_1, title: "TP1", color: "#22c55e", style: LineStyle.Solid },
-        { price: signal.take_profit_2, title: "TP2", color: "#16a34a", style: LineStyle.Dashed },
-        { price: signal.take_profit_3, title: "TP3", color: "#15803d", style: LineStyle.Dotted },
+        { price: signal.entry_zone?.min, title: "GİRİŞ AŞAĞI", color: "#3b82f6", style: LineStyle.Dashed },
+        { price: signal.entry_zone?.max, title: "GİRİŞ YUXARI", color: "#60a5fa", style: LineStyle.Dashed },
+        { price: signal.stop_loss, title: "ZƏRƏR KƏS", color: "#ef4444", style: LineStyle.Solid },
+        { price: signal.take_profit_1, title: "MH1", color: "#22c55e", style: LineStyle.Solid },
+        { price: signal.take_profit_2, title: "MH2", color: "#16a34a", style: LineStyle.Dashed },
+        { price: signal.take_profit_3, title: "MH3", color: "#15803d", style: LineStyle.Dotted },
       ]
       levels.forEach((level) => {
         if (level.price && level.price > 0) {
           candleSeriesRef.current?.createPriceLine({
             price: level.price,
             color: level.color,
-            lineWidth: level.title === "STOP LOSS" || level.title === "TP1" ? 2 : 1,
+            lineWidth: level.title === "ZƏRƏR KƏS" || level.title === "MH1" ? 2 : 1,
             lineStyle: level.style,
             axisLabelVisible: true,
             title: level.title,
           })
         }
       })
-      const markers: SeriesMarker<Time>[] = [{
-        time: lastTime,
-        position: isBullish ? "belowBar" : "aboveBar",
-        color: isBullish ? "#22c55e" : "#ef4444",
-        shape: isBullish ? "arrowUp" : "arrowDown",
-        text: `${isBullish ? "LONG" : "SHORT"} ${signal.confidence || 0}%`,
-      }]
-      createSeriesMarkers(candleSeriesRef.current, markers)
+      if (aiAnalysis?.combined_direction) {
+        const isBullish = aiAnalysis.combined_direction === "long"
+        const finalConf = aiAnalysis.confidence || signal.confidence || 0
+        const markers: SeriesMarker<Time>[] = [{
+          time: lastTime,
+          position: isBullish ? "belowBar" : "aboveBar",
+          color: isBullish ? "#22c55e" : "#ef4444",
+          shape: "circle" as const,
+          text: `${isBullish ? "UZUN" : "QISA"} ${finalConf}%`,
+        }]
+        createSeriesMarkers(candleSeriesRef.current, markers)
+      }
     }
 
     chartRef.current = chart
@@ -245,7 +362,7 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
       chartRef.current = null
       candleSeriesRef.current = null
     }
-  }, [candleData, signal])
+  }, [candleData, signal, aiAnalysis])
 
   return (
     <div className="flex flex-col h-full">
@@ -273,19 +390,25 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
                 : "text-gray-300 bg-gray-800 border-gray-700"
           )}>
             {candleDirection === "bullish"
-              ? "ŞAM ↑ BULLISH"
+              ? "ŞAM ↑ YÜKSƏLİŞ"
               : candleDirection === "bearish"
-                ? "ŞAM ↓ BEARISH"
-                : "ŞAM → NEUTRAL"}
+                ? "ŞAM ↓ ENİŞ"
+                : "ŞAM → NEYTRAL"}
           </div>
-          {(analysis?.details?.rsi) && (
-            <div className="hidden sm:flex items-center gap-1.5 text-[10px]">
-              <span className={cn("px-1.5 py-0.5 rounded font-mono", (analysis.details.rsi || 0) > 70 ? "bg-red-900/50 text-red-400" : (analysis.details.rsi || 0) < 30 ? "bg-green-900/50 text-green-400" : "bg-gray-800 text-gray-400")}>
-                RSI: {analysis.details.rsi?.toFixed(0)}
-              </span>
-              <span className={cn("px-1.5 py-0.5 rounded font-mono", (analysis.details.macd || 0) > 0 ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400")}>
-                MACD: {analysis.details.macd?.toFixed(1)}
-              </span>
+          {/* Pattern indicators */}
+          {aiAnalysis?.components?.candlestick_patterns?.patterns && aiAnalysis.components.candlestick_patterns.patterns.length > 0 && (
+            <div className="hidden md:flex items-center gap-1 text-[10px]">
+              {aiAnalysis.components.candlestick_patterns.patterns.slice(0, 3).map((p, i) => {
+                const pl = PATTERN_LABELS[p.name]
+                return (
+                  <span key={i} className="px-1.5 py-0.5 rounded font-mono" style={{
+                    backgroundColor: (pl?.color || "#9ca3af") + "20",
+                    color: pl?.color || "#9ca3af",
+                  }}>
+                    {pl?.az || p.name}
+                  </span>
+                )
+              })}
             </div>
           )}
         </div>
@@ -304,42 +427,39 @@ export function AIChart({ analysis, explain, signal, livePrice }: AIChartProps) 
         </div>
       </div>
 
-      {/* Institutional signal levels sourced from the backend engine */}
-      {analysis && (
+      {/* Info bar */}
+      {(analysis || aiAnalysis) && (
         <div className="flex items-center gap-4 px-3 py-1 bg-gray-900/80 border-b border-gray-800 text-[10px]">
           <span className="text-gray-400">Real Binance OHLCV</span>
-          {signal && !signal.error && (
-            <span className={signal.execution?.approved ? "text-green-400" : "text-amber-400"}>
-              {signal.execution?.approved ? "Trade eligible" : "Validation required"}
+          {aiAnalysis?.components?.elliott_wave?.count && aiAnalysis.components.elliott_wave.count !== "unknown" && (
+            <span className="text-purple-400">
+              Elliott: {aiAnalysis.components.elliott_wave.count === "impulse" ? "İmpuls" : "Korrektiv"}
             </span>
           )}
-          {signal && !signal.error && signal.confidence !== undefined && signal.confidence >= 70 && (
-            <>
-              <div className="flex items-center gap-1">
-                <span className="text-green-400 font-medium">Entry</span>
-                <span className="text-white font-mono">
-                  {signal.entry_zone?.mid ? `$${signal.entry_zone.mid.toFixed(2)}` : "N/A"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-red-400 font-medium">SL</span>
-                <span className="text-red-400 font-mono">
-                  {signal.stop_loss ? `$${signal.stop_loss.toFixed(2)}` : "N/A"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-green-400 font-medium">TP</span>
-                <span className="text-green-400 font-mono">
-                  {signal.take_profit_1 ? `$${signal.take_profit_1.toFixed(2)}` : "N/A"}
-                </span>
-              </div>
-            </>
+          {aiAnalysis?.components?.candlestick_patterns && (
+            <span className={cn(
+              aiAnalysis.components.candlestick_patterns.pattern_direction === "long" ? "text-green-400" :
+              aiAnalysis.components.candlestick_patterns.pattern_direction === "short" ? "text-red-400" : "text-yellow-400"
+            )}>
+              Naxış: {aiAnalysis.components.candlestick_patterns.pattern_direction === "long" ? "YÜKSƏLİŞ" :
+                       aiAnalysis.components.candlestick_patterns.pattern_direction === "short" ? "ENİŞ" : "NEYTRAL"}
+              ({aiAnalysis.components.candlestick_patterns.total_count})
+            </span>
+          )}
+          {signal && !signal.error && (
+            <span className={signal.execution?.approved ? "text-green-400" : "text-amber-400"}>
+              {signal.execution?.approved ? "Ticarət uyğun" : "Doğrulama tələb olunur"}
+            </span>
           )}
           <div className="flex-1" />
           <div className={cn("font-medium",
-            analysis.prediction === "long" ? "text-green-400" : analysis.prediction === "short" ? "text-red-400" : "text-yellow-400"
+            (aiAnalysis?.combined_direction || analysis?.prediction) === "long" ? "text-green-400" :
+            (aiAnalysis?.combined_direction || analysis?.prediction) === "short" ? "text-red-400" : "text-yellow-400"
           )}>
-            {analysis.prediction?.toUpperCase() || "NEUTRAL"} · {analysis.confidence || 0}%
+            {aiAnalysis?.combined_direction
+              ? (aiAnalysis.combined_direction === "long" ? "UZUN" : aiAnalysis.combined_direction === "short" ? "QISA" : "NEYTRAL")
+              : (analysis?.prediction?.toUpperCase() || "NEYTRAL")}
+            {" · "}{aiAnalysis?.confidence || analysis?.confidence || 0}%
           </div>
         </div>
       )}

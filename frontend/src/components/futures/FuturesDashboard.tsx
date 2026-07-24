@@ -28,7 +28,7 @@ export function FuturesDashboard() {
           api.institutionalScan(0, 30),
           api.getFundingRates(30),
         ])
-        const signals = Array.isArray(scanResponse) ? scanResponse : []
+        const signals = Array.isArray(scanResponse?.signals) ? scanResponse.signals : []
         const funding = Array.isArray(fundingResponse?.funding_rates)
           ? fundingResponse.funding_rates
           : []

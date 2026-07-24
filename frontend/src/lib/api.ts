@@ -92,7 +92,7 @@ export const api = {
     request<any>(`/api/v1/analysis/indicators/${symbol}?timeframe=${timeframe}`),
 
   getAIAnalysis: (symbol: string, timeframe = "1h") =>
-    request<any>(`/api/v1/analysis/ai/${symbol}?timeframe=${timeframe}`),
+    request<any>(`/api/v1/institutional/ai-analysis/${encodeURIComponent(symbol.replace("/", "-"))}?timeframe=${encodeURIComponent(timeframe)}`),
 
   getFullAnalysis: (symbol: string, timeframe = "1h") =>
     request<any>(`/api/v1/analysis/full/${symbol}?timeframe=${timeframe}`),
@@ -362,4 +362,5 @@ export const api = {
 
   getTrendingCoins: (count = 10) =>
     request<any>(`/api/v1/institutional/market/trending?count=${count}`),
+
 }

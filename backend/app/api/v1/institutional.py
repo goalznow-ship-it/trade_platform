@@ -13,6 +13,7 @@ from app.services.smc_engine import smc_engine
 from app.services.professional_risk import professional_risk
 from app.services.institutional_scoring import institutional_scorer
 from app.services.market import market_service
+from app.services.pattern_analysis import pattern_engine
 
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
@@ -234,3 +235,44 @@ async def get_trending_coins(
     """Trending coins (volume + gainers composite)"""
     trending = await market_coverage.get_trending_coins(count=count)
     return {"trending": trending, "count": len(trending)}
+
+
+@router.get("/ai-analysis/{symbol}")
+async def get_ai_analysis(
+    symbol: str,
+    timeframe: str = Query("1h", pattern="^(1w|1d|4h|1h|15m|5m)$"),
+    user: dict = Depends(get_current_user),
+):
+    """Comprehensive AI analysis: patterns, trends, Elliott Wave, Fibonacci, liquidity zones"""
+    sym = symbol.replace("-", "/")
+    ohlcv = await market_service.get_ohlcv(sym, "binance", timeframe, 200)
+    if not ohlcv or len(ohlcv) < 30:
+        return {"error": "Insufficient data", "symbol": sym}
+
+    smc_result = smc_engine.analyze(ohlcv)
+    result = await pattern_engine.comprehensive_analysis(sym, timeframe, ohlcv, smc_result)
+
+    score_result = await institutional_scorer.score(sym, ohlcv, timeframe, smc_result)
+    result["institutional_score"] = score_result
+    result["smc"] = {
+        "trend": smc_result.get("trend", "unknown"),
+        "bos_count": smc_result.get("bos_count", 0),
+        "choch_count": smc_result.get("choch_count", 0),
+        "net_bos": smc_result.get("net_bos", 0),
+        "liquidity_sweep": smc_result.get("liquidity_sweep"),
+        "premium_discount": smc_result.get("premium_discount", {}),
+    }
+
+    combined_dir = result["direction"]
+    score_dir = score_result.get("direction", "neutral")
+    if combined_dir == score_dir:
+        confidence_boost = 15
+    elif combined_dir != score_dir and combined_dir != "neutral":
+        confidence_boost = -10
+    else:
+        confidence_boost = 0
+
+    result["combined_direction"] = combined_dir if combined_dir != "neutral" else score_dir
+    result["confidence"] = min(100, max(0, abs(score_result.get("abs_score", 50)) + confidence_boost))
+
+    return result
