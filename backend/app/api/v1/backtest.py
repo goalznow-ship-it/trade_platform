@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.portfolio import BacktestResult
 from pydantic import BaseModel
 from typing import Optional
+import httpx
 
 router = APIRouter(prefix="/backtest", tags=["Backtest"])
 
@@ -29,18 +30,46 @@ async def run_backtest(
     risk_per_trade: float = 0.02,
     fee_rate: float = Query(default=0.0004, ge=0, le=0.01),
     slippage_bps: float = Query(default=2.0, ge=0, le=100),
+    mode: str = Query(default="balanced", pattern="^(strict|balanced|exploratory)$"),
     user: User = Depends(get_current_user)
 ):
     sym = symbol.replace("-", "/")
     data = await market_service.get_ohlcv(sym, 'binance', timeframe, limit)
     if not data:
-        return {"error": "No data available"}
+        return {
+            "error": "No data available",
+            "error_reason": "provider xətası",
+            "provider_status": "unavailable",
+            "source": "Binance",
+        }
+    # Exchange OHLCV responses may contain the candle currently being formed.
+    # Backtests only accept fully closed candles.
+    closed_data = data[:-1]
+    funding_rates = []
+    provider_errors = {}
+    try:
+        binance_symbol = sym.replace("/", "")
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                "https://fapi.binance.com/fapi/v1/fundingRate",
+                params={"symbol": binance_symbol, "limit": 1000},
+            )
+            response.raise_for_status()
+            funding_rates = [
+                {"time": int(row["fundingTime"] // 1000), "rate": float(row["fundingRate"])}
+                for row in response.json()
+            ]
+    except Exception as exc:
+        provider_errors["historical_funding"] = f"{type(exc).__name__}: {str(exc)[:240]}"
     result = await backtest_service.run_backtest(
-        symbol=sym, data=data, timeframe=timeframe,
+        symbol=sym, data=closed_data, timeframe=timeframe,
         initial_balance=initial_balance, leverage=leverage,
         risk_per_trade=risk_per_trade, fee_rate=fee_rate,
-        slippage_bps=slippage_bps,
+        slippage_bps=slippage_bps, mode=mode, funding_rates=funding_rates,
     )
+    result["provider_errors"] = provider_errors
+    result["module_errors"] = dict(provider_errors)
+    result["funding_accounted"] = bool(funding_rates)
     return result
 
 

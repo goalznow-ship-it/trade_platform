@@ -141,31 +141,11 @@ export function DashboardStats() {
       let isPaper = false
       let dataSource = "provider unavailable"
 
+      try { portfolio = await api.getPortfolio() } catch { portfolio = null }
       try {
-        portfolio = await api.getPortfolio()
-        if (portfolio && (portfolio.balance !== undefined || portfolio.total_trades !== undefined)) {
-          dataSource = "live portfolio"
-        } else {
-          portfolio = null
-        }
-      } catch {
-        portfolio = null
-      }
-
-      if (!portfolio || portfolio.balance === undefined || portfolio.balance === 0) {
-        try {
-          paper = await api.getPaperAccount()
-          if (paper && paper.balance !== undefined) {
-            paper.is_paper = true
-            dataSource = "paper balance"
-            isPaper = true
-          } else {
-            paper = null
-          }
-        } catch {
-          paper = null
-        }
-      }
+        paper = await api.getPaperAccount()
+        if (paper && paper.balance !== undefined) paper.is_paper = true
+      } catch { paper = null }
 
       try {
         analytics = await api.getPortfolioAnalytics()
@@ -182,8 +162,24 @@ export function DashboardStats() {
 
       try {
         balance = await api.getBalance()
+        if (balance && Object.keys(balance).length > 0) {
+          dataSource = "real exchange"
+        } else {
+          balance = null
+        }
       } catch {
         balance = null
+      }
+
+      // A database user balance is not proof of an exchange connection.
+      // Prefer the explicitly separated paper account unless a real exchange
+      // balance response exists.
+      if (!balance && paper) {
+        isPaper = true
+        dataSource = "paper account · Exchange qoşulmayıb"
+      } else if (!balance) {
+        portfolio = null
+        dataSource = "Exchange qoşulmayıb"
       }
 
       if (!portfolio && !paper && !analytics && positions.length === 0) {
@@ -215,10 +211,11 @@ export function DashboardStats() {
     [positions]
   )
 
-  const totalBalance = data?.portfolio?.balance ?? data?.paper?.balance ?? 0
+  const totalBalance = data?.isPaper ? data?.paper?.balance : data?.portfolio?.balance
   const equity = data?.portfolio && data.portfolio.balance !== undefined
+    && !data?.isPaper && totalBalance != null
     ? totalBalance + unrealizedPnl
-    : (data?.paper?.equity ?? totalBalance + unrealizedPnl)
+    : (data?.paper?.equity ?? (totalBalance != null ? totalBalance + unrealizedPnl : undefined))
   const isPaper = data?.isPaper ?? false
 
   const exchangeBalances = data?.balance
@@ -231,7 +228,7 @@ export function DashboardStats() {
     }
   }
   if (freeMargin === 0 && usedMargin === 0) {
-    freeMargin = data?.paper?.free_margin ?? equity
+    freeMargin = data?.paper?.free_margin ?? equity ?? 0
     usedMargin = data?.paper?.used_margin ?? 0
   }
 
@@ -247,7 +244,7 @@ export function DashboardStats() {
   const stats = useMemo(() => [
     {
       label: "Equity",
-      value: formatPrice(equity),
+      value: equity == null ? "Exchange qoşulmayıb" : formatPrice(equity),
       change: unrealizedPnl !== 0 ? (unrealizedPnl >= 0 ? "+" : "") + formatPrice(Math.abs(unrealizedPnl)) : undefined,
       changeValue: unrealizedPnl,
       icon: LineChart,
@@ -256,7 +253,7 @@ export function DashboardStats() {
     },
     {
       label: "Balance",
-      value: formatPrice(totalBalance),
+      value: totalBalance == null ? "Exchange qoşulmayıb" : formatPrice(totalBalance),
       icon: Wallet,
       tooltip: `Available account balance (${dataSource})`,
       sub: isPaper ? "Paper" : undefined,

@@ -7,7 +7,16 @@ from collections import defaultdict
 from app.core.logging import logger
 
 
+def mode_label(threshold: float) -> str:
+    return "strict" if threshold >= 70 else "balanced" if threshold >= 55 else "exploratory"
+
+
 class BacktestService:
+    MODES = {
+        "strict": {"threshold": 70.0, "min_lookback": 100},
+        "balanced": {"threshold": 55.0, "min_lookback": 75},
+        "exploratory": {"threshold": 45.0, "min_lookback": 50},
+    }
     def __init__(self):
         self.logger = logger
 
@@ -21,6 +30,8 @@ class BacktestService:
         slippage_bps: float = 2.0,
         leverage: int = 1,
         risk_per_trade: float = 0.02,
+        mode: str = "balanced",
+        funding_rates: Optional[list] = None,
     ) -> dict:
         from app.core.cache import cache_get, cache_set
 
@@ -28,7 +39,7 @@ class BacktestService:
         cache_key = (
             f"backtest:{symbol}:{timeframe}:{len(data)}:{last_bar}:"
             f"{initial_balance:.2f}:{fee_rate:.6f}:{slippage_bps:.2f}:"
-            f"{leverage}:{risk_per_trade:.4f}"
+            f"{leverage}:{risk_per_trade:.4f}:{mode}"
         )
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -37,7 +48,7 @@ class BacktestService:
         result = await asyncio.to_thread(
             self._run_backtest_sync,
             symbol, data, timeframe, initial_balance, fee_rate,
-            slippage_bps, leverage, risk_per_trade,
+            slippage_bps, leverage, risk_per_trade, mode, funding_rates or [],
         )
         await cache_set(cache_key, result, ttl=300)
         return result
@@ -52,9 +63,19 @@ class BacktestService:
         slippage_bps: float = 2.0,
         leverage: int = 1,
         risk_per_trade: float = 0.02,
+        mode: str = "balanced",
+        funding_rates: Optional[list] = None,
     ) -> dict:
-        if len(data) < 100:
-            return {"error": "Insufficient data"}
+        config = self.MODES.get(mode)
+        if config is None:
+            return {"error": f"Unknown backtest mode: {mode}", "error_reason": "mode_not_supported"}
+        if len(data) < config["min_lookback"] + 20:
+            return {
+                "error": "Insufficient data",
+                "error_reason": "data çatmır",
+                "required_candles": config["min_lookback"] + 20,
+                "received_candles": len(data),
+            }
 
         df = pd.DataFrame(data)
         if "time" in df.columns:
@@ -75,16 +96,25 @@ class BacktestService:
         daily_balances = []
 
         num_bars = len(df)
-        lookback = 50
+        lookback = int(config["min_lookback"])
+        diagnostics = {"evaluated_bars": 0, "neutral_direction": 0, "below_threshold": 0, "signal_errors": 0}
+        funding_by_time = {
+            int(row["time"]): float(row["rate"])
+            for row in (funding_rates or [])
+            if row.get("time") is not None and row.get("rate") is not None
+        }
 
         for i in range(lookback, num_bars):
             current = df.iloc[i]
             signal = None
             if position is None:
                 start = max(0, i - 249)
+                # The signal is computed at candle i close. Position management
+                # starts on i+1, so no future high/low enters the decision.
                 prev_data = df.iloc[start:i + 1].to_dict("records")
                 signal = self._generate_institutional_signal(
                     symbol, prev_data, institutional_scorer, smc_engine,
+                    timeframe, float(config["threshold"]), diagnostics,
                 )
 
             if signal and signal["action"] != 0 and position is None:
@@ -100,8 +130,11 @@ class BacktestService:
                 )
 
                 if exit_price:
-                    pnl, pnl_pct = self._close_trade(
-                        position, exit_price, fee_rate, slippage_bps,
+                    funding_rate = self._funding_for_period(
+                        funding_by_time, position, current,
+                    )
+                    pnl, pnl_pct, fee, funding_fee = self._close_trade(
+                        position, exit_price, fee_rate, slippage_bps, funding_rate,
                     )
                     balance += pnl
 
@@ -127,7 +160,12 @@ class BacktestService:
                         "pnl_percent": round(pnl_pct, 2),
                         "return_pct": round((pnl / trade_entry_balance) * 100, 2) if position.get("entry_balance") else 0,
                         "exit_reason": exit_reason,
+                        "reason": position.get("reason", "institutional_score"),
+                        "score": position.get("score"),
+                        "fee": round(fee, 4),
+                        "funding_fee": round(funding_fee, 4),
                         "duration_hours": round(trade_duration, 1),
+                        "holding_time": round(trade_duration, 1),
                         "risk_reward": round(abs(pnl) / abs(position.get("risk_amount", 1)), 2) if position.get("risk_amount") else 0,
                     })
 
@@ -142,26 +180,46 @@ class BacktestService:
             if balance > peak_balance:
                 peak_balance = balance
 
-        return self._compute_metrics(
+        result = self._compute_metrics(
             trades, equity_curve, daily_balances, monthly_pnl,
             initial_balance, balance, symbol, timeframe,
         )
+        result.update({
+            "mode": mode,
+            "threshold": config["threshold"],
+            "diagnostics": diagnostics,
+            "drawdown_curve": self._drawdown_curve(equity_curve),
+            "data_freshness": "historical",
+            "source": "Binance historical OHLCV",
+            "last_updated": pd.Timestamp.now(tz="UTC").isoformat(),
+            "provider_status": "available",
+            "is_stale": False,
+            "fallback_used": False,
+            "error_reason": None,
+            "zero_trade_reason": self._zero_trade_reason(diagnostics, len(data)) if not trades else None,
+        })
+        return result
 
     def _generate_institutional_signal(
         self, symbol: str, data: list,
-        scorer, smc,
+        scorer, smc, timeframe: str, threshold: float, diagnostics: dict,
     ) -> Optional[dict]:
         try:
             if len(data) < 50:
                 return None
 
             smc_data = smc.analyze(data)
-            score_result = scorer.score_sync(symbol, data, "1h", smc_data)
+            diagnostics["evaluated_bars"] += 1
+            score_result = scorer.score_sync(symbol, data, timeframe, smc_data)
 
             direction = score_result.get("direction", "neutral")
             abs_score = score_result.get("abs_score", 0)
 
-            if direction == "neutral" or abs_score < 70:
+            if direction == "neutral":
+                diagnostics["neutral_direction"] += 1
+                return None
+            if abs_score < threshold:
+                diagnostics["below_threshold"] += 1
                 return None
 
             current_price = data[-1]["close"]
@@ -183,8 +241,11 @@ class BacktestService:
                 "atr": atr,
                 "score": abs_score,
                 "classification": score_result.get("classification", "reject"),
+                "reason": f"{mode_label(threshold)} mode institutional score {abs_score:.1f}",
             }
-        except Exception:
+        except Exception as exc:
+            diagnostics["signal_errors"] += 1
+            self.logger.debug("Backtest signal error for %s: %s", symbol, exc)
             return None
 
     def _open_position(self, signal: dict, current_row, balance: float,
@@ -215,11 +276,13 @@ class BacktestService:
             "risk_amount": risk_amount,
             "entry_balance": balance,
             "entry_index": entry_index,
+            "entry_time_unix": int(current_row.get("time", 0) or 0),
             "take_profit_1": signal.get("take_profit_1"),
             "take_profit_2": signal.get("take_profit_2"),
             "take_profit_3": signal.get("take_profit_3"),
             "score": signal.get("score", 0),
             "classification": signal.get("classification", ""),
+            "reason": signal.get("reason"),
         }
 
     def _check_exit(self, position: dict, current_row, idx: int, num_bars: int) -> tuple:
@@ -267,7 +330,7 @@ class BacktestService:
 
     def _close_trade(
         self, position: dict, exit_price: float, fee_rate: float,
-        slippage_bps: float,
+        slippage_bps: float, funding_rate: float = 0.0,
     ) -> tuple:
         ep = position["entry_price"]
         size = position["size"]
@@ -276,12 +339,36 @@ class BacktestService:
         exit_price *= 1 - (slippage_bps / 10000) * side
         gross_pnl = (exit_price - ep) * size * side
         fee = (abs(ep * size) + abs(exit_price * size)) * fee_rate
-        pnl = gross_pnl - fee
+        funding_fee = ep * size * funding_rate * side
+        pnl = gross_pnl - fee - funding_fee
 
         entry_balance = position.get("entry_balance", 10000)
         pnl_pct = (pnl / entry_balance) * 100
 
-        return pnl, pnl_pct
+        return pnl, pnl_pct, fee, funding_fee
+
+    def _funding_for_period(self, rates: dict[int, float], position: dict, current_row) -> float:
+        if not rates:
+            return 0.0
+        entry_time = position.get("entry_time_unix", 0)
+        exit_time = current_row.get("time", 0)
+        return sum(rate for timestamp, rate in rates.items() if entry_time < timestamp <= exit_time)
+
+    def _drawdown_curve(self, equity_curve: list[float]) -> list[float]:
+        values = np.array(equity_curve, dtype=float)
+        peaks = np.maximum.accumulate(values)
+        curve = np.where(peaks > 0, (values - peaks) / peaks * 100, 0)
+        step = max(1, len(curve) // 200)
+        return [round(float(value), 4) for value in curve[::step]]
+
+    def _zero_trade_reason(self, diagnostics: dict, candle_count: int) -> str:
+        if candle_count < 100:
+            return "data çatmır"
+        if diagnostics["signal_errors"] >= max(1, diagnostics["evaluated_bars"]):
+            return "provider xətası"
+        if diagnostics["below_threshold"] >= diagnostics["neutral_direction"]:
+            return "threshold yüksəkdir"
+        return "timeframe uyğun deyil"
 
     def _calc_entry_zone(self, price: float, atr: float, direction: str) -> dict:
         offset = atr * 0.3

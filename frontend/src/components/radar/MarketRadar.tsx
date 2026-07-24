@@ -1,264 +1,79 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
-import {
-  Radar, Activity,
-  BarChart3, Flame, DollarSign, ArrowUpDown,
-  RefreshCw, Wallet, AlertTriangle,
-} from "lucide-react"
+import { Activity, AlertTriangle, BarChart3, Flame, Radar, RefreshCw, Wallet } from "lucide-react"
 
-interface MarketOverview {
-  btc_dominance?: number
-  btc_price?: number
-  eth_price?: number
-  btc_change?: number
+type Meta = {
+  source?: string; last_updated?: string | null; data_freshness?: string
+  error_reason?: string | null; provider_status?: string; is_stale?: boolean
+}
+type Intel = Meta & {
+  btc_dominance?: Meta & { value?: number | null }
+  prices?: Meta & { items?: Array<{symbol: string; price: number; change_24h: number; volume_24h: number}>; eth_btc_ratio?: Meta & {value?: number | null} }
+  futures?: Meta & { items?: Array<{symbol: string; funding_rate?: number | null; open_interest_usd?: number | null; long_short_ratio?: number | null; oi_change?: number | null}> }
+  liquidations?: Meta & { items?: Array<{symbol: string; price: number; notional: number; count: number; side: string}> }
+  whale_transactions?: Meta & { items?: unknown[] }
+  alerts?: Array<{type: string; symbol: string; message: string; last_updated: string; source: string}>
+  provider_errors?: Record<string, string>
 }
 
-interface WhaleTransaction {
-  amount?: string | number
-  value?: string | number
-  symbol: string
-  direction?: string
-  impact?: number
-  type?: string
-  exchange?: string
-}
+const money = (value?: number | null) => value == null ? "N/A" : new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2}).format(value)
+const updated = (value?: string | null) => value ? new Date(value).toLocaleTimeString() : "N/A"
 
-interface OpenInterestItem {
-  symbol: string
-  open_interest?: number
-  open_interest_usd?: number
-  price?: number
-}
-
-interface FundingItem {
-  symbol: string
-  funding_rate?: number
-  price?: number
+function MetaLine({meta}: {meta?: Meta}) {
+  return <div className="text-[9px] text-gray-600 mt-1">
+    {meta?.source || "N/A"} · {meta?.data_freshness || "unavailable"} · {updated(meta?.last_updated)}
+    {meta?.error_reason && <div className="text-amber-500 mt-1">{meta.error_reason}</div>}
+  </div>
 }
 
 export function MarketRadar() {
-  const [data, setData] = useState<MarketOverview | null>(null)
-  const [openInterest, setOpenInterest] = useState<OpenInterestItem[]>([])
-  const [fundingRates, setFundingRates] = useState<FundingItem[]>([])
-  const [whales, setWhales] = useState<WhaleTransaction[]>([])
+  const [intel, setIntel] = useState<Intel | null>(null)
   const [loading, setLoading] = useState(true)
-  const [alerts, setAlerts] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      try {
-        const [overview, oiResponse, fundingResponse, whaleResponse] = await Promise.all([
-          api.getOverview(),
-          api.getOpenInterest(5).catch(() => ({ open_interest: [] })),
-          api.getFundingRates(10).catch(() => ({ funding_rates: [] })),
-          api.getRecentWhales(5).catch(() => []),
-        ])
-        setData(overview)
-        setOpenInterest(Array.isArray(oiResponse?.open_interest) ? oiResponse.open_interest : [])
-        setFundingRates(Array.isArray(fundingResponse?.funding_rates) ? fundingResponse.funding_rates : [])
-        setWhales(Array.isArray(whaleResponse) ? whaleResponse : [])
-        const alerts: string[] = []
-        if (overview?.btc_change && Math.abs(overview.btc_change) > 3) {
-          alerts.push(`BTC moved ${overview.btc_change > 0 ? "+" : ""}${overview.btc_change.toFixed(1)}% — high volatility`)
-        }
-        if (Array.isArray(whaleResponse) && whaleResponse.length > 0) {
-          whaleResponse.slice(0, 3).forEach((w: WhaleTransaction) => {
-            alerts.push(`Whale: ${w.amount ?? "N/A"} ${w.symbol} — ${w.direction || "unknown"}`)
-          })
-        }
-        if (alerts.length === 0) {
-          alerts.push("No significant anomalies detected")
-        }
-        setAlerts(alerts)
-      } catch {
-        setData(null)
-        setAlerts(["Data temporarily unavailable"])
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-    const interval = setInterval(load, 30000)
-    return () => clearInterval(interval)
+  const load = useCallback(async () => {
+    setLoading(true); setError(null)
+    try { setIntel(await api.getMarketIntelligence()) }
+    catch (exc) { setError(exc instanceof Error ? exc.message : "Market məlumatı alınmadı") }
+    finally { setLoading(false) }
   }, [])
 
-  if (loading) {
-    return (
-      <div className="h-full overflow-y-auto bg-[#0d1117] p-4 lg:p-6">
-        <div className="animate-pulse space-y-4 max-w-6xl mx-auto">
-          <div className="h-6 w-48 bg-gray-800 rounded" />
-          <div className="grid grid-cols-4 gap-3">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-gray-800 rounded-xl" />)}
-          </div>
-          <div className="h-64 bg-gray-800 rounded-xl" />
-        </div>
+  useEffect(() => { load(); const timer = setInterval(load, 30000); return () => clearInterval(timer) }, [load])
+
+  const futures = intel?.futures?.items || []
+  const ratios = futures.map(row => row.long_short_ratio).filter((v): v is number => v != null)
+  const averageRatio = ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null
+  const funding = futures.map(row => row.funding_rate).filter((v): v is number => v != null)
+  const averageFunding = funding.length ? funding.reduce((a, b) => a + b, 0) / funding.length : null
+  const cards = [
+    ["BTC Dominance", intel?.btc_dominance?.value == null ? "N/A" : `${intel.btc_dominance.value.toFixed(2)}%`, intel?.btc_dominance],
+    ["ETH/BTC Ratio", intel?.prices?.eth_btc_ratio?.value?.toFixed(6) || "N/A", intel?.prices?.eth_btc_ratio],
+    ["Funding Sentiment", averageFunding == null ? "N/A" : `${averageFunding >= 0 ? "+" : ""}${(averageFunding * 100).toFixed(4)}%`, intel?.futures],
+    ["Long/Short Ratio", averageRatio?.toFixed(3) || "N/A", intel?.futures],
+  ] as const
+
+  return <div className="h-full overflow-y-auto bg-[#0d1117] p-4 lg:p-6">
+    <div className="max-w-7xl mx-auto space-y-5">
+      <div className="flex justify-between items-center">
+        <div><h1 className="text-lg font-semibold text-white flex items-center gap-2"><Radar className="w-5 h-5 text-purple-400"/>Market Radar</h1><p className="text-xs text-gray-500">Canonical real-time market intelligence</p></div>
+        <button onClick={load} disabled={loading} className="flex items-center gap-1 px-3 py-2 text-xs bg-gray-800 rounded text-gray-300 disabled:opacity-50"><RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`}/>Refresh</button>
       </div>
-    )
-  }
-
-  const ethBtcRatio = data?.eth_price && data?.btc_price
-    ? data.eth_price / data.btc_price
-    : null
-  const validFunding = fundingRates
-    .map((item) => item.funding_rate)
-    .filter((rate): rate is number => typeof rate === "number")
-  const avgFunding = validFunding.length
-    ? validFunding.reduce((sum, rate) => sum + rate, 0) / validFunding.length
-    : null
-  const fundingSentiment = avgFunding === null
-    ? "N/A"
-    : avgFunding > 0.0001 ? "LONG BIAS" : avgFunding < -0.0001 ? "SHORT BIAS" : "NEUTRAL"
-  const formatUsd = (value?: number) => {
-    if (typeof value !== "number") return "N/A"
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      notation: "compact",
-      maximumFractionDigits: 2,
-    }).format(value)
-  }
-
-  const items = [
-    { label: "BTC Dominance", value: typeof data?.btc_dominance === "number" ? `${data.btc_dominance.toFixed(1)}%` : "N/A", change: "Provider unavailable", icon: DollarSign, color: "text-orange-400", bg: "bg-orange-900/10", border: "border-orange-900/30" },
-    { label: "ETH/BTC Ratio", value: ethBtcRatio?.toFixed(4) ?? "N/A", change: "Live Binance prices", icon: ArrowUpDown, color: "text-blue-400", bg: "bg-blue-900/10", border: "border-blue-900/30" },
-    { label: "Funding Sentiment", value: fundingSentiment, change: avgFunding === null ? "N/A" : `${(avgFunding * 100).toFixed(4)}% avg`, icon: Activity, color: "text-yellow-400", bg: "bg-yellow-900/10", border: "border-yellow-900/30" },
-    { label: "Long/Short Ratio", value: "N/A", change: "Provider unavailable", icon: BarChart3, color: "text-gray-400", bg: "bg-gray-900/30", border: "border-gray-800" },
-  ]
-
-  return (
-    <div className="h-full overflow-y-auto bg-[#0d1117]">
-      <div className="max-w-7xl mx-auto p-4 lg:p-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
-              <Radar className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-white">Market Radar</h1>
-              <p className="text-xs text-gray-500">Real-time market intelligence & anomaly detection</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 flex items-center gap-1">
-              <Activity className="w-3 h-3" /> Live · 30s
-            </span>
-            <button onClick={() => window.location.reload()}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-md hover:bg-gray-700 transition-colors">
-              <RefreshCw className="w-3 h-3" /> Refresh
-            </button>
-          </div>
-        </div>
-
-        {/* Key Metrics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {items.map((item) => (
-            <div key={item.label} className={`p-4 rounded-xl border ${item.bg} ${item.border}`}>
-              <div className="flex items-center gap-1.5 mb-2">
-                <item.icon className={`w-4 h-4 ${item.color}`} />
-                <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{item.label}</span>
-              </div>
-              <div className={`text-lg font-bold font-mono ${item.color}`}>{item.value}</div>
-              <div className="text-[10px] text-gray-500 mt-0.5">{item.change}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Real-time Alerts */}
-        <div className="p-4 rounded-xl border border-yellow-900/30 bg-yellow-900/5">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-4 h-4 text-yellow-400" />
-            <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Real-time Alerts</h2>
-          </div>
-          <div className="space-y-2">
-            {alerts.map((alert, i) => (
-              <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-800/30 border border-gray-700/30">
-                <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 mt-1.5 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-gray-300">{alert}</p>
-                  <span className="text-[10px] text-gray-600">{(i % 5) + 1}m ago</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Market Depth Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Open Interest */}
-          <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
-            <div className="flex items-center gap-1.5 mb-3">
-              <BarChart3 className="w-4 h-4 text-blue-400" />
-              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Open Interest</h2>
-            </div>
-            <div className="space-y-2">
-              {openInterest.length > 0 ? openInterest.slice(0, 5).map((item) => (
-                <div key={item.symbol} className="flex items-center justify-between p-2 rounded-lg bg-gray-800/30">
-                  <span className="text-xs font-mono text-white">{item.symbol}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-gray-300">{formatUsd(item.open_interest_usd)}</span>
-                    <span className="text-[10px] text-gray-600">live</span>
-                  </div>
-                </div>
-              )) : <div className="text-xs text-gray-600 py-6 text-center">Open-interest data unavailable</div>}
-            </div>
-          </div>
-
-          {/* Liquidation Heatmap */}
-          <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
-            <div className="flex items-center gap-1.5 mb-3">
-              <Flame className="w-4 h-4 text-red-400" />
-              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Liquidation Clusters</h2>
-            </div>
-            <div className="py-8 text-center">
-              <div className="text-sm font-mono text-gray-500">N/A</div>
-              <div className="text-[10px] text-gray-600 mt-1">Real liquidation provider not configured</div>
-            </div>
-          </div>
-
-          {/* Whale Transactions */}
-          <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
-            <div className="flex items-center gap-1.5 mb-3">
-              <Wallet className="w-4 h-4 text-purple-400" />
-              <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Whale Transactions</h2>
-            </div>
-            <div className="space-y-2">
-              {whales.length > 0 ? whales.map((item, i) => {
-                const type = item.type || item.direction || "unknown"
-                return (
-                <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-gray-800/30">
-                  <div className={cn(
-                    "w-6 h-6 rounded flex items-center justify-center text-[9px] font-bold",
-                    type === "deposit" ? "bg-red-900/40 text-red-400" :
-                    type === "withdrawal" ? "bg-green-900/40 text-green-400" : "bg-blue-900/40 text-blue-400"
-                  )}>
-                    {type === "deposit" ? "↓" : type === "withdrawal" ? "↑" : "★"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-medium text-white">{item.symbol}</span>
-                      <span className="text-[10px] font-mono text-gray-300">{String(item.value ?? "N/A")}</span>
-                    </div>
-                    <div className="flex items-center gap-1 text-[9px] text-gray-500">
-                      <span>{String(item.amount ?? "N/A")}</span>
-                      <span>·</span>
-                      <span>{item.exchange || type}</span>
-                    </div>
-                  </div>
-                </div>
-              )}) : (
-                <div className="py-8 text-center">
-                  <div className="text-sm font-mono text-gray-500">N/A</div>
-                  <div className="text-[10px] text-gray-600 mt-1">Real whale provider not configured</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {error && <div className="p-3 border border-red-900 bg-red-950/30 text-red-300 text-xs">{error}</div>}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{cards.map(([label, value, meta]) =>
+        <div key={label} className="p-4 rounded-xl border border-gray-800 bg-gray-900/50"><div className="text-[10px] text-gray-500 uppercase">{label}</div><div className="text-lg font-bold font-mono text-white mt-2">{value}</div><MetaLine meta={meta}/></div>)}
       </div>
+      <section className="p-4 rounded-xl border border-yellow-900/30 bg-yellow-900/5">
+        <h2 className="text-xs text-yellow-400 uppercase flex items-center gap-2 mb-3"><AlertTriangle className="w-4 h-4"/>Real-time Alerts</h2>
+        {intel?.alerts?.length ? <div className="space-y-2">{intel.alerts.map((alert, i) => <div key={`${alert.type}-${alert.symbol}-${i}`} className="p-2 bg-gray-900/50 text-xs text-gray-300"><b>{alert.type.replaceAll("_", " ").toUpperCase()}</b> · {alert.symbol} · {alert.message}<div className="text-[9px] text-gray-600">{alert.source} · {updated(alert.last_updated)}</div></div>)}</div> : <div className="text-xs text-gray-500">Hazırda real hədləri keçən anomaliya aşkarlanmayıb.</div>}
+      </section>
+      <div className="grid lg:grid-cols-3 gap-4">
+        <section className="p-4 rounded-xl border border-gray-800 bg-gray-900/40"><h2 className="text-xs text-blue-400 flex gap-2 mb-3"><BarChart3 className="w-4 h-4"/>OPEN INTEREST</h2>{futures.length ? futures.map(row => <div key={row.symbol} className="flex justify-between text-xs py-1"><span>{row.symbol}</span><span className="font-mono">{money(row.open_interest_usd)}{row.oi_change != null ? ` (${row.oi_change > 0 ? "+" : ""}${row.oi_change}%)` : ""}</span></div>) : <p className="text-xs text-gray-500">N/A — {intel?.futures?.error_reason}</p>}<MetaLine meta={intel?.futures}/></section>
+        <section className="p-4 rounded-xl border border-gray-800 bg-gray-900/40"><h2 className="text-xs text-red-400 flex gap-2 mb-3"><Flame className="w-4 h-4"/>LIQUIDATION CLUSTERS</h2>{intel?.liquidations?.items?.length ? intel.liquidations.items.map((row, i) => <div key={i} className="flex justify-between text-xs py-1"><span>{row.symbol} {row.side}</span><span>{money(row.notional)} @ {money(row.price)}</span></div>) : <p className="text-xs text-gray-500">N/A — {intel?.liquidations?.error_reason || "Son axında klaster yoxdur"}</p>}<MetaLine meta={intel?.liquidations}/></section>
+        <section className="p-4 rounded-xl border border-gray-800 bg-gray-900/40"><h2 className="text-xs text-purple-400 flex gap-2 mb-3"><Wallet className="w-4 h-4"/>WHALE TRANSACTIONS</h2><p className="text-xs text-gray-500">N/A — {intel?.whale_transactions?.error_reason || "Provider konfiqurasiya edilməyib"}</p><MetaLine meta={intel?.whale_transactions}/></section>
+      </div>
+      {intel?.is_stale && <div className="text-xs text-amber-400 flex gap-2"><Activity className="w-4 h-4"/>Məlumat köhnədir; provider statusunu yoxlayın.</div>}
     </div>
-  )
+  </div>
 }

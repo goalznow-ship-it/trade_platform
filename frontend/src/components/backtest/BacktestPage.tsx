@@ -13,6 +13,11 @@ interface BacktestTrade {
   exit: number
   pnl: number
   risk_reward: number
+  fee: number
+  funding_fee: number
+  reason: string
+  score: number
+  holding_time: number
 }
 
 interface BacktestResult {
@@ -25,6 +30,13 @@ interface BacktestResult {
   avg_risk_reward: number
   final_balance: number
   trades: BacktestTrade[]
+  equity_curve: number[]
+  drawdown_curve: number[]
+  zero_trade_reason?: string | null
+  threshold?: number
+  mode?: string
+  funding_accounted?: boolean
+  provider_errors?: Record<string, string>
 }
 
 interface BacktestHistoryItem {
@@ -43,6 +55,7 @@ export function BacktestPage() {
   const [timeframe, setTimeframe] = useState("1h")
   const [balance, setBalance] = useState(10000)
   const [leverage, setLeverage] = useState(1)
+  const [mode, setMode] = useState("balanced")
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [history, setHistory] = useState<BacktestHistoryItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,7 +70,7 @@ export function BacktestPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.runBacktest(symbol, timeframe, 500, balance, leverage)
+      const res = await api.runBacktest(symbol, timeframe, 500, balance, leverage, mode)
       if (res?.error) throw new Error(res.error)
       setResult(res)
     } catch (err) {
@@ -98,7 +111,16 @@ export function BacktestPage() {
           <>
             {/* Controls */}
             <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 block">Mode</label>
+                  <select value={mode} onChange={(e) => setMode(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <option value="strict">Strict (70+)</option>
+                    <option value="balanced">Balanced (55+)</option>
+                    <option value="exploratory">Exploratory (45+)</option>
+                  </select>
+                </div>
                 <div>
                   <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 block">Symbol</label>
                   <select value={symbol} onChange={(e) => setSymbol(e.target.value)}
@@ -197,8 +219,22 @@ export function BacktestPage() {
 
                 {result.total_trades === 0 && (
                   <div className="p-3 rounded-lg border border-amber-900/50 bg-amber-950/20 text-xs text-amber-200">
-                    Engine uğurla işləyib, lakin seçilmiş 500 real şamda 70+ institusional bal alan giriş tapılmayıb.
-                    Symbol və ya timeframe-i dəyişərək yenidən yoxlayın.
+                    Trade yaranmadı: {result.zero_trade_reason || "səbəb müəyyən edilmədi"}.
+                    Rejim: {result.mode}, threshold: {result.threshold ?? "N/A"}.
+                  </div>
+                )}
+                {result.provider_errors && Object.keys(result.provider_errors).length > 0 && (
+                  <div className="p-3 rounded-lg border border-amber-900/50 bg-amber-950/20 text-xs text-amber-200">
+                    {Object.entries(result.provider_errors).map(([provider, reason]) => <div key={provider}>{provider}: {reason}</div>)}
+                  </div>
+                )}
+
+                {result.equity_curve?.length > 1 && (
+                  <div className="grid lg:grid-cols-2 gap-3">
+                    {[{label: "Equity Curve", values: result.equity_curve, color: "bg-blue-500"}, {label: "Drawdown Curve", values: result.drawdown_curve, color: "bg-red-500"}].map(chart => {
+                      const min = Math.min(...chart.values); const max = Math.max(...chart.values); const range = max - min || 1
+                      return <div key={chart.label} className="p-4 rounded-xl border border-gray-800 bg-gray-900/40"><h3 className="text-xs text-gray-400 mb-3">{chart.label}</h3><div className="h-28 flex items-end gap-px">{chart.values.map((v, i) => <div key={i} className={`flex-1 ${chart.color} opacity-70`} style={{height: `${Math.max(2, ((v - min) / range) * 100)}%`}} />)}</div></div>
+                    })}
                   </div>
                 )}
 
@@ -215,6 +251,10 @@ export function BacktestPage() {
                             <th className="text-right py-2 pr-2">Entry</th>
                             <th className="text-right py-2 pr-2">Exit</th>
                             <th className="text-right py-2 pr-2">PnL</th>
+                            <th className="text-right py-2 pr-2">Fee/Funding</th>
+                            <th className="text-right py-2 pr-2">Score</th>
+                            <th className="text-left py-2 pr-2">Reason</th>
+                            <th className="text-right py-2 pr-2">Hold</th>
                             <th className="text-right py-2">RR</th>
                           </tr>
                         </thead>
@@ -230,8 +270,12 @@ export function BacktestPage() {
                               <td className="py-1.5 pr-2 text-right font-mono">${t.entry?.toFixed(2) || 0}</td>
                               <td className="py-1.5 pr-2 text-right font-mono">${t.exit?.toFixed(2) || 0}</td>
                               <td className={cn("py-1.5 pr-2 text-right font-mono", (t.pnl || 0) >= 0 ? "text-green-400" : "text-red-400")}>
-                                {t.pnl ? `${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}%` : "0.00%"}
+                                {t.pnl != null ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "N/A"}
                               </td>
+                              <td className="py-1.5 pr-2 text-right font-mono">${t.fee?.toFixed(2) ?? "N/A"} / ${t.funding_fee?.toFixed(2) ?? "N/A"}</td>
+                              <td className="py-1.5 pr-2 text-right font-mono">{t.score?.toFixed(1) ?? "N/A"}</td>
+                              <td className="py-1.5 pr-2 text-left max-w-48 truncate">{t.reason || "N/A"}</td>
+                              <td className="py-1.5 pr-2 text-right font-mono">{t.holding_time != null ? `${t.holding_time}h` : "N/A"}</td>
                               <td className="py-1.5 text-right font-mono">{t.risk_reward?.toFixed(1) || "--"}</td>
                             </tr>
                           ))}

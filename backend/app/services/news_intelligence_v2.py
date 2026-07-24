@@ -20,6 +20,10 @@ class NewsIntelligenceEngine:
         "million", "billion", "institutional", "major holder",
     ]
 
+    SECURITY_KEYWORDS = ["hack", "exploit", "breach", "stolen", "attack", "vulnerability"]
+    ETF_KEYWORDS = ["etf", "exchange-traded fund", "spot bitcoin fund", "spot ether fund"]
+    EXCHANGE_KEYWORDS = ["binance", "coinbase", "kraken", "bybit", "listing", "delisting"]
+
     async def analyze_news_event(self, article: dict) -> dict:
         title = article.get("title", "")
         content = article.get("content", "") or title
@@ -41,8 +45,12 @@ class NewsIntelligenceEngine:
             event_type = "regulation"
         elif is_whale:
             event_type = "whale"
-        elif "hack" in text or "exploit" in text or "breach" in text:
+        elif any(kw in text for kw in self.SECURITY_KEYWORDS):
             event_type = "security"
+        elif any(kw in text for kw in self.ETF_KEYWORDS):
+            event_type = "etf"
+        elif any(kw in text for kw in self.EXCHANGE_KEYWORDS):
+            event_type = "exchange"
         elif "listing" in text or "delisting" in text:
             event_type = "listing"
         elif "partnership" in text or "collaboration" in text or "integrate" in text:
@@ -84,6 +92,7 @@ class NewsIntelligenceEngine:
             "asset_impact": asset_impact,
             "category": intelligence.get("category", "general"),
             "summary": intelligence.get("summary", title[:200]),
+            "summary_az": f"{article.get('source', 'Mənbə')} bildirir: {title}",
             "confidence": round(confidence, 1),
         }
 
@@ -95,6 +104,18 @@ class NewsIntelligenceEngine:
             analyzed.append(result)
         analyzed.sort(key=lambda x: x["impact_score"], reverse=True)
         return analyzed
+
+    async def scan_with_status(self, limit: int = 50) -> dict:
+        provider_result = await news_service.fetch_with_status(limit=limit)
+        analyzed = []
+        for article in provider_result["articles"]:
+            analyzed.append(await self.analyze_news_event(article))
+        analyzed.sort(key=lambda row: row.get("published_at", ""), reverse=True)
+        return {
+            **provider_result,
+            "articles": analyzed,
+            "count": len(analyzed),
+        }
 
 
 news_intelligence_engine = NewsIntelligenceEngine()

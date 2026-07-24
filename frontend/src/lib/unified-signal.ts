@@ -40,11 +40,13 @@ export interface UnifiedSignal {
     details: Record<string, unknown>
   }
   futures: {
-    funding_rate: number
-    funding_rate_8h: number
+    funding_rate: number | null
+    funding_rate_8h: number | null
     funding_pressure: string
-    open_interest: number
-    open_interest_usd: number
+    open_interest: number | null
+    open_interest_usd: number | null
+    oi_change?: number | null
+    volume?: number | null
   } | null
   market_structure: {
     trend: string
@@ -159,11 +161,13 @@ export function normalizeSignal(raw: Record<string, unknown>): UnifiedSignal {
       details,
     },
     futures: fut ? {
-      funding_rate: (fut.funding_rate as number) || 0,
-      funding_rate_8h: (fut.funding_rate_8h as number) || 0,
+      funding_rate: (fut.funding_rate as number) ?? null,
+      funding_rate_8h: (fut.funding_rate_8h as number) ?? null,
       funding_pressure: (fut.funding_pressure as string) || "neutral",
-      open_interest: (fut.open_interest as number) || 0,
-      open_interest_usd: (fut.open_interest_usd as number) || 0,
+      open_interest: (fut.open_interest as number) ?? null,
+      open_interest_usd: (fut.open_interest_usd as number) ?? null,
+      oi_change: (fut.oi_change as number) ?? null,
+      volume: (fut.volume as number) ?? null,
     } : null,
     market_structure: {
       trend: (ms.trend as string) || "unknown",

@@ -40,6 +40,13 @@ async def get_overview():
     return await market_service.get_market_overview()
 
 
+@router.get("/intelligence")
+async def get_market_intelligence():
+    """Provider-isolated canonical snapshot for Radar, Futures and Dashboard."""
+    from app.services.market_intelligence import market_intelligence
+    return await market_intelligence.snapshot()
+
+
 @router.get("/search")
 async def search(q: str = Query(min_length=1)):
     return await market_service.search_symbols(q)

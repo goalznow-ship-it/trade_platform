@@ -29,7 +29,23 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
     headers["Content-Type"] = "application/json"
   }
 
-  const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers,
+      signal: options?.signal || controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Sorğu 15 saniyə ərzində cavab vermədi")
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
   if (res.status === 401 && typeof window !== "undefined" && !retried && endpoint !== "/api/v1/auth/refresh") {
     refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null })
     const accessToken = await refreshPromise
@@ -80,6 +96,7 @@ export const api = {
     request<any>(`/api/v1/market/ticker/${encodeURIComponent(symbol)}`),
 
   getOverview: () => request<any>("/api/v1/market/overview"),
+  getMarketIntelligence: () => request<any>("/api/v1/market/intelligence"),
 
   getFearGreed: () => request<any>("/api/v1/market/fear-greed"),
 
@@ -158,10 +175,10 @@ export const api = {
   getDailyPnL: () => request<any[]>("/api/v1/portfolio/daily-pnl"),
 
   // Backtest
-  runBacktest: (symbol: string, timeframe = "1h", limit = 500, initialBalance = 10000, leverage = 1) =>
+  runBacktest: (symbol: string, timeframe = "1h", limit = 500, initialBalance = 10000, leverage = 1, mode = "balanced") =>
     request<any>(
       `/api/v1/backtest/run?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`
-      + `&limit=${limit}&initial_balance=${initialBalance}&leverage=${leverage}`,
+      + `&limit=${limit}&initial_balance=${initialBalance}&leverage=${leverage}&mode=${mode}`,
     ),
 
   saveBacktest: (data: any) =>
@@ -174,10 +191,7 @@ export const api = {
   // News
   getNews: () => request<any[]>("/api/v1/news/latest"),
 
-  getNewsIntelligence: (symbol?: string) => {
-    const q = symbol ? `?symbol=${symbol}` : ""
-    return request<any>("/api/v1/enterprise/news-intelligence" + q)
-  },
+  getNewsIntelligence: () => request<any>("/api/v1/news/intelligence?limit=50"),
 
   // Watchlist
   getWatchlists: () => request<any[]>("/api/v1/watchlists"),

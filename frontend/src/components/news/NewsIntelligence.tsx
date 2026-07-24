@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { cn, formatTime } from "@/lib/utils"
 import {
@@ -14,6 +14,7 @@ interface NewsItem {
   headline?: string
   source?: string
   timestamp?: number | string
+  published_at?: string
   impact?: string
   sentiment?: string
   score?: number
@@ -21,7 +22,9 @@ interface NewsItem {
   category?: string
   type?: string
   summary?: string
+  summary_az?: string
   assets?: string[]
+  affected_assets?: string[]
   url?: string
 }
 
@@ -29,23 +32,30 @@ export function NewsIntelligence() {
   const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>("all")
+  const [error, setError] = useState<string | null>(null)
+  const [providerErrors, setProviderErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    async function load() {
+  const load = useCallback(async () => {
       setLoading(true)
+      setError(null)
       try {
         const data = await api.getNewsIntelligence()
-        setNews(Array.isArray(data) ? data : [])
-      } catch {
+        setNews(Array.isArray(data?.articles) ? data.articles : [])
+        setProviderErrors(data?.provider_errors || {})
+        if (!data?.articles?.length) setError(data?.error_reason || "Provider-lər xəbər qaytarmadı")
+      } catch (exc) {
         setNews([])
+        setError(exc instanceof Error ? exc.message : "Xəbərlər alınmadı")
       } finally {
         setLoading(false)
       }
-    }
+  }, [])
+
+  useEffect(() => {
     load()
     const interval = setInterval(load, 120000)
     return () => clearInterval(interval)
-  }, [])
+  }, [load])
 
   const categories = [
     { id: "all", label: "All News", icon: Newspaper },
@@ -75,10 +85,14 @@ export function NewsIntelligence() {
             <h1 className="text-lg font-semibold text-white">News Intelligence</h1>
             <p className="text-xs text-gray-500 mt-0.5">AI-powered news monitoring with impact analysis</p>
           </div>
-          <button onClick={() => window.location.reload()} className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-md hover:bg-gray-700 transition-colors">
+          <button onClick={load} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50">
             <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} /> Refresh
           </button>
         </div>
+        {(error || Object.keys(providerErrors).length > 0) && <div className="p-3 rounded border border-amber-900/40 bg-amber-950/20 text-xs text-amber-300">
+          {error && <div>{error}</div>}
+          {Object.entries(providerErrors).map(([provider, reason]) => <div key={provider}>{provider}: {reason}</div>)}
+        </div>}
 
         {/* Category Filters */}
         <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg border border-gray-800 bg-gray-900/50">
@@ -125,6 +139,8 @@ export function NewsIntelligence() {
               const isNegative = impact === "negative" || impact === "bearish"
               const score = item.score || item.impact_score || 0
               const cat = item.category || item.type || "general"
+              const itemTime = item.published_at || item.timestamp
+              const assets = item.affected_assets || item.assets || []
 
               return (
                 <div key={i} className="p-4 rounded-lg border border-gray-800 bg-gray-900/30 hover:border-gray-700 transition-colors">
@@ -144,11 +160,11 @@ export function NewsIntelligence() {
                           {item.source && (
                             <div className="flex items-center gap-1 mt-0.5">
                               <span className="text-[10px] text-gray-600">{item.source}</span>
-                              {item.timestamp && (
+                              {itemTime && (
                                 <>
                                   <span className="text-gray-700">·</span>
                                   <span className="text-[10px] text-gray-600">
-                                    {formatTime(typeof item.timestamp === "number" ? item.timestamp : Date.parse(item.timestamp) / 1000)}
+                                    {formatTime(typeof itemTime === "number" ? itemTime : Date.parse(itemTime) / 1000)}
                                   </span>
                                 </>
                               )}
@@ -170,8 +186,8 @@ export function NewsIntelligence() {
                       </div>
 
                       {/* Summary */}
-                      {item.summary && (
-                        <p className="text-xs text-gray-400 mt-1.5 line-clamp-2 leading-relaxed">{item.summary}</p>
+                      {(item.summary_az || item.summary) && (
+                        <p className="text-xs text-gray-400 mt-1.5 line-clamp-2 leading-relaxed">{item.summary_az || item.summary}</p>
                       )}
 
                       {/* Tags & Links */}
@@ -187,9 +203,9 @@ export function NewsIntelligence() {
                           {cat.toUpperCase()}
                         </span>
 
-                        {item.assets && Array.isArray(item.assets) && item.assets.length > 0 && (
+                        {assets.length > 0 && (
                           <div className="flex gap-1">
-                            {item.assets.slice(0, 3).map((a: string) => (
+                            {assets.slice(0, 3).map((a: string) => (
                               <span key={a} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{a}</span>
                             ))}
                           </div>
@@ -226,5 +242,3 @@ export function NewsIntelligence() {
     </div>
   )
 }
-
-

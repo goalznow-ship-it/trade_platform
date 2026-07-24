@@ -12,16 +12,8 @@ import {
   displayDate, isStale, isTradeReady,
 } from "@/lib/unified-signal"
 
-interface FundingItem {
-  symbol: string
-  funding_rate?: number
-  price?: number
-  change_percent?: number
-}
-
 export function FuturesDashboard() {
   const [data, setData] = useState<UnifiedSignal[]>([])
-  const [fundingData, setFundingData] = useState<FundingItem[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<string>("")
 
@@ -29,31 +21,34 @@ export function FuturesDashboard() {
     async function load() {
       setLoading(true)
       try {
-        const [scanResponse, fundingResponse] = await Promise.all([
+        const [scanResponse, marketIntel] = await Promise.all([
           api.institutionalScan(0, 30) as Promise<{ signals?: Record<string, unknown>[] }>,
-          api.getFundingRates(30) as Promise<{ funding_rates?: FundingItem[] }>,
+          api.getMarketIntelligence(),
         ])
         const rawSignals = Array.isArray(scanResponse?.signals) ? scanResponse.signals : []
         const normalized = rawSignals.map(normalizeSignal)
-        const funding = Array.isArray(fundingResponse?.funding_rates)
-          ? fundingResponse.funding_rates
+        const funding = Array.isArray(marketIntel?.futures?.items)
+          ? marketIntel.futures.items
           : []
-        const fundingBySymbol = new Map<string, number | undefined>(
-          funding.map((item) => [item.symbol, item.funding_rate]),
+        const futuresBySymbol = new Map<string, any>(
+          funding.map((item: any) => [item.symbol.replace("/", ""), item]),
         )
         setData(normalized.map((s) => ({
           ...s,
           // enrich with funding from dedicated endpoint
-          futures: s.futures ? {
-            ...s.futures,
-            funding_rate: fundingBySymbol.get(s.symbol) ?? s.futures.funding_rate,
-          } : null,
+          futures: {
+            funding_rate: futuresBySymbol.get(s.symbol.replace("/", ""))?.funding_rate ?? null,
+            funding_rate_8h: futuresBySymbol.get(s.symbol.replace("/", ""))?.funding_rate ?? null,
+            funding_pressure: s.futures?.funding_pressure || "neutral",
+            open_interest: futuresBySymbol.get(s.symbol.replace("/", ""))?.open_interest ?? null,
+            open_interest_usd: futuresBySymbol.get(s.symbol.replace("/", ""))?.open_interest_usd ?? null,
+            oi_change: futuresBySymbol.get(s.symbol.replace("/", ""))?.oi_change ?? null,
+            volume: futuresBySymbol.get(s.symbol.replace("/", ""))?.volume ?? null,
+          },
         })))
-        setFundingData(funding)
         setLastUpdated(new Date().toISOString())
       } catch {
         setData([])
-        setFundingData([])
       } finally {
         setLoading(false)
       }
@@ -82,10 +77,15 @@ export function FuturesDashboard() {
   const tradeReady = data.filter(isTradeReady)
   const longSignals = tradeReady.filter((d) => d.direction === "long")
   const shortSignals = tradeReady.filter((d) => d.direction === "short")
-  const highConf = tradeReady.filter((d) => d.confidence > 75)
+  const watchlist = data.filter((d) => d.direction !== "neutral" && d.confidence >= 50 && d.confidence < 70)
+  const waiting = data.filter((d) => d.direction === "neutral" || d.confidence < 50)
+  const highConf = tradeReady.filter((d) => d.confidence >= 80)
   const stale = isStale(lastUpdated, 120)
 
-  const sortedByFunding = [...data].sort(
+  const fundingExtremes = data.filter((item) =>
+    item.futures?.funding_rate != null && Math.abs(item.futures.funding_rate) >= 0.0005
+  )
+  const sortedByFunding = [...fundingExtremes].sort(
     (a, b) => Math.abs(b.futures?.funding_rate || 0) - Math.abs(a.futures?.funding_rate || 0),
   )
   const sortedByConfidence = [...tradeReady].sort(
@@ -132,7 +132,7 @@ export function FuturesDashboard() {
             <div className="flex items-center gap-1 text-xs text-yellow-400 mb-1">
               <Flame className="w-3.5 h-3.5" /> Funding Extremes
             </div>
-            <div className="text-2xl font-bold text-white">{sortedByFunding.filter((d) => Math.abs(d.futures?.funding_rate || 0) > 0.005).length}</div>
+            <div className="text-2xl font-bold text-white">{fundingExtremes.length}</div>
             <div className="text-[10px] text-gray-500 mt-0.5">Top 8 below</div>
           </div>
           <div className="p-4 rounded-xl border border-blue-900/30 bg-blue-900/10">
@@ -140,7 +140,7 @@ export function FuturesDashboard() {
               <Zap className="w-3.5 h-3.5" /> High Confidence
             </div>
             <div className="text-2xl font-bold text-white">{highConf.length}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">75%+ confidence</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">80%+ · Watchlist {watchlist.length} · WAIT {waiting.length}</div>
           </div>
         </div>
 
@@ -150,9 +150,10 @@ export function FuturesDashboard() {
             Funding Rate Extremes
           </h2>
           <div className="space-y-1.5">
+            {sortedByFunding.length === 0 && <div className="text-xs text-gray-600 py-6 text-center">Real ekstremal funding aşkarlanmayıb</div>}
             {sortedByFunding.slice(0, 8).map((item, i) => {
               const fr = item.futures?.funding_rate
-              const isExtreme = typeof fr === "number" && Math.abs(fr) > 0.01
+              const isExtreme = typeof fr === "number" && Math.abs(fr) >= 0.0005
               return (
                 <div key={i}
                   className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20 hover:bg-gray-800/40 transition-colors">
