@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, AlertTriangle, Target, Shield } from "lucide-react"
+import { TrendingUp, TrendingDown, AlertTriangle, Target, Shield, Info } from "lucide-react"
 
 interface Props {
   scenarios: Record<string, unknown> | null
@@ -25,29 +25,54 @@ export function SKHYScenarioPanel({ scenarios }: Props) {
 
   return (
     <div className="border-b border-gray-800/60 p-3">
-      <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Scenarios</div>
+      <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Ssenarilər</div>
       <div className="space-y-2">
         <ScenarioCard
-          title="Main Scenario"
+          title="Əsas Ssenari"
           scenario={main}
           color={main?.direction === "LONG" ? "green" : "red"}
           icon={main?.direction === "LONG" ? TrendingUp : TrendingDown}
         />
         <ScenarioCard
-          title="Alternative"
+          title="Alternativ Ssenari"
           scenario={alt}
           color={alt?.direction === "LONG" ? "green" : "red"}
           icon={TrendingUp}
           muted
         />
         <ScenarioCard
-          title="Risk / Fakeout"
+          title="Risk / Yalançı Çıxış"
           scenario={risk}
           color="yellow"
           icon={AlertTriangle}
           muted
         />
       </div>
+
+      {/* Pattern izahları */}
+      {main && (
+        <div className="mt-3 pt-2 border-t border-gray-800/40">
+          <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-1">
+            <Info className="w-2.5 h-2.5" />
+            <span>Pattern izahı:</span>
+          </div>
+          <div className="text-[9px] text-gray-500 leading-relaxed">
+            <strong className="text-gray-400">BOS</strong> (Break of Structure) - struktur dəyişikliyi, trendin istiqamət dəyişdirdiyini göstərir.
+          </div>
+          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+            <strong className="text-gray-400">CHoCH</strong> (Change of Character) - xarakter dəyişikliyi, smart money-nin yeni istiqamətə keçdiyini göstərir.
+          </div>
+          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+            <strong className="text-gray-400">FVG</strong> (Fair Value Gap) - qiymət boşluğu, adətən doldurulmağa meyllidir.
+          </div>
+          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+            <strong className="text-gray-400">OB</strong> (Order Block) - smart money-nin əmr buraxdığı zona.
+          </div>
+          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+            <strong className="text-gray-400">Likvidite</strong> - stop-loss və marjanın toplandığı hədəf zona.
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -67,6 +92,7 @@ function ScenarioCard({
   const c = colorClasses[color] || colorClasses.green
   const dir = strVal(scenario.direction)
   const prob = numVal(scenario.probability)
+  const dirLabel = dir === "LONG" ? "ALIŞ" : dir === "SHORT" ? "SATIŞ" : dir
 
   return (
     <div className={cn("rounded border p-2", c.border, c.bg, muted && "opacity-70")}>
@@ -76,26 +102,32 @@ function ScenarioCard({
           <span className="text-[11px] font-semibold text-gray-300">{title}</span>
         </div>
         <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-mono", c.badge)}>
-          {dir} {prob}%
+          {dirLabel} {prob}%
         </span>
       </div>
       <div className="text-[10px] text-gray-400 space-y-0.5">
         {scenario.activation_trigger != null && strVal(scenario.activation_trigger) && (
           <div className="flex items-start gap-1">
             <Target className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
-            <span>Trigger: {strVal(scenario.activation_trigger)}</span>
+            <span>Aktivləşmə: {strVal(scenario.activation_trigger)}</span>
           </div>
         )}
         {Array.isArray(scenario.target_zones) && (
           <div className="flex items-center gap-1">
-            <span className="text-gray-600">Targets:</span>
+            <span className="text-gray-600">Hədəflər:</span>
             <span className="font-mono text-gray-300">{(scenario.target_zones as string[]).join(" → ")}</span>
           </div>
         )}
         {scenario.invalidation != null && strVal(scenario.invalidation) && (
           <div className="flex items-start gap-1">
             <Shield className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
-            <span>Invalidation: {strVal(scenario.invalidation)}</span>
+            <span>Ləğvetmə: {strVal(scenario.invalidation)}</span>
+          </div>
+        )}
+        {Array.isArray(scenario.supporting_reasons) && (
+          <div className="flex items-start gap-1">
+            <span className="text-gray-600">Səbəblər:</span>
+            <span className="text-gray-300">{(scenario.supporting_reasons as string[]).slice(0, 2).join(", ")}</span>
           </div>
         )}
       </div>

@@ -232,7 +232,7 @@ export default function SkhyTerminalPage() {
           <div className="w-96 border-l border-gray-800/60 flex flex-col overflow-hidden bg-gray-950/30">
             <div className="flex-1 overflow-y-auto">
               <SKHYTriggerPanel triggers={triggers} scores={scores} />
-              <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} />
+              <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis} />
               <SKHYScenarioPanel scenarios={scenarios} />
             </div>
           </div>

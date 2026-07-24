@@ -32,6 +32,8 @@ class SkhyAnalysisEngine:
         triggers = self._compute_triggers(tf_analysis, alignment, scores, snapshot)
         patterns = self._detect_patterns(ohlcv_data)
         support_resistance = self._compute_support_resistance(ohlcv_data, snapshot)
+        elliott_wave = self._detect_elliott_wave(ohlcv_data)
+        fibonacci = self._compute_fibonacci_levels(ohlcv_data, snapshot)
 
         return {
             "symbol": "SKHYUSDT",
@@ -45,6 +47,8 @@ class SkhyAnalysisEngine:
             "triggers": triggers,
             "patterns": patterns,
             "support_resistance": support_resistance,
+            "elliott_wave": elliott_wave,
+            "fibonacci": fibonacci,
             "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers),
         }
 
@@ -345,39 +349,39 @@ class SkhyAnalysisEngine:
         short_conditions = []
 
         if h4_trend in ("bullish", "neutral"):
-            long_conditions.append("4H structure supports longs")
+            long_conditions.append("4H strukturu alışı dəstəkləyir")
         else:
-            long_conditions.append("4H trend bearish - WAIT for reversal confirmation")
+            long_conditions.append("4H trendi aşağı - təsdiq üçün GÖZLƏ")
 
         if h1_trend in ("bullish", "neutral"):
-            long_conditions.append("1H momentum favors longs")
+            long_conditions.append("1H momentum alışı dəstəkləyir")
         else:
-            long_conditions.append("1H bearish - need flip")
+            long_conditions.append("1H aşağı trenddə - dönüş gözlənilir")
 
         if res_1h:
-            long_conditions.append(f"1H candle close above ${long_trigger_price}")
-        long_conditions.append("Volume 1.5x above average on breakout candle")
-        long_conditions.append("OI increases on breakout")
+            long_conditions.append(f"1H şamı ${long_trigger_price} üzərində bağlanmalı")
+        long_conditions.append("Partlayış şamında həcm 1.5x ortalamadan yuxarı")
+        long_conditions.append("Partlayışda OI artmalı")
         taker = snapshot.get("taker_buy_sell_ratio", {})
         if taker.get("buy_sell_ratio", 1) < 1.0:
-            long_conditions.append("Taker buy ratio strengthens above 1.0")
+            long_conditions.append("Taker alış nisbəti 1.0 üzərində güclənməlidir")
 
         if h4_trend in ("bearish", "neutral"):
-            short_conditions.append("4H structure supports shorts")
+            short_conditions.append("4H strukturu satışı dəstəkləyir")
         else:
-            short_conditions.append("4H trend bullish - WAIT for reversal")
+            short_conditions.append("4H trendi yuxarı - dönüş üçün GÖZLƏ")
 
         if h1_trend in ("bearish", "neutral"):
-            short_conditions.append("1H momentum favors shorts")
+            short_conditions.append("1H momentum satışı dəstəkləyir")
         else:
-            short_conditions.append("1H bullish - need flip")
+            short_conditions.append("1H yuxarı trenddə - dönüş gözlənilir")
 
         if sup_1h:
-            short_conditions.append(f"1H candle close below ${short_trigger_price}")
-        short_conditions.append("Volume 1.5x above average on breakdown candle")
-        short_conditions.append("OI increases on breakdown")
+            short_conditions.append(f"1H şamı ${short_trigger_price} altında bağlanmalı")
+        short_conditions.append("Qırılma şamında həcm 1.5x ortalamadan yuxarı")
+        short_conditions.append("Qırılmada OI artmalı")
         if taker.get("buy_sell_ratio", 1) > 1.0:
-            short_conditions.append("Taker sell ratio strengthens above 1.0")
+            short_conditions.append("Taker satış nisbəti 1.0 üzərində güclənməlidir")
 
         bullish_invalidation = round(close_1h * 0.98, 2) if close_1h else 0
         bearish_invalidation = round(close_1h * 1.02, 2) if close_1h else 0
@@ -625,6 +629,97 @@ class SkhyAnalysisEngine:
             "distance_to_resistance": round(nearest_resistance - price, 2) if price else 0,
             "liquidity_above": [{"price": round(h, 2), "strength": 2} for h in sorted(set(round(h, 1) for h in all_highs[-10:]), reverse=True)[:5]],
             "liquidity_below": [{"price": round(l, 2), "strength": 2} for l in sorted(set(round(l, 1) for l in all_lows[-10:]))[:5]],
+        }
+
+    def _detect_elliott_wave(self, ohlcv_data: dict) -> dict:
+        data_1h = ohlcv_data.get("1h", [])
+        if len(data_1h) < 100:
+            return {"status": "insufficient_data", "waves": []}
+
+        closes = [d["close"] for d in data_1h]
+        highs = [d["high"] for d in data_1h]
+        lows = [d["low"] for d in data_1h]
+
+        waves = []
+        i = 0
+        swing_threshold = 0.015
+        while i < len(closes) - 20:
+            if i == 0:
+                i += 10
+                continue
+            local_high = max(highs[max(0,i-10):i+10])
+            local_low = min(lows[max(0,i-10):i+10])
+            local_high_idx = highs.index(local_high) if local_high in highs else i
+            local_low_idx = lows.index(local_low) if local_low in lows else i
+            if local_high_idx > local_low_idx:
+                waves.append({"type": "wave_up", "start": local_low, "end": local_high, "index": local_high_idx})
+            else:
+                waves.append({"type": "wave_down", "start": local_high, "end": local_low, "index": local_low_idx})
+            i += 10
+            if len(waves) >= 8:
+                break
+
+        impulse_count = 0
+        corrective_count = 0
+        for w in waves:
+            move_pct = abs(w["end"] - w["start"]) / w["start"]
+            if move_pct > swing_threshold * 2:
+                impulse_count += 1
+            else:
+                corrective_count += 1
+
+        wave_direction = "impulsive_up" if impulse_count > corrective_count * 1.5 else "impulsive_down" if corrective_count > impulse_count * 1.5 else "corrective"
+        completion = min(impulse_count * 12.5, 100) if waves else 0
+
+        return {
+            "status": "detected" if len(waves) >= 5 else "forming",
+            "waves": waves[-8:],
+            "impulse_count": impulse_count,
+            "corrective_count": corrective_count,
+            "wave_direction": wave_direction,
+            "completion": completion,
+            "description_az": "Yüksələn impuls dalğası" if wave_direction == "impulsive_up" else "Enən impuls dalğası" if wave_direction == "impulsive_down" else "Korrektiv hərəkət",
+        }
+
+    def _compute_fibonacci_levels(self, ohlcv_data: dict, snapshot: dict) -> dict:
+        data_1h = ohlcv_data.get("1h", [])
+        if len(data_1h) < 30:
+            return {"status": "insufficient_data"}
+        recent = data_1h[-50:]
+        high = max(d["high"] for d in recent)
+        low = min(d["low"] for d in recent)
+        range_price = high - low
+        if range_price <= 0:
+            return {"status": "insufficient_range"}
+        price = snapshot.get("ticker", {}).get("price", 0) or recent[-1]["close"]
+        levels = {}
+        for level in [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.414, 1.618, 2.0, 2.272, 2.618, 3.618]:
+            val = high - range_price * level
+            levels[str(level)] = round(val, 2)
+        extension_levels = {}
+        for ext in [0.382, 0.618, 1.0, 1.272, 1.414, 1.618, 2.0, 2.272, 2.618]:
+            if price > high:
+                ext_val = high + range_price * ext
+            elif price < low:
+                ext_val = low - range_price * ext
+            else:
+                ext_val = high + range_price * ext
+            extension_levels[str(ext)] = round(ext_val, 2)
+
+        nearest_support_fib = max(v for v in levels.values() if v < price) if any(v < price for v in levels.values()) else low
+        nearest_resistance_fib = min(v for v in levels.values() if v > price) if any(v > price for v in levels.values()) else high
+
+        return {
+            "status": "calculated",
+            "high": round(high, 2),
+            "low": round(low, 2),
+            "range": round(range_price, 2),
+            "retracement_levels": levels,
+            "extension_levels": extension_levels,
+            "nearest_support_fib": round(nearest_support_fib, 2),
+            "nearest_resistance_fib": round(nearest_resistance_fib, 2),
+            "current_price_zone": "oversold_fib" if price <= low + range_price * 0.236 else "overbought_fib" if price >= high - range_price * 0.236 else "middle_fib",
+            "description_az": f"Qiymət Fib 0.618-ə yaxınlaşır alış zonası" if price <= low + range_price * 0.382 else f"Qiymət Fib 0.618-dən yuxarı satış zonası" if price >= high - range_price * 0.382 else "Qiymət Fib orta zonasında",
         }
 
     def _generate_explanation(self, tf_analysis: dict, alignment: dict, scores: dict, triggers: dict) -> str:
