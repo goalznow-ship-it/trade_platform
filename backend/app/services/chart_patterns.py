@@ -586,6 +586,222 @@ class ChartPatternEngine:
                             forming.append(patterns[-1])
                         break
 
+        # Triple Top
+        if len(swing_highs) >= 6:
+            for i in range(len(swing_highs) - 5):
+                tops = swing_highs[i:i + 3]
+                if len(tops) < 3:
+                    continue
+                p0, p1, p2 = tops
+                d01 = abs(p0["price"] - p1["price"]) / max(p0["price"], p1["price"]) * 100
+                d12 = abs(p1["price"] - p2["price"]) / max(p1["price"], p2["price"]) * 100
+                if d01 < 2 and d12 < 2:
+                    valley1 = min(lows[p0["index"]:p1["index"] + 1]) if p1["index"] > p0["index"] else 0
+                    valley2 = min(lows[p1["index"]:p2["index"] + 1]) if p2["index"] > p1["index"] else 0
+                    neckline = max(valley1, valley2)
+                    target = max(p0["price"], p1["price"], p2["price"]) - (max(p0["price"], p1["price"], p2["price"]) - neckline) * 1.5
+                    patterns.append({
+                        "name": "Triple Top",
+                        "type": "bearish",
+                        "signal": "reversal_down",
+                        "strength": "strong",
+                        "tops": [round(p["price"], 4) for p in tops],
+                        "neckline": round(neckline, 4),
+                        "target": round(target, 4),
+                        "current_price": round(current_price, 4),
+                        "projected_direction": "short",
+                        "confidence": 85,
+                        "entry_trigger": f"Break below neckline at {neckline:.4f}",
+                        "invalidation": f"Price closes above {max(p0['price'], p1['price'], p2['price']):.4f}",
+                        "breakout_confirm": current_price <= neckline,
+                        "measured_move": round(max(p0["price"], p1["price"], p2["price"]) - neckline, 4),
+                        "is_forming": current_price >= neckline * 0.98,
+                    })
+                    if patterns[-1]["is_forming"]:
+                        forming.append(patterns[-1])
+                    break
+
+        # Triple Bottom
+        if len(swing_lows) >= 6:
+            for i in range(len(swing_lows) - 5):
+                bottoms = swing_lows[i:i + 3]
+                if len(bottoms) < 3:
+                    continue
+                p0, p1, p2 = bottoms
+                d01 = abs(p0["price"] - p1["price"]) / max(p0["price"], p1["price"]) * 100
+                d12 = abs(p1["price"] - p2["price"]) / max(p1["price"], p2["price"]) * 100
+                if d01 < 2 and d12 < 2:
+                    peak1 = max(highs[p0["index"]:p1["index"] + 1]) if p1["index"] > p0["index"] else 0
+                    peak2 = max(highs[p1["index"]:p2["index"] + 1]) if p2["index"] > p1["index"] else 0
+                    neckline = min(peak1, peak2)
+                    target = neckline + (neckline - min(p0["price"], p1["price"], p2["price"])) * 1.5
+                    patterns.append({
+                        "name": "Triple Bottom",
+                        "type": "bullish",
+                        "signal": "reversal_up",
+                        "strength": "strong",
+                        "bottoms": [round(p["price"], 4) for p in bottoms],
+                        "neckline": round(neckline, 4),
+                        "target": round(target, 4),
+                        "current_price": round(current_price, 4),
+                        "projected_direction": "long",
+                        "confidence": 85,
+                        "entry_trigger": f"Break above neckline at {neckline:.4f}",
+                        "invalidation": f"Price closes below {min(p0['price'], p1['price'], p2['price']):.4f}",
+                        "breakout_confirm": current_price >= neckline,
+                        "measured_move": round(neckline - min(p0["price"], p1["price"], p2["price"]), 4),
+                        "is_forming": current_price <= neckline * 1.02,
+                    })
+                    if patterns[-1]["is_forming"]:
+                        forming.append(patterns[-1])
+                    break
+
+        # Diamond Top (broadening top with converging ends)
+        if len(swing_highs) >= 4 and len(swing_lows) >= 4:
+            recent_sh = swing_highs[-4:]
+            recent_sl = swing_lows[-4:]
+            sh_line = fit_line(recent_sh)
+            sl_line = fit_line(recent_sl)
+            if sh_line and sl_line and sh_line["slope"] < 0 and sl_line["slope"] > 0:
+                sh_prices = [p["price"] for p in recent_sh]
+                sl_prices = [p["price"] for p in recent_sl]
+                if max(sh_prices) > max(sl_prices) and min(sh_prices) < min(sl_prices):
+                    height = max(sh_prices) - min(sl_prices)
+                    target = current_price - height * 0.5
+                    patterns.append({
+                        "name": "Diamond Top",
+                        "type": "bearish",
+                        "signal": "reversal_down",
+                        "strength": "moderate",
+                        "target": round(target, 4),
+                        "current_price": round(current_price, 4),
+                        "projected_direction": "short",
+                        "confidence": 65,
+                        "entry_trigger": "Break below diamond support",
+                        "invalidation": "Price closes above diamond resistance",
+                        "breakout_confirm": current_price < recent_sl[-1]["price"],
+                        "measured_move": round(height, 4),
+                        "is_forming": True,
+                    })
+                    forming.append(patterns[-1])
+
+        # Broadening Formation (expanding range)
+        if len(swing_highs) >= 3 and len(swing_lows) >= 3:
+            recent_sh = swing_highs[-3:]
+            recent_sl = swing_lows[-3:]
+            sh_line = fit_line(recent_sh)
+            sl_line = fit_line(recent_sl)
+            if sh_line and sl_line and sh_line["slope"] > 0.03 and sl_line["slope"] < -0.03:
+                height = recent_sh[-1]["price"] - recent_sl[-1]["price"]
+                patterns.append({
+                    "name": "Broadening Formation",
+                    "type": "neutral",
+                    "signal": "volatility_expansion",
+                    "strength": "moderate",
+                    "current_price": round(current_price, 4),
+                    "projected_direction": "neutral",
+                    "confidence": 50,
+                    "entry_trigger": "Wait for range breakout",
+                    "invalidation": "Range contraction",
+                    "breakout_confirm": False,
+                    "measured_move": round(height, 4),
+                    "is_forming": True,
+                })
+                forming.append(patterns[-1])
+
+        # ABCD Pattern (harmonic leg)
+        if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+            for i in range(min(len(swing_highs), len(swing_lows)) - 1):
+                if i + 1 >= len(swing_highs) or i + 1 >= len(swing_lows):
+                    break
+                x = swing_lows[i] if swing_lows[i]["index"] < swing_highs[i]["index"] else swing_highs[i]
+                a = swing_highs[i] if x == swing_lows[i] else swing_lows[i]
+                b = swing_lows[i + 1] if a["type"] == "up" else swing_highs[i + 1]
+                if i + 2 < len(swing_highs) and i + 2 < len(swing_lows):
+                    c = swing_highs[i + 2] if b["type"] == "up" else swing_lows[i + 2]
+                    leg_ab = abs(a["price"] - b["price"])
+                    leg_bc = abs(b["price"] - c["price"])
+                    if leg_ab > 0 and leg_bc / leg_ab > 0.382 and leg_bc / leg_ab < 0.886:
+                        if c["price"] > a["price"]:
+                            target = c["price"] + leg_ab
+                            direction = "long"
+                        else:
+                            target = c["price"] - leg_ab
+                            direction = "short"
+                        patterns.append({
+                            "name": "ABCD Pattern",
+                            "type": "bullish" if direction == "long" else "bearish",
+                            "signal": "harmonic_completion",
+                            "strength": "moderate",
+                            "point_a": round(a["price"], 4),
+                            "point_b": round(b["price"], 4),
+                            "point_c": round(c["price"], 4),
+                            "target": round(target, 4),
+                            "current_price": round(current_price, 4),
+                            "projected_direction": direction,
+                            "confidence": 70,
+                            "entry_trigger": f"Entry at {c['price']:.4f} with AB=CD completion",
+                            "invalidation": f"Price breaks beyond {b['price']:.4f}",
+                            "breakout_confirm": current_price > c["price"] if direction == "long" else current_price < c["price"],
+                            "measured_move": round(leg_ab, 4),
+                            "is_forming": True,
+                        })
+                        forming.append(patterns[-1])
+                        break
+
+        # Wolfe Wave
+        if len(swing_highs) >= 4 and len(swing_lows) >= 4:
+            for i in range(min(len(swing_highs), len(swing_lows)) - 3):
+                w = []
+                for j in range(4):
+                    if i + j % 2 == 0:
+                        w.append(swing_lows[i + j] if len(swing_lows) > i + j else None)
+                    else:
+                        w.append(swing_highs[i + j] if len(swing_highs) > i + j else None)
+                w = [x for x in w if x is not None]
+                if len(w) >= 4:
+                    p0, p1, p2, p3 = w[0], w[1], w[2], w[3]
+                    line_1_3 = fit_line([p0, p2]) if p0 and p2 else None
+                    line_2_4 = fit_line([p1, p3]) if p1 and p3 else None
+                    if line_1_3 and line_2_4:
+                        slope1, slope2 = line_1_3["slope"], line_2_4["slope"]
+                        if slope1 > 0 and slope2 > 0 and slope2 > slope1:
+                            target = p3["price"] + (p2["price"] - p1["price"])
+                            patterns.append({
+                                "name": "Wolfe Wave",
+                                "type": "bullish",
+                                "signal": "wave_completion",
+                                "strength": "moderate",
+                                "target": round(target, 4),
+                                "current_price": round(current_price, 4),
+                                "projected_direction": "long",
+                                "confidence": 70,
+                                "entry_trigger": "Wave 4 completion entry",
+                                "invalidation": "Price breaks below wave 1",
+                                "breakout_confirm": current_price > p3["price"],
+                                "measured_move": round(abs(p2["price"] - p1["price"]), 4),
+                                "is_forming": True,
+                            })
+                            forming.append(patterns[-1])
+                        elif slope1 < 0 and slope2 < 0 and slope2 < slope1:
+                            target = p3["price"] - (p1["price"] - p2["price"])
+                            patterns.append({
+                                "name": "Wolfe Wave",
+                                "type": "bearish",
+                                "signal": "wave_completion",
+                                "strength": "moderate",
+                                "target": round(target, 4),
+                                "current_price": round(current_price, 4),
+                                "projected_direction": "short",
+                                "confidence": 70,
+                                "entry_trigger": "Wave 4 completion entry",
+                                "invalidation": "Price breaks above wave 1",
+                                "breakout_confirm": current_price < p3["price"],
+                                "measured_move": round(abs(p1["price"] - p2["price"]), 4),
+                                "is_forming": True,
+                            })
+                            forming.append(patterns[-1])
+
         return _convert_numpy({
             "patterns": patterns,
             "forming_patterns": forming,

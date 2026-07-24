@@ -44,12 +44,18 @@ class CanonicalSignalEngine:
         details = inst_score.get("details", {})
 
         # Pattern info
-        chart_patterns = (pattern_data or {}).get("components", {}).get("chart_patterns", {})
+        components = (pattern_data or {}).get("components", {})
+        chart_patterns = components.get("chart_patterns", {})
         forming_patterns = chart_patterns.get("forming_patterns", [])
         all_patterns = chart_patterns.get("patterns", [])
         active_pattern = forming_patterns[0] if forming_patterns else (all_patterns[0] if all_patterns else None)
 
         projection = (pattern_data or {}).get("projection", {})
+
+        # Elliott Wave + Fibonacci from components
+        ew_data = components.get("elliott_wave", {})
+        fib_data = components.get("fibonacci", {})
+        liq_zones = components.get("liquidity_zones", {})
 
         # Multi-timeframe alignment
         mtf_alignment = (mtf_data or {}).get("alignment", {})
@@ -210,6 +216,39 @@ class CanonicalSignalEngine:
                 "aligned_tfs": mtf_aggregated.get("timeframe_count", 0) if mtf_aggregated else 0,
                 "aggregate_direction": mtf_aggregated.get("direction", "neutral") if mtf_aggregated else "neutral",
             },
+            "elliott_wave": {
+                "count": ew_data.get("count", "unknown"),
+                "current_phase": ew_data.get("current_phase", "neutral"),
+                "momentum": ew_data.get("momentum", "weak"),
+                "next_wave": ew_data.get("next_wave"),
+                "wave_count": ew_data.get("wave_count", 0),
+                "waves": ew_data.get("waves", []),
+                "current_wave": ew_data.get("current_wave"),
+                "estimated_completion": ew_data.get("estimated_completion", "analyzing"),
+            } if ew_data else None,
+            "fibonacci": {
+                "levels": fib_data.get("levels", []),
+                "golden_zone": fib_data.get("golden_zone"),
+                "direction": fib_data.get("direction", "neutral"),
+                "swing_high": fib_data.get("swing_high"),
+                "swing_low": fib_data.get("swing_low"),
+                "nearest_level": fib_data.get("nearest_level"),
+                "nearest_retracement": fib_data.get("nearest_retracement"),
+                "support_level": fib_data.get("support_level"),
+                "resistance_level": fib_data.get("resistance_level"),
+                "ai_targets": fib_data.get("ai_targets"),
+            } if fib_data else None,
+            "liquidity_zones": {
+                "total_zones": liq_zones.get("total_zones", 0),
+                "nearest_support": liq_zones.get("nearest_support"),
+                "nearest_resistance": liq_zones.get("nearest_resistance"),
+                "zones": liq_zones.get("zones", []),
+            } if liq_zones else None,
+            "projected_candles": projection.get("projected_candles", []),
+            "projection_arrows": projection.get("arrows", []),
+            "projected_target": projection.get("projected_target"),
+            "expected_move_pct": projection.get("expected_move_pct"),
+            "expected_move": projection.get("expected_move"),
         }
 
 

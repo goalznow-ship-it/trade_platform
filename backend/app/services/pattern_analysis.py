@@ -691,9 +691,17 @@ class PatternAnalysisEngine:
     async def comprehensive_analysis(self, symbol: str, timeframe: str, ohlcv_data: list, smc_data: dict = None) -> dict:
         patterns = self.analyze_candlestick_patterns(ohlcv_data)
         trend_lines = self.detect_trend_lines(ohlcv_data)
-        elliott = self.analyze_elliott_wave(ohlcv_data)
-        fibonacci = self.calculate_fibonacci_levels(ohlcv_data)
+        legacy_elliott = self.analyze_elliott_wave(ohlcv_data)
+        legacy_fib = self.calculate_fibonacci_levels(ohlcv_data)
         chart_patterns = chart_pattern_engine.detect_all(ohlcv_data)
+
+        # Use dedicated engines for enhanced analysis
+        from app.services.elliott_wave import elliott as ew_engine
+        from app.services.fibonacci import fibonacci as fib_engine
+        from app.services.future_projection import future_projection as fp_engine
+
+        enhanced_ew = ew_engine.analyze(ohlcv_data)
+        enhanced_fib = fib_engine.calculate(ohlcv_data)
 
         liquidity_zones = {"zones": [], "nearest_support": None, "nearest_resistance": None,
                            "support_levels": [], "resistance_levels": [], "total_zones": 0}
@@ -713,22 +721,23 @@ class PatternAnalysisEngine:
             trend_bias -= min(15, 15 - resistance_dist)
 
         elliott_bias = 0
-        if elliott.get("impulse_up"):
+        if legacy_elliott.get("impulse_up") or enhanced_ew.get("count") == "impulse":
             elliott_bias += 20
-        if elliott.get("impulse_down"):
+        if legacy_elliott.get("impulse_down") or enhanced_ew.get("next_wave") and enhanced_ew["next_wave"].get("direction") == "down":
             elliott_bias -= 20
 
         fib_bias = 0
-        if fibonacci.get("nearest_bullish_target"):
-            fib_move = (fibonacci["nearest_bullish_target"]["price"] - current_price) / current_price * 100
+        if legacy_fib.get("nearest_bullish_target"):
+            fib_move = (legacy_fib["nearest_bullish_target"]["price"] - current_price) / current_price * 100
             if fib_move < 5:
                 fib_bias += 10
-        if fibonacci.get("nearest_bearish_target"):
-            fib_move = (current_price - fibonacci["nearest_bearish_target"]["price"]) / current_price * 100
+        if legacy_fib.get("nearest_bearish_target"):
+            fib_move = (current_price - legacy_fib["nearest_bearish_target"]["price"]) / current_price * 100
             if fib_move < 5:
                 fib_bias -= 10
+        if enhanced_fib.get("golden_zone") and enhanced_fib["golden_zone"].get("current_price_in_zone"):
+            fib_bias += 15 if enhanced_fib["direction"] == "long" else -15
 
-        # Chart pattern bias
         chart_bias = 0
         best_pattern = None
         best_confidence = 0
@@ -751,16 +760,35 @@ class PatternAnalysisEngine:
         else:
             direction = "neutral"
 
-        # Generate projection from best chart pattern
         projection = {}
         if best_pattern and best_confidence >= 60:
             projection = chart_pattern_engine.calculate_projection(best_pattern)
+            projected_direction = projection.get("direction", direction)
+            future_proj = fp_engine.project(
+                ohlcv_data,
+                projected_direction,
+                best_confidence,
+                pattern_data=best_pattern,
+                fib_data=enhanced_fib,
+                ew_data=enhanced_ew,
+                smc_data=smc_data,
+            )
             projection["pattern_name"] = best_pattern["name"]
             projection["pattern_confidence"] = best_confidence
             projection["pattern_status"] = "forming" if best_pattern.get("is_forming", False) else "confirmed"
             projection["breakout_confirmed"] = best_pattern.get("breakout_confirm", False)
             projection["entry_trigger"] = best_pattern.get("entry_trigger", "")
             projection["invalidation"] = best_pattern.get("invalidation", "")
+            projection["projected_candles"] = future_proj.get("projected_candles", [])
+            projection["arrows"] = future_proj.get("arrows", [])
+            projection["projected_target"] = future_proj.get("projected_target")
+            projection["expected_move_pct"] = future_proj.get("expected_move_pct")
+            projection["expected_move"] = future_proj.get("expected_move")
+            projection["projected_final_price"] = future_proj.get("projected_final_price")
+
+        # Merge enhanced data into components
+        enhanced_ew_merged = {**legacy_elliott, **enhanced_ew}
+        enhanced_fib_merged = {**legacy_fib, **enhanced_fib}
 
         return _convert_numpy({
             "symbol": symbol,
@@ -773,8 +801,8 @@ class PatternAnalysisEngine:
                 "candlestick_patterns": patterns,
                 "chart_patterns": chart_patterns,
                 "trend_lines": trend_lines,
-                "elliott_wave": elliott,
-                "fibonacci": fibonacci,
+                "elliott_wave": enhanced_ew_merged,
+                "fibonacci": enhanced_fib_merged,
                 "liquidity_zones": liquidity_zones,
             },
         })
