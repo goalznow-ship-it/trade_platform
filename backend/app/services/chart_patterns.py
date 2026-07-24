@@ -50,14 +50,14 @@ class ChartPatternEngine:
             swings = []
             for i in range(window, len(values) - window):
                 if values[i] == max(values[i - window:i + window + 1]):
-                    swings.append({"index": i, "price": float(values[i])})
+                    swings.append({"index": i, "price": float(values[i]), "type": "high"})
             return swings
 
         def find_swing_lows(values, window=5):
             swings = []
             for i in range(window, len(values) - window):
                 if values[i] == min(values[i - window:i + window + 1]):
-                    swings.append({"index": i, "price": float(values[i])})
+                    swings.append({"index": i, "price": float(values[i]), "type": "low"})
             return swings
 
         swing_highs = find_swing_highs(highs, 5)
@@ -716,9 +716,11 @@ class ChartPatternEngine:
                     break
                 x = swing_lows[i] if swing_lows[i]["index"] < swing_highs[i]["index"] else swing_highs[i]
                 a = swing_highs[i] if x == swing_lows[i] else swing_lows[i]
-                b = swing_lows[i + 1] if a["type"] == "up" else swing_highs[i + 1]
+                if a.get("type") not in ("high", "low"):
+                    continue
+                b = swing_lows[i + 1] if a["type"] == "high" else swing_highs[i + 1]
                 if i + 2 < len(swing_highs) and i + 2 < len(swing_lows):
-                    c = swing_highs[i + 2] if b["type"] == "up" else swing_lows[i + 2]
+                    c = swing_highs[i + 2] if b.get("type") == "low" else swing_lows[i + 2]
                     leg_ab = abs(a["price"] - b["price"])
                     leg_bc = abs(b["price"] - c["price"])
                     if leg_ab > 0 and leg_bc / leg_ab > 0.382 and leg_bc / leg_ab < 0.886:

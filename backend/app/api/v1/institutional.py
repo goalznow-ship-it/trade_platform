@@ -313,7 +313,16 @@ async def get_ai_analysis(
     smc_result = smc_engine.analyze(ohlcv)
     result = await pattern_engine.comprehensive_analysis(sym, timeframe, ohlcv, smc_result)
 
-    score_result = await institutional_scorer.score(sym, ohlcv, timeframe, smc_result)
+    module_errors = result.pop("module_errors", None)
+
+    try:
+        score_result = await institutional_scorer.score(sym, ohlcv, timeframe, smc_result)
+    except Exception as e:
+        score_result = {"abs_score": 0, "direction": "neutral", "classification": "error",
+                        "scores": {}, "weights": {}, "risk_level": "unknown"}
+        module_errors = module_errors or {}
+        module_errors["institutional_score"] = f"{type(e).__name__}: {e}"
+
     result["institutional_score"] = score_result
     result["smc"] = {
         "trend": smc_result.get("trend", "unknown"),
@@ -324,8 +333,8 @@ async def get_ai_analysis(
         "premium_discount": smc_result.get("premium_discount", {}),
     }
 
-    combined_dir = result["direction"]
-    score_dir = score_result.get("direction", "neutral")
+    combined_dir = result.get("direction", "neutral")
+    score_dir = score_result.get("direction", "neutral") if isinstance(score_result, dict) else "neutral"
     if combined_dir == score_dir:
         confidence_boost = 15
     elif combined_dir != score_dir and combined_dir != "neutral":
@@ -334,6 +343,11 @@ async def get_ai_analysis(
         confidence_boost = 0
 
     result["combined_direction"] = combined_dir if combined_dir != "neutral" else score_dir
-    result["confidence"] = min(100, max(0, abs(score_result.get("abs_score", 50)) + confidence_boost))
+    abs_score = score_result.get("abs_score", 50) if isinstance(score_result, dict) else 50
+    result["confidence"] = min(100, max(0, abs(abs_score) + confidence_boost))
+    result["confidence"] = int(result["confidence"])
+
+    if module_errors:
+        result["module_errors"] = module_errors
 
     return _convert_numpy(result)
