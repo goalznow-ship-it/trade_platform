@@ -26,6 +26,7 @@ const MODULES = [
   { href: "/backtest", label: "Backtest", icon: History, color: "text-green-400" },
   { href: "/dashboard", label: "Portfolio", icon: Shield, color: "text-gray-400" },
   { href: "/matrix", label: "30 Aktiv", icon: BarChart3, color: "text-cyan-400" },
+  { href: "/skhy-terminal", label: "SKHY Xüsusi", icon: BarChart3, color: "text-purple-400" },
 ]
 
 export function Navbar() {
@@ -37,7 +38,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
@@ -231,6 +232,7 @@ export function Navbar() {
               { label: "News Intel", href: "/news", icon: Newspaper },
               { label: "Backtesting", href: "/backtest", icon: History },
               { label: "Pricing", href: "/pricing", icon: TrendingUp },
+              { label: "SKHY Xüsusi", href: "/skhy-terminal", icon: BarChart3 },
               { label: "Admin", href: "/admin", icon: Settings },
             ].map((item) => (
               <Link key={item.label} href={item.href}

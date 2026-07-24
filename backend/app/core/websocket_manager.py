@@ -37,10 +37,11 @@ class Channel:
     SCANNER = "scanner"
     FEAR_GREED = "fear_greed"
     BREADTH = "breadth"
+    SKHY = "skhy"
 
     ALL = [MARKET, TICKER, ORDERBOOK, SIGNALS, TRADES, POSITIONS, PORTFOLIO,
            NOTIFICATIONS, ORDERFLOW, DERIVATIVES, NEWS, SENTIMENT, ONCHAIN,
-           MACRO, BRAIN, SCANNER, FEAR_GREED, BREADTH]
+           MACRO, BRAIN, SCANNER, FEAR_GREED, BREADTH, SKHY]
 
 
 class WebSocketClient:

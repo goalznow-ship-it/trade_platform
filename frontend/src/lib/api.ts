@@ -384,4 +384,18 @@ export const api = {
   getMarketMatrix: (count = 30) =>
     request<any>(`/api/v1/institutional/market/matrix?count=${count}`),
 
+  // SKHY Terminal
+  getSkhySnapshot: () => request<any>("/api/v1/skhy/snapshot"),
+
+  getSkhyAnalysis: () => request<any>("/api/v1/skhy/analysis"),
+
+  getSkhyScenarios: () => request<any>("/api/v1/skhy/scenarios"),
+
+  getSkhyHistory: (limit = 30) => request<any>(`/api/v1/skhy/history?limit=${limit}`),
+
+  getSkhyOHLCV: (timeframe = "1h", limit = 200) =>
+    request<any>(`/api/v1/skhy/ohlcv?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
+
+  runSkhyBacktest: (timeframe = "1h", mode = "balanced", limit = 500) =>
+    request<any>(`/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}`),
 }

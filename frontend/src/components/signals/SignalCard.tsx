@@ -196,8 +196,8 @@ export function SignalCard({ signal }: SignalCardProps) {
               </div>
               {futures ? (
                 <div className="space-y-1">
-                  <MetaCheck label="Funding" value={`${(futures.funding_rate * 100).toFixed(4)}%`} good={futures.funding_pressure !== "neutral"} />
-                  <MetaCheck label="OI" value={`$${(futures.open_interest_usd / 1e6).toFixed(0)}M`} good={futures.open_interest_usd > 0} />
+                  <MetaCheck label="Funding" value={futures.funding_rate != null ? `${(futures.funding_rate * 100).toFixed(4)}%` : "N/A"} good={futures.funding_pressure !== "neutral"} />
+                  <MetaCheck label="OI" value={futures.open_interest_usd != null ? `$${(futures.open_interest_usd / 1e6).toFixed(0)}M` : "N/A"} good={futures.open_interest_usd != null && futures.open_interest_usd > 0} />
                   <MetaCheck label="Pressure" value={futures.funding_pressure} good={futures.funding_pressure !== "neutral"} />
                   <MetaCheck label="Exchange" value={signal.exchange} good />
                 </div>

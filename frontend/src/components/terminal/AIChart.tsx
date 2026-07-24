@@ -157,8 +157,8 @@ function ScenarioLabels({ projection, lastCandle, overlays }: {
         <div className={cn("font-bold", pDir === "long" ? "text-green-400" : "text-red-400")}>
           {pDir === "long" ? "↑ UZUN" : "↓ QISA"} {conf}%
         </div>
-        {projection.entry_trigger && <div className="text-gray-400 mt-0.5">{projection.entry_trigger as string}</div>}
-        {projection.invalidation && <div className="text-gray-600 mt-0.5">✕ {projection.invalidation as string}</div>}
+        {projection.entry_trigger ? <div className="text-gray-400 mt-0.5">{String(projection.entry_trigger)}</div> : null}
+        {projection.invalidation ? <div className="text-gray-600 mt-0.5">✕ {String(projection.invalidation)}</div> : null}
       </div>
       <div className={cn("flex-1 p-1.5 rounded border opacity-60 pointer-events-auto", altDir === "long" ? "bg-green-950/70 border-green-700/50" : "bg-red-950/70 border-red-700/50")}>
         <div className={cn("font-bold", altDir === "long" ? "text-green-400" : "text-red-400")}>
@@ -595,7 +595,8 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
       }
     }
 
-    drawZoneCanvas(canvas, chart, zones)
+    const cs = candleSeriesRef.current
+    if (cs) drawZoneCanvas(canvas, cs, zones)
   }, [candleData, overlays, components])
 
   useEffect(() => {
@@ -638,7 +639,7 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
       </div>
 
       {/* MTF badges */}
-      {mtfData?.timeframes && (
+      {mtfData?.timeframes ? (
         <div className="flex items-center gap-1.5 px-3 py-0.5 bg-gray-900/80 border-b border-gray-800 overflow-x-auto shrink-0">
           {Object.entries((mtfData.timeframes as Record<string, Record<string, unknown>>) || {}).slice(0, 6).map(([tf, td]) => {
             const d = (td.direction as string) || "neutral"
@@ -650,11 +651,11 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
             )
           })}
           <span className={cn("text-[8px] font-bold ml-1",
-            (mtfData.alignment as Record<string, unknown>)?.major_aligned ? "text-green-400" : "text-yellow-400")}>
-            {(mtfData.aggregated as Record<string, unknown>)?.timeframe_count || 0}/6
+            !!(mtfData.alignment as Record<string, unknown>)?.major_aligned ? "text-green-400" : "text-yellow-400")}>
+            {Number((mtfData.aggregated as Record<string, unknown>)?.timeframe_count ?? 0)}/6
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Overlay toggles */}
       <OverlayToggles active={overlays} onChange={toggleOverlay} />

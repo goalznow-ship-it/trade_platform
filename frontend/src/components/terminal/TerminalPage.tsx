@@ -205,7 +205,7 @@ export function TerminalPage() {
           <AIChart
             analysis={displayedAnalysis}
             explain={explain}
-            signal={signal}
+            signal={signal as Record<string, unknown> | null | undefined}
             livePrice={livePrice}
             aiAnalysis={aiAnalysis as Record<string, unknown> as AIChartProps["aiAnalysis"]}
           />
