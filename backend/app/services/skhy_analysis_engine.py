@@ -35,22 +35,36 @@ class SkhyAnalysisEngine:
         detected_structure = self._detect_dominant_structure(ohlcv_data, snapshot)
         channel_lines = self._detect_channel(ohlcv_data)
         breakout_zone = self._detect_breakout_zone(ohlcv_data, snapshot, tf_analysis)
-        scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci)
-        target_hierarchy = self._compute_target_hierarchy(ohlcv_data, snapshot, scenario_paths, fibonacci, support_resistance)
+        scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci, detected_structure)
+        target_hierarchy = self._compute_target_hierarchy(ohlcv_data, snapshot, scenario_paths, fibonacci, support_resistance, detected_structure)
         time_estimates = self._compute_time_estimates(ohlcv_data)
         activation_conditions = self._compute_activation_conditions(triggers, tf_analysis, snapshot)
-        confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure)
+        confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure, alignment)
+        module_errors = self._collect_module_errors(ohlcv_data, tf_analysis)
+        data_freshness = snapshot.get("data_freshness", "live") if isinstance(snapshot, dict) else "unknown"
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        sp_main = scenario_paths.get("main_scenario", {}).get("path_points", [])
+        sp_alt = scenario_paths.get("alternative_scenario", {}).get("path_points", [])
+        sp_fake = scenario_paths.get("fakeout_scenario", {}).get("path_points", [])
+        invalidation_level = triggers.get("bullish_invalidation") or triggers.get("bearish_invalidation") or 0
+        sup_zone = {"top": detected_structure.get("support_zone_top"), "bottom": detected_structure.get("support_zone_bottom")}
+        res_zone = {"top": detected_structure.get("resistance_zone_top"), "bottom": detected_structure.get("resistance_zone_bottom")}
 
         return {
             "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_iso, "last_updated": now_iso,
             "snapshot": snapshot, "timeframes": tf_analysis, "alignment": alignment, "scores": scores,
             "triggers": triggers, "patterns": patterns, "support_resistance": support_resistance,
-            "elliott_wave": elliott_wave, "fibonacci": fibonacci,
+            "support_zone": sup_zone, "resistance_zone": res_zone,
+            "elliott_wave": elliott_wave, "fibonacci": fibonacci, "fibonacci_levels": fibonacci,
             "detected_structure": detected_structure, "channel_lines": channel_lines,
             "breakout_zone": breakout_zone, "scenario_paths": scenario_paths,
+            "main_scenario_path": sp_main, "alternative_scenario_path": sp_alt, "fakeout_scenario_path": sp_fake,
             "target_hierarchy": target_hierarchy, "time_estimates": time_estimates,
             "activation_conditions": activation_conditions, "confidence_breakdown": confidence_breakdown,
+            "invalidation_level": round(invalidation_level, 2) if invalidation_level else 0,
+            "module_errors": module_errors, "data_freshness": data_freshness,
             "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
         }
 
@@ -422,6 +436,7 @@ class SkhyAnalysisEngine:
     def _detect_dominant_structure(self, ohlcv_data, snapshot):
         data_1h = ohlcv_data.get("1h", [])
         data_4h = ohlcv_data.get("4h", [])
+        data_15m = ohlcv_data.get("15m", [])
         primary = data_4h if len(data_4h)>=50 else data_1h
         if len(primary) < 50: return {"status":"insufficient_data","type":"none"}
         highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]
@@ -471,6 +486,28 @@ class SkhyAnalysisEngine:
                 structure_type = "ascending_channel"
                 structure_label_az = "Yüksələn kanal"
 
+        bull_flag = None; bear_flag = None
+        for tf_check in ["15m","1h","4h"]:
+            d = ohlcv_data.get(tf_check, [])
+            if len(d) < 30: continue
+            pole = d[:10]; flag = d[10:25]
+            pole_rise = pole[-1]["close"] - pole[0]["close"]
+            pole_drop = pole[0]["close"] - pole[-1]["close"]
+            if len(flag) >= 5:
+                flag_highs = [x["high"] for x in flag]; flag_lows = [x["low"] for x in flag]
+                flag_narrow = (max(flag_highs)-min(flag_lows)) < (max(x["high"] for x in pole)-min(x["low"] for x in pole))*0.5
+                if pole_rise > 0 and pole_rise/pole[0]["close"] > 0.02 and flag_narrow:
+                    bull_flag = {"timeframe":tf_check,"breakout_level":max(flag_highs),"flag_low":min(flag_lows),"pole_height":pole_rise}
+                if pole_drop > 0 and pole_drop/pole[0]["close"] > 0.02 and flag_narrow:
+                    bear_flag = {"timeframe":tf_check,"breakdown_level":min(flag_lows),"flag_high":max(flag_highs),"pole_height":pole_drop}
+            if bull_flag and bear_flag: break
+        if bull_flag and not structure_type.startswith("ascending") and not structure_type.startswith("descending"):
+            structure_type = "bull_flag"
+            structure_label_az = "Yüksələn bayraq"
+        if bear_flag and not structure_type.startswith("ascending") and not structure_type.startswith("descending"):
+            structure_type = "bear_flag"
+            structure_label_az = "Enən bayraq"
+
         ch_top = max(h_prices); ch_bottom = min(l_prices)
         price = snapshot.get("ticker",{}).get("price",0) or closes[-1]
 
@@ -478,24 +515,33 @@ class SkhyAnalysisEngine:
         if price > ch_top * 1.01: breakout_status = "yuxarı breakout"
         elif price < ch_bottom * 0.99: breakout_status = "aşağı breakout"
 
-        obs = 0; accum = True
+        obs = 0
         for i in range(1, len(closes)):
-            if closes[i] > closes[i-1] and primary[i].get("volume",0) > np.mean([d.get("volume",0) for d in primary[max(0,i-20):i+1]]):
+            vol_mean = np.mean([d.get("volume",0) for d in primary[max(0,i-20):i+1]])
+            if closes[i] > closes[i-1] and primary[i].get("volume",0) > vol_mean:
                 obs += 1
-            elif closes[i] < closes[i-1] and primary[i].get("volume",0) > np.mean([d.get("volume",0) for d in primary[max(0,i-20):i+1]]):
+            elif closes[i] < closes[i-1] and primary[i].get("volume",0) > vol_mean:
                 obs -= 1
-        if obs > 5: accum = True
-        elif obs < -5: accum = False
+        accum = obs > 5
+        distrib = obs < -5
+
+        support_zone_top = round(ch_bottom * 1.01, 2) if ch_bottom else 0
+        support_zone_bottom = round(ch_bottom * 0.97, 2) if ch_bottom else 0
+        resistance_zone_top = round(ch_top * 1.03, 2) if ch_top else 0
+        resistance_zone_bottom = round(ch_top * 0.99, 2) if ch_top else 0
 
         return {
             "status":"detected","type":structure_type,"label_az":structure_label_az,
             "swing_highs":swing_highs[-6:],"swing_lows":swing_lows[-6:],
             "channel_top":round(ch_top,2),"channel_bottom":round(ch_bottom,2),
             "channel_mid":round((ch_top+ch_bottom)/2,2),
+            "support_zone_top":support_zone_top,"support_zone_bottom":support_zone_bottom,
+            "resistance_zone_top":resistance_zone_top,"resistance_zone_bottom":resistance_zone_bottom,
             "breakout_status":breakout_status,
-            "accumulation_zone":accum,"distribution_zone":not accum,
+            "accumulation_zone":accum,"distribution_zone":distrib,
+            "bull_flag":bull_flag,"bear_flag":bear_flag,
             "swing_count":len(swing_highs)+len(swing_lows),
-            "description_az":f"{structure_label_az} - Qiymət kanal {breakout_status}. {'Yığım zonası müşahidə olunur.' if accum else 'Paylanma zonası müşahidə olunur.'}",
+            "description_az":f"{structure_label_az} - Qiymət kanal {breakout_status}. {'Yığım zonası müşahidə olunur.' if accum else 'Paylanma zonası müşahidə olunur.' if distrib else 'Neytral zona.'}",
         }
 
     # ─── CHANNEL LINES ───
@@ -584,67 +630,78 @@ class SkhyAnalysisEngine:
         }
 
     # ─── SCENARIO PATHS ───
-    def _compute_scenario_paths(self, tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci):
+    def _compute_scenario_paths(self, tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci, detected_structure):
         price = snapshot.get("ticker",{}).get("price",0) or 155
         h4_trend = tf_analysis.get("4h",{}).get("trend","neutral")
         h1_trend = tf_analysis.get("1h",{}).get("trend","neutral")
         long_prob = scores.get("long_probability",50)
         short_prob = scores.get("short_probability",50)
-        confidence = scores.get("signal_confidence",0)
+        signal_conf = scores.get("signal_confidence",0)
         fib = fibonacci
         fib_up = fib.get("extension_up",{}) if isinstance(fib.get("extension_up"), dict) else {}
         fib_down = fib.get("extension_down",{}) if isinstance(fib.get("extension_down"), dict) else {}
         lt_price = triggers.get("long_trigger_price",0)
         st_price = triggers.get("short_trigger_price",0)
+        inval_bull = triggers.get("bullish_invalidation",0)
+        inval_bear = triggers.get("bearish_invalidation",0)
 
-        def path_points(start_price, direction, steps=5):
+        fib_1_272_up = fib_up.get("1.272", price*1.02) if (isinstance(fib_up, dict) and "1.272" in fib_up) else price*1.02
+        fib_1_618_up = fib_up.get("1.618", price*1.04) if (isinstance(fib_up, dict) and "1.618" in fib_up) else price*1.04
+        fib_2_618_up = fib_up.get("2.618", price*1.08) if (isinstance(fib_up, dict) and "2.618" in fib_up) else price*1.08
+        fib_1_272_dn = fib_down.get("1.272", price*0.98) if (isinstance(fib_down, dict) and "1.272" in fib_down) else price*0.98
+        fib_1_618_dn = fib_down.get("1.618", price*0.96) if (isinstance(fib_down, dict) and "1.618" in fib_down) else price*0.96
+        fib_2_618_dn = fib_down.get("2.618", price*0.92) if (isinstance(fib_down, dict) and "2.618" in fib_down) else price*0.92
+
+        def path_points(start_price, direction):
             pts = [{"time_offset":0,"price":start_price,"label":"Başlanğıc","phase":"start"}]
             if direction == "up":
-                r1 = round(start_price * 1.01, 2)
-                r2 = round(start_price * 1.025, 2)
-                r3 = round(start_price * 1.04, 2)
-                r4 = round(start_price * 1.06, 2)
-                r5 = round(start_price * 1.085, 2)
-                pts.append({"time_offset":1,"price":r1,"label":"Breakout","phase":"breakout"})
-                pts.append({"time_offset":2,"price":round((r1+r2)/2,2),"label":"Retest","phase":"retest"})
-                pts.append({"time_offset":3,"price":r2,"label":"İlk impuls","phase":"impulse1"})
-                pts.append({"time_offset":4,"price":round((r2+r3)/2,2),"label":"Pullback","phase":"pullback"})
-                pts.append({"time_offset":5,"price":r3,"label":"TP1","phase":"tp1"})
-                pts.append({"time_offset":7,"price":round((r3+r4)/2,2),"label":"TP2","phase":"tp2"})
-                pts.append({"time_offset":10,"price":r4,"label":"TP3","phase":"tp3"})
-                pts.append({"time_offset":15,"price":r5,"label":"Final","phase":"final"})
+                b = round(lt_price or start_price*1.01, 2)
+                r = round(start_price*0.99, 2)
+                i1 = round(fib_1_272_up, 2)
+                t1 = round(fib_1_618_up, 2)
+                t2 = round(fib_2_618_up, 2)
+                t3 = round(fib_2_618_up*1.05, 2)
+                pts.append({"time_offset":1,"price":b,"label":"Breakout","phase":"breakout"})
+                pts.append({"time_offset":2,"price":round((b+r)/2,2),"label":"Retest","phase":"retest"})
+                pts.append({"time_offset":3,"price":i1,"label":"İlk impuls","phase":"impulse1"})
+                pts.append({"time_offset":4,"price":round((i1+t1)/2,2),"label":"TP1","phase":"tp1"})
+                pts.append({"time_offset":6,"price":t1,"label":"TP2","phase":"tp2"})
+                pts.append({"time_offset":9,"price":t2,"label":"TP3","phase":"tp3"})
+                pts.append({"time_offset":14,"price":t3,"label":"Final","phase":"final"})
             else:
-                r1 = round(start_price * 0.99, 2)
-                r2 = round(start_price * 0.975, 2)
-                r3 = round(start_price * 0.96, 2)
-                r4 = round(start_price * 0.94, 2)
-                r5 = round(start_price * 0.915, 2)
-                pts.append({"time_offset":1,"price":r1,"label":"Breakdown","phase":"breakout"})
-                pts.append({"time_offset":2,"price":round((r1+r2)/2,2),"label":"Retest","phase":"retest"})
-                pts.append({"time_offset":3,"price":r2,"label":"İlk impuls","phase":"impulse1"})
-                pts.append({"time_offset":4,"price":round((r2+r3)/2,2),"label":"Pullback","phase":"pullback"})
-                pts.append({"time_offset":5,"price":r3,"label":"TP1","phase":"tp1"})
-                pts.append({"time_offset":7,"price":round((r3+r4)/2,2),"label":"TP2","phase":"tp2"})
-                pts.append({"time_offset":10,"price":r4,"label":"TP3","phase":"tp3"})
-                pts.append({"time_offset":15,"price":r5,"label":"Final","phase":"final"})
+                b = round(st_price or start_price*0.99, 2)
+                r = round(start_price*1.01, 2)
+                i1 = round(fib_1_272_dn, 2)
+                t1 = round(fib_1_618_dn, 2)
+                t2 = round(fib_2_618_dn, 2)
+                t3 = round(fib_2_618_dn*0.95, 2)
+                pts.append({"time_offset":1,"price":b,"label":"Breakdown","phase":"breakout"})
+                pts.append({"time_offset":2,"price":round((b+r)/2,2),"label":"Retest","phase":"retest"})
+                pts.append({"time_offset":3,"price":i1,"label":"İlk impuls","phase":"impulse1"})
+                pts.append({"time_offset":4,"price":round((i1+t1)/2,2),"label":"TP1","phase":"tp1"})
+                pts.append({"time_offset":6,"price":t1,"label":"TP2","phase":"tp2"})
+                pts.append({"time_offset":9,"price":t2,"label":"TP3","phase":"tp3"})
+                pts.append({"time_offset":14,"price":t3,"label":"Final","phase":"final"})
             return pts
 
-        def fakeout_path(start_price, direction, steps=4):
+        def fakeout_path(start_price, direction):
             pts = [{"time_offset":0,"price":start_price,"label":"Başlanğıc","phase":"start"}]
             if direction == "up":
-                fake_high = round(start_price * 1.025, 2)
-                pivot = round(start_price * 0.98, 2)
+                fake_high = round(lt_price or start_price*1.02, 2)
+                pivot = round(start_price*0.975, 2)
+                cont = round(start_price*0.95, 2)
                 pts.append({"time_offset":1,"price":fake_high,"label":"Yalançı breakout","phase":"fake_breakout"})
                 pts.append({"time_offset":2,"price":round((fake_high+pivot)/2,2),"label":"Dönüş","phase":"reversal"})
                 pts.append({"time_offset":3,"price":pivot,"label":"Tələ","phase":"trap"})
-                pts.append({"time_offset":4,"price":round(pivot*0.98,2),"label":"Aşağı davam","phase":"continuation"})
+                pts.append({"time_offset":5,"price":cont,"label":"Aşağı davam","phase":"continuation"})
             else:
-                fake_low = round(start_price * 0.975, 2)
-                pivot = round(start_price * 1.02, 2)
+                fake_low = round(st_price or start_price*0.98, 2)
+                pivot = round(start_price*1.025, 2)
+                cont = round(start_price*1.05, 2)
                 pts.append({"time_offset":1,"price":fake_low,"label":"Yalançı breakdown","phase":"fake_breakout"})
                 pts.append({"time_offset":2,"price":round((fake_low+pivot)/2,2),"label":"Dönüş","phase":"reversal"})
                 pts.append({"time_offset":3,"price":pivot,"label":"Tələ","phase":"trap"})
-                pts.append({"time_offset":4,"price":round(pivot*1.02,2),"label":"Yuxarı davam","phase":"continuation"})
+                pts.append({"time_offset":5,"price":cont,"label":"Yuxarı davam","phase":"continuation"})
             return pts
 
         main_dir = "up" if long_prob >= short_prob else "down"
@@ -656,67 +713,127 @@ class SkhyAnalysisEngine:
         alt_path = path_points(price, alt_dir)
         fake_path = fakeout_path(price, main_dir)
 
+        main_targets = [p for p in main_path if p["phase"] in ("tp1","tp2","tp3","final")]
+        alt_targets = [p for p in alt_path if p["phase"] in ("tp1","tp2","tp3","final")]
+
+        h4_sig = tf_analysis.get("4h",{}).get("signal","WAIT")
+        h1_sig = tf_analysis.get("1h",{}).get("signal","WAIT")
+
+        main_activation = f"{main_label} trigger: ${lt_price if main_dir=='up' else st_price} üzərində/qırılır + həcm təsdiqi"
+        alt_activation = f"{alt_label} trigger: ${st_price if alt_dir=='down' else lt_price} altında/qırılır + həcm təsdiqi"
+
+        main_reasons = [
+            f"{'4H' if h4_sig else 'H4'} siqnalı {main_label} istiqamətində" if h4_sig in ("LONG","STRONG_LONG","SHORT","STRONG_SHORT") else "Neytral 4H bazası",
+            f"1H {h1_trend} trend",
+            f"Ehtimal: {max(long_prob,short_prob)}%",
+        ]
+        alt_reasons = [
+            "Əsas ssenarinin əksi - alternativ hədəf",
+            f"1H {h1_trend} trend dəyişərsə aktivləşər",
+            f"Ehtimal: {min(long_prob,short_prob)}%",
+        ]
+
         return {
             "main_scenario":{
                 "direction":main_label,"direction_az":"ALIŞ" if main_label=="LONG" else "SATIŞ",
                 "probability":max(long_prob,short_prob),
+                "confidence":signal_conf,
+                "activation_trigger":main_activation,
                 "path_points":main_path,
+                "targets":[{"level":f"TP{i+1}","price":t["price"]} for i,t in enumerate(main_targets)],
+                "target_zones":[f"${t['price']}" for t in main_targets],
+                "invalidation":f"${inval_bull if main_dir=='up' else inval_bear}",
+                "expected_duration":"4-8 saat",
+                "supporting_reasons":main_reasons,
+                "risks":["Fakeout riski", "Həcm təsdiqi olmazsa uğursuz ola bilər", "4H trendi dəyişərsə etibarsız"],
                 "description_az":f"Əsas ehtimal olunan ssenari: {main_label}. Hədəf: ${main_path[-1]['price']}",
             },
             "alternative_scenario":{
                 "direction":alt_label,"direction_az":"SATIŞ" if alt_label=="SHORT" else "ALIŞ",
                 "probability":min(long_prob,short_prob),
+                "confidence":max(10, signal_conf-20),
+                "activation_trigger":alt_activation,
                 "path_points":alt_path,
+                "targets":[{"level":f"TP{i+1}","price":t["price"]} for i,t in enumerate(alt_targets)],
+                "target_zones":[f"${t['price']}" for t in alt_targets],
+                "invalidation":f"${inval_bear if alt_dir=='down' else inval_bull}",
+                "expected_duration":"6-12 saat",
+                "supporting_reasons":alt_reasons,
+                "risks":["Fakeout riski", "Trend güclü olduqda alternativ uğursuz ola bilər"],
                 "description_az":f"Alternativ ssenari: {alt_label}. Hədəf: ${alt_path[-1]['price']}",
             },
             "fakeout_scenario":{
                 "direction":f"FAKEOUT - {main_label}","direction_az":f"YALANÇI - {main_label}",
                 "probability":20,
+                "confidence":min(40, signal_conf-30),
+                "activation_trigger":"Qiymət breakout edib geri dönərsə",
                 "path_points":fake_path,
+                "targets":[],
+                "target_zones":[],
+                "invalidation":f"${price} (başlanğıca qayıdış)",
+                "expected_duration":"2-4 saat",
+                "supporting_reasons":["Aşağı həcmli breakout", "OI artımı yoxdursa fakeout riski", "Double top/bottom formalaşması"],
+                "risks":["Fakeout ssenarisi baş tutarsa sürətli itki"],
                 "description_az":f"Yalançı breakout riski: qiymət əvvəl {main_dir.upper()} istiqamətdə çıxıb geri dönər.",
             },
         }
 
     # ─── TARGET HIERARCHY ───
-    def _compute_target_hierarchy(self, ohlcv_data, snapshot, scenario_paths, fibonacci, sr):
+    def _compute_target_hierarchy(self, ohlcv_data, snapshot, scenario_paths, fibonacci, sr, detected_structure):
         price = snapshot.get("ticker",{}).get("price",0) or 155
-        fib_up = fibonacci.get("extension_up",{}); fib_down = fibonacci.get("extension_down",{})
+        fib_ret = fibonacci.get("retracement_levels",{}) if isinstance(fibonacci.get("retracement_levels"), dict) else {}
+        fib_up = fibonacci.get("extension_up",{}) if isinstance(fibonacci.get("extension_up"), dict) else {}
+        fib_down = fibonacci.get("extension_down",{}) if isinstance(fibonacci.get("extension_down"), dict) else {}
         sr_high = sr.get("strongest_resistance", price*1.1); sr_low = sr.get("strongest_support", price*0.9)
         main = scenario_paths.get("main_scenario",{})
         main_dir = "up" if main.get("direction") == "LONG" else "down"
-        pts = main.get("path_points",[])
-        path_targets = [p["price"] for p in pts if "TP" in p.get("phase","") or "Final" in p.get("phase","")]
+        ch_top = detected_structure.get("channel_top",0)
+        ch_bottom = detected_structure.get("channel_bottom",0)
+        ch_mid = detected_structure.get("channel_mid",0)
 
         targets = []
+        retrace_targets = ["0.382","0.5","0.618","0.786","1.0"]
+        for k in retrace_targets:
+            v = fib_ret.get(k)
+            if v and ((main_dir == "up" and v > price) or (main_dir == "down" and v < price)):
+                continue
+            if v:
+                targets.append({
+                    "level":f"Fib {k}","price":round(v,2),"type":f"Retracement {k}",
+                    "distance_pct":round(abs(v-price)/price*100,1) if price else 0,
+                    "probability":round(max(30,60-abs(0.5-float(k))*40)),
+                    "source":"Fibonacci retracement",
+                    "time_estimate":"2-4 saat",
+                    "invalidation":round(price*0.97 if main_dir=="up" else price*1.03,2),
+                })
+
         if main_dir == "up":
-            fib_keys = ["1.272","1.618","2.0","2.618","3.618"]
+            fib_ext_keys = ["1.272","1.618","2.0","2.618","3.618"]
             fib_vals = []
-            for k in fib_keys:
+            for k in fib_ext_keys:
                 v = fib_up.get(k)
                 if v and v > price: fib_vals.append((k, v))
-            for i, (k, v) in enumerate(fib_vals):
-                is_near = any(abs(v-t)/t < 0.05 for t in path_targets) if path_targets else False
+            for i, (k, v) in enumerate(fib_vals[:5]):
                 targets.append({
                     "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
                     "distance_pct":round((v-price)/price*100,1) if price else 0,
-                    "probability":max(30, 80 - i*15),"source":"Fibonacci extension",
+                    "probability":max(25, 85 - i*15),"source":"Fibonacci extension",
                     "time_estimate":"4-8 saat" if i==0 else "1-2 gün" if i<=2 else "3-7 gün",
-                    "invalidation":round(price*0.97,2) if i==0 else round(price*0.95,2),
+                    "invalidation":round(price*0.97 if i==0 else price*0.95 if i<=2 else price*0.93,2),
                 })
         else:
-            fib_keys = ["1.272","1.618","2.0","2.618","3.618"]
+            fib_ext_keys = ["1.272","1.618","2.0","2.618","3.618"]
             fib_vals = []
-            for k in fib_keys:
+            for k in fib_ext_keys:
                 v = fib_down.get(k)
                 if v and v < price: fib_vals.append((k, v))
-            for i, (k, v) in enumerate(fib_vals):
-                is_near = any(abs(v-t)/t < 0.05 for t in path_targets) if path_targets else False
+            for i, (k, v) in enumerate(fib_vals[:5]):
                 targets.append({
                     "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
                     "distance_pct":round((price-v)/price*100,1) if price else 0,
-                    "probability":max(30, 80 - i*15),"source":"Fibonacci extension",
+                    "probability":max(25, 85 - i*15),"source":"Fibonacci extension",
                     "time_estimate":"4-8 saat" if i==0 else "1-2 gün" if i<=2 else "3-7 gün",
-                    "invalidation":round(price*1.03,2) if i==0 else round(price*1.05,2),
+                    "invalidation":round(price*1.03 if i==0 else price*1.05 if i<=2 else price*1.07,2),
                 })
 
         if main_dir == "up":
@@ -725,10 +842,16 @@ class SkhyAnalysisEngine:
             sr_target = {"level":"TP-SR","price":round(sr_low,2),"type":"Dəstək","distance_pct":round((price-sr_low)/price*100,1) if price else 0,"probability":50,"source":"Support/Resistance","time_estimate":"1-2 gün","invalidation":round(price*1.05,2)}
         targets.append(sr_target)
 
+        if ch_top and ch_bottom:
+            targets.append({"level":"Kanal Top","price":round(ch_top,2),"type":"Kanal yuxarı","distance_pct":round((ch_top-price)/price*100,1) if price else 0,"probability":45,"source":"Channel","time_estimate":"1-4 saat","invalidation":round(price*0.96,2)})
+            targets.append({"level":"Kanal Bottom","price":round(ch_bottom,2),"type":"Kanal aşağı","distance_pct":round((price-ch_bottom)/price*100,1) if price else 0,"probability":45,"source":"Channel","time_estimate":"1-4 saat","invalidation":round(price*1.04,2)})
+
+        targets.sort(key=lambda t: t["distance_pct"] if t["distance_pct"] else 0)
+
         return {
             "targets":targets,
             "primary_direction":main_dir,
-            "description_az":"{} hədəflər: {}".format("Yuxarı" if main_dir=="up" else "Aşağı", ", ".join("${}({})".format(t["price"], t["type"]) for t in targets[:3])),
+            "description_az":"{} hədəflər: {}".format("Yuxarı" if main_dir=="up" else "Aşağı", ", ".join("${}({})".format(t["price"], t["type"]) for t in targets[:5])),
         }
 
     # ─── TIME ESTIMATES ───
@@ -782,8 +905,18 @@ class SkhyAnalysisEngine:
             },
         }
 
+    def _collect_module_errors(self, ohlcv_data, tf_analysis):
+        errors = {}
+        for tf, v in tf_analysis.items():
+            if isinstance(v, dict) and v.get("error"):
+                errors[f"{tf}_data"] = v["error"]
+        for tf, data in ohlcv_data.items():
+            if not data:
+                errors[f"{tf}_ohlcv"] = "No OHLCV data"
+        return errors if errors else {}
+
     # ─── CONFIDENCE BREAKDOWN ───
-    def _compute_confidence_breakdown(self, scores, tf_analysis, patterns, detected_structure):
+    def _compute_confidence_breakdown(self, scores, tf_analysis, patterns, detected_structure, alignment):
         signal_conf = scores.get("signal_confidence",0)
         pattern_conf = 0
         if patterns:
@@ -794,13 +927,27 @@ class SkhyAnalysisEngine:
             breakout_conf = min(50 + len(patterns)*5, 100)
         direction_conf = max(scores.get("long_probability",0), scores.get("short_probability",0))
         target_conf = min(30 + signal_conf//2, 100)
+        trend_conf = scores.get("trend_score",0)
+        momentum_conf = scores.get("momentum_score",0)
+        volume_conf = scores.get("volume_score",0)
+        futures_conf = scores.get("futures_score",0)
+        liquidity_conf = scores.get("liquidity_score",0)
+        mtf_conf = alignment.get("confidence",0)
+        risk_conf = scores.get("risk_score",0)
         return {
             "signal_confidence":signal_conf,
             "direction_probability":direction_conf,
-            "pattern_confidence":pattern_conf,
+            "trend_confidence":trend_conf,
             "structure_confidence":structure_conf,
+            "momentum_confidence":momentum_conf,
+            "volume_confidence":volume_conf,
+            "futures_confidence":futures_conf,
+            "liquidity_confidence":liquidity_conf,
+            "pattern_confidence":pattern_conf,
             "breakout_confidence":breakout_conf,
             "target_confidence":target_conf,
+            "multitimeframe_confidence":mtf_conf,
+            "risk_confidence":risk_conf,
             "overall_assessment":"yüksək" if signal_conf >= 70 else "orta" if signal_conf >= 50 else "aşağı",
         }
 

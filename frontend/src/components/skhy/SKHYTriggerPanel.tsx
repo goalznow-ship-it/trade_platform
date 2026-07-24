@@ -118,7 +118,7 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
           <AlertTriangle className="w-3 h-3 text-yellow-400 shrink-0" />
           <div>
             <span className="text-[10px] text-yellow-400 font-semibold">{status === "WAIT" ? "Gözləyin" : "İzləmə"}</span>
-            <p className="text-[9px] text-gray-500">İnam {confidence}% - təsdiq gözlənilir</p>
+            {confidence > 0 && <p className="text-[9px] text-gray-500">İnam {confidence}% - təsdiq gözlənilir</p>}
           </div>
         </div>
       )}

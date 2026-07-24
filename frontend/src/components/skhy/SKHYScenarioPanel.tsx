@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, AlertTriangle, Target, Shield, Info } from "lucide-react"
+import { TrendingUp, TrendingDown, AlertTriangle, Target, Shield, Info, Clock, Zap } from "lucide-react"
 
 interface Props {
   scenarios: Record<string, unknown> | null
@@ -49,7 +49,6 @@ export function SKHYScenarioPanel({ scenarios }: Props) {
         />
       </div>
 
-      {/* Pattern izahları */}
       {main && (
         <div className="mt-3 pt-2 border-t border-gray-800/40">
           <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-1">
@@ -57,19 +56,16 @@ export function SKHYScenarioPanel({ scenarios }: Props) {
             <span>Pattern izahı:</span>
           </div>
           <div className="text-[9px] text-gray-500 leading-relaxed">
-            <strong className="text-gray-400">BOS</strong> (Break of Structure) - struktur dəyişikliyi, trendin istiqamət dəyişdirdiyini göstərir.
+            <strong className="text-gray-400">BOS</strong> - struktur dəyişikliyi.
           </div>
           <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">CHoCH</strong> (Change of Character) - xarakter dəyişikliyi, smart money-nin yeni istiqamətə keçdiyini göstərir.
+            <strong className="text-gray-400">CHoCH</strong> - xarakter dəyişikliyi.
           </div>
           <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">FVG</strong> (Fair Value Gap) - qiymət boşluğu, adətən doldurulmağa meyllidir.
+            <strong className="text-gray-400">FVG</strong> - qiymət boşluğu.
           </div>
           <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">OB</strong> (Order Block) - smart money-nin əmr buraxdığı zona.
-          </div>
-          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">Likvidite</strong> - stop-loss və marjanın toplandığı hədəf zona.
+            <strong className="text-gray-400">OB</strong> - order block.
           </div>
         </div>
       )}
@@ -84,14 +80,15 @@ function ScenarioCard({
 }) {
   if (!scenario) return null
 
-  const colorClasses: Record<string, { border: string; bg: string; text: string; badge: string }> = {
+  const cc: Record<string, { border: string; bg: string; text: string; badge: string }> = {
     green: { border: "border-green-500/30", bg: "bg-green-500/5", text: "text-green-400", badge: "bg-green-500/20 text-green-400" },
     red: { border: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", badge: "bg-red-500/20 text-red-400" },
     yellow: { border: "border-yellow-500/30", bg: "bg-yellow-500/5", text: "text-yellow-400", badge: "bg-yellow-500/20 text-yellow-400" },
   }
-  const c = colorClasses[color] || colorClasses.green
+  const c = cc[color] || cc.green
   const dir = strVal(scenario.direction)
   const prob = numVal(scenario.probability)
+  const conf = numVal(scenario.confidence)
   const dirLabel = dir === "LONG" ? "ALIŞ" : dir === "SHORT" ? "SATIŞ" : dir
 
   return (
@@ -108,26 +105,48 @@ function ScenarioCard({
       <div className="text-[10px] text-gray-400 space-y-0.5">
         {scenario.activation_trigger != null && strVal(scenario.activation_trigger) && (
           <div className="flex items-start gap-1">
-            <Target className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
+            <Zap className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
             <span>Aktivləşmə: {strVal(scenario.activation_trigger)}</span>
           </div>
         )}
-        {Array.isArray(scenario.target_zones) && (
+        {Array.isArray(scenario.target_zones) && (scenario.target_zones as string[]).length > 0 && (
           <div className="flex items-center gap-1">
-            <span className="text-gray-600">Hədəflər:</span>
-            <span className="font-mono text-gray-300">{(scenario.target_zones as string[]).join(" → ")}</span>
+            <Target className="w-2.5 h-2.5 shrink-0 text-gray-600" />
+            <span>Hədəflər: <span className="font-mono text-gray-300">{(scenario.target_zones as string[]).join(" → ")}</span></span>
           </div>
         )}
         {scenario.invalidation != null && strVal(scenario.invalidation) && (
           <div className="flex items-start gap-1">
             <Shield className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
-            <span>Ləğvetmə: {strVal(scenario.invalidation)}</span>
+            <span>Ləğv: {strVal(scenario.invalidation)}</span>
+          </div>
+        )}
+        {scenario.expected_duration != null && strVal(scenario.expected_duration) && (
+          <div className="flex items-start gap-1">
+            <Clock className="w-2.5 h-2.5 mt-0.5 shrink-0 text-gray-600" />
+            <span>Müddət: {strVal(scenario.expected_duration)}</span>
+          </div>
+        )}
+        {conf > 0 && (
+          <div className="flex items-center gap-1">
+            <span className="text-gray-600">İnam:</span>
+            <span className={cn("font-mono", conf >= 70 ? "text-green-400" : conf >= 50 ? "text-yellow-400" : "text-gray-400")}>{conf}%</span>
           </div>
         )}
         {Array.isArray(scenario.supporting_reasons) && (
-          <div className="flex items-start gap-1">
+          <div className="flex flex-col gap-0.5">
             <span className="text-gray-600">Səbəblər:</span>
-            <span className="text-gray-300">{(scenario.supporting_reasons as string[]).slice(0, 2).join(", ")}</span>
+            {(scenario.supporting_reasons as string[]).slice(0, 3).map((r, i) => (
+              <span key={i} className="text-gray-300 text-[9px] pl-2">• {r}</span>
+            ))}
+          </div>
+        )}
+        {Array.isArray(scenario.risks) && (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-red-400/60">Risk:</span>
+            {(scenario.risks as string[]).slice(0, 2).map((r, i) => (
+              <span key={i} className="text-red-400/40 text-[9px] pl-2">⚠ {r}</span>
+            ))}
           </div>
         )}
       </div>

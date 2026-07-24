@@ -21,6 +21,8 @@ interface Candle { time: number; open: number; high: number; low: number; close:
 function num(v: unknown): number { return typeof v === "number" ? v : 0 }
 function str(v: unknown): string { return v == null ? "" : String(v) }
 
+type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"
+
 export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -34,12 +36,15 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
 
   const [ohlcv, setOhlcv] = useState<Candle[]>([])
   const [tf, setTf] = useState("1h")
-  const [projection] = useState<Candle[]>([])
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
+    structure: true, channel: true, breakout: true, retest: true,
+    fibonacci: true, targets: true, mainScenario: true, altScenario: true,
+    fakeout: true, smc: true, liquidity: true, ema: true, atrStop: true,
+  })
   const timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
   const scores = (analysis?.scores || {}) as Record<string, unknown>
-  const scenarios = analysis?.scenarios as Record<string, unknown> | undefined
   const tfs = (analysis?.timeframes || {}) as Record<string, unknown>
   const allStructs = analysis?.all_structures as Record<string, unknown>[] | undefined
   const patterns = analysis?.patterns as Record<string, unknown>[] | undefined
@@ -51,6 +56,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
   const sp = analysis?.scenario_paths as Record<string, unknown> | undefined
   const th = analysis?.target_hierarchy as Record<string, unknown> | undefined
   const cb = analysis?.confidence_breakdown as Record<string, unknown> | undefined
+  const supZone = analysis?.support_zone as Record<string, unknown> | undefined
+  const resZone = analysis?.resistance_zone as Record<string, unknown> | undefined
+  const invalLevel = num(analysis?.invalidation_level)
 
   const confidence = num(scores.signal_confidence)
   const longProb = num(scores.long_probability)
@@ -58,8 +66,11 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
   const status = str(scores.status)
   const ltPrice = num(triggers.long_trigger_price)
   const stPrice = num(triggers.short_trigger_price)
-  const inval = num(triggers.bullish_invalidation) || num(triggers.bearish_invalidation)
   const price = num(snapshot?.live_price)
+
+  const toggleOverlay = useCallback((key: OverlayKey) => {
+    setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
+  }, [])
 
   useEffect(() => {
     api.getSkhyOHLCV(tf, 240).then((res) => { if (res?.data) setOhlcv(res.data) }).catch(() => {})
@@ -94,16 +105,24 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
     const volData = ohlcv.map((d) => ({ time: d.time as Time, value: d.volume, color: d.close >= d.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)" }))
     candleSeriesRef.current.setData(candleData)
     volSeriesRef.current.setData(volData)
-    const closes = ohlcv.map((d) => d.close)
-    const ema20 = calcEMA(closes, 20); const ema50 = calcEMA(closes, 50); const ema100 = calcEMA(closes, 100)
-    const atrStop = calcATRStop(ohlcv, 14, 2.5)
-    ema20Ref.current?.setData(ema20.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
-    ema50Ref.current?.setData(ema50.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
-    ema100Ref.current?.setData(ema100.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
-    atrStopRef.current?.setData(atrStop.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
+    if (overlays.ema) {
+      const closes = ohlcv.map((d) => d.close)
+      const ema20 = calcEMA(closes, 20); const ema50 = calcEMA(closes, 50); const ema100 = calcEMA(closes, 100)
+      ema20Ref.current?.setData(ema20.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
+      ema50Ref.current?.setData(ema50.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
+      ema100Ref.current?.setData(ema100.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
+    } else {
+      ema20Ref.current?.setData([]); ema50Ref.current?.setData([]); ema100Ref.current?.setData([])
+    }
+    if (overlays.atrStop) {
+      const atrStop = calcATRStop(ohlcv, 14, 2.5)
+      atrStopRef.current?.setData(atrStop.map((v, i) => ({ time: ohlcv[i].time as Time, value: v })).filter(d => d.value > 0))
+    } else {
+      atrStopRef.current?.setData([])
+    }
     chartRef.current?.timeScale().fitContent()
     drawOverlay()
-  }, [ohlcv])
+  }, [ohlcv, overlays])
 
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current; const chart = chartRef.current
@@ -118,46 +137,75 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
     if (!vr) return
     const toX = (t: number) => ts.timeToCoordinate(t as Time) ?? 0
     const toY = (p: number) => candleSeriesRef.current?.priceToCoordinate(p) ?? 0
-
     const w = rect.width; const h = rect.height
+
     drawHeatmap(ctx, toX, toY, w, h, ohlcv)
-    drawChannel(ctx, toX, toY, cl, w, ohlcv)
-    drawBreakoutZone(ctx, toX, toY, bz, w, h, ohlcv)
-    drawFibonacciLevels(ctx, toX, toY, fib, w, ohlcv)
-    drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv)
-    drawTargets(ctx, toX, toY, th, w, ohlcv)
-    drawSMCStructures(ctx, toX, toY, analysis, ohlcv)
-    drawSR(ctx, toX, toY, sr, price, w)
+
+    if (overlays.channel) drawChannel(ctx, toX, toY, cl, w, ohlcv, ds)
+    if (overlays.breakout) drawBreakoutZone(ctx, toX, toY, bz, w, h, ohlcv)
+    if (overlays.retest) drawRetestZone(ctx, toX, toY, bz, ds, w, h, ohlcv)
+    if (overlays.liquidity) drawLiquidityZones(ctx, toX, toY, sr, ds, w, ohlcv)
+    if (overlays.fibonacci) drawFibonacciLevels(ctx, toX, toY, fib, th, w, ohlcv)
+    if (overlays.targets) drawInvalLine(ctx, toX, toY, invalLevel, w)
+    if (overlays.targets) drawTargetLines(ctx, toX, toY, th, w, ohlcv)
+    if (overlays.mainScenario) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "main")
+    if (overlays.altScenario) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "alt")
+    if (overlays.fakeout) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "fakeout")
+    if (overlays.smc) drawSMCStructures(ctx, toX, toY, analysis, ohlcv)
+    if (overlays.structure) {
+      drawSR(ctx, toX, toY, sr, price, w)
+      drawSupportResistanceZones(ctx, toX, toY, supZone, resZone, w, h, ohlcv)
+    }
     drawPatterns(ctx, toX, toY, patterns, ohlcv, w)
     drawTradeLevels(ctx, toX, toY, triggers, scores, w)
     drawVolumeProfile(ctx, toX, toY, ohlcv, w, h)
     drawSmartMoney(ctx, toX, toY, analysis, ohlcv)
     drawElliottWave(ctx, toX, toY, ew, w, ohlcv)
-    drawCone(ctx, toX, toY, projection, confidence, w, h, ohlcv)
-  }, [ohlcv, analysis, triggers, scores, sr, scenarios, patterns, projection, confidence, price, ew, fib, ds, cl, bz, sp, th, cb])
+    drawCone(ctx, toX, toY, confidence, w, h, ohlcv, sp)
+  }, [ohlcv, analysis, triggers, scores, sr, patterns, confidence, price, ew, fib, ds, cl, bz, sp, th, cb, supZone, resZone, invalLevel, overlays])
 
-  useEffect(() => { drawOverlay(); const i = setInterval(drawOverlay, 1000); return () => clearInterval(i) }, [drawOverlay])
+  useEffect(() => { drawOverlay() }, [drawOverlay])
+
+  useEffect(() => {
+    if (!chartRef.current) return
+  }, [drawOverlay])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const canvas = overlayRef.current; const chart = chartRef.current
     if (!canvas || !chart) { setTooltip(null); return }
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left; const y = e.clientY - rect.top
-    const t = chart.timeScale().coordinateToTime(x); const pr = candleSeriesRef.current?.coordinateToPrice(y)
+    const t = chart.timeScale().coordinateToTime(x) as number | null; const pr = candleSeriesRef.current?.coordinateToPrice(y)
     if (t == null || pr == null) { setTooltip(null); return }
-    const hovered = findNearestStructure(allStructs, t as number, pr, toCandleTime(ohlcv, x, chart))
-    if (hovered) setTooltip({ x: e.clientX - rect.left + 10, y: e.clientY - rect.top - 10, text: hovered })
+    const txt = findNearestAll(t as number, pr, x, y, toCandleTime(ohlcv, x, chart), ohlcv, allStructs, patterns, ds, bz, th, cl, sp)
+    if (txt) setTooltip({ x: e.clientX - rect.left + 10, y: e.clientY - rect.top - 10, text: txt })
     else setTooltip(null)
-  }, [allStructs, ohlcv])
+  }, [allStructs, patterns, ds, bz, th, cl, sp, ohlcv])
   const handleMouseLeave = () => setTooltip(null)
 
   const statusLabel: Record<string, string> = { STRONG_TRADE_READY: "GÜCLÜ HAZIR", TRADE_READY: "HAZIRDIR", WATCHLIST: "İZLƏMƏ", WAIT: "GÖZLƏYİN" }
+
+  const toggleItems: { key: OverlayKey; label: string }[] = [
+    { key: "structure", label: "Struktur" },
+    { key: "channel", label: "Kanal" },
+    { key: "breakout", label: "Breakout" },
+    { key: "retest", label: "Retest" },
+    { key: "fibonacci", label: "Fibonacci" },
+    { key: "targets", label: "Hədəflər" },
+    { key: "mainScenario", label: "Əsas" },
+    { key: "altScenario", label: "Alternativ" },
+    { key: "fakeout", label: "Fakeout" },
+    { key: "smc", label: "SMC" },
+    { key: "liquidity", label: "Likvidlik" },
+    { key: "ema", label: "EMA" },
+    { key: "atrStop", label: "ATR" },
+  ]
 
   return (
     <div className="h-full flex flex-col relative">
       <div className="flex items-center px-2 py-0.5 border-b border-gray-800/40 bg-gray-950/60 z-10 shrink-0">
         {timeframes.map((t) => {
-          const sig = ((tfs[t] as Record<string, unknown>)?.signal as string) || ""
+          const sig = str((tfs[t] as Record<string, unknown>)?.signal)
           const sigColor = sig.includes("LONG") ? "text-green-400 bg-green-500/10" : sig.includes("SHORT") ? "text-red-400 bg-red-500/10" : "text-gray-500 bg-gray-800/30"
           return (
             <button key={t} onClick={() => setTf(t)}
@@ -168,6 +216,15 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
           )
         })}
         <div className="flex-1" />
+        <div className="flex items-center gap-0.5 overflow-x-auto max-w-[280px] mr-1">
+          {toggleItems.map(({ key, label }) => (
+            <button key={key} onClick={() => toggleOverlay(key)}
+              className={cn("px-1 py-0.5 text-[7px] font-mono rounded border transition-colors shrink-0",
+                overlays[key] ? "bg-blue-600/20 border-blue-500/40 text-blue-400" : "bg-gray-800/30 border-gray-700/30 text-gray-600 hover:text-gray-400")}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1.5 px-2">
           <span className="text-[9px] text-gray-500">AI</span>
           <div className="w-16 h-1.5 rounded-full bg-gray-800 overflow-hidden">
@@ -183,7 +240,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none z-[5]" />
         {tooltip && (
-          <div className="absolute z-10 pointer-events-none bg-gray-900/95 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-200 shadow-xl max-w-[220px] whitespace-pre-line" style={{ left: tooltip.x, top: tooltip.y }}>
+          <div className="absolute z-10 pointer-events-none bg-gray-900/95 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-200 shadow-xl max-w-[240px] whitespace-pre-line" style={{ left: tooltip.x, top: tooltip.y }}>
             {tooltip.text}
           </div>
         )}
@@ -194,9 +251,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
         {confidence >= 70 && (
           <div className="absolute bottom-2 left-2 z-[6] bg-gray-950/90 border border-gray-700/60 rounded px-2 py-1 text-[9px] font-mono space-y-0.5 max-w-[200px]">
             {longProb > shortProb ? (
-              <><div className="text-green-400 font-bold text-[10px]">ALIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${ltPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${inval.toFixed(2)}</span></div></>
+              <><div className="text-green-400 font-bold text-[10px]">ALIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${ltPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${invalLevel.toFixed(2)}</span></div></>
             ) : (
-              <><div className="text-red-400 font-bold text-[10px]">SATIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${stPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${inval.toFixed(2)}</span></div></>
+              <><div className="text-red-400 font-bold text-[10px]">SATIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${stPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${invalLevel.toFixed(2)}</span></div></>
             )}
           </div>
         )}
@@ -227,29 +284,58 @@ function calcATRStop(data: Candle[], period: number, mult: number): number[] {
   const pad = new Array(period).fill(0); return [...pad, ...atrs.map((a, i) => Math.round((data[i + period].close - a * mult) * 100) / 100)]
 }
 function toCandleTime(ohlcv: Candle[], x: number, chart: IChartApi): number { const t = chart.timeScale().coordinateToTime(x); return t == null ? 0 : t as number }
+function p2str(v: unknown): string { return v == null ? "" : String(v) }
+function n2(v: unknown): number { return typeof v === "number" ? v : 0 }
 
-function findNearestStructure(structs: Record<string, unknown>[] | undefined, time: number, price: number, candleTime: number): string | null {
-  if (!structs) return null
-  for (const s of structs) {
-    const sIdx = num(s.index)
-    if (Math.abs(sIdx - candleTime) < 5) {
-      const sp = num(s.price) || num(s.gap_high) || 0
-      if (Math.abs(sp - price) / price < 0.05) {
-        const type = str(s.type); const cat = str(s.category)
-        if (cat === "bos") return `BOS (Struktur dəyişikliyi)\nBazar ${type.includes("bullish") ? "yuxarı" : "aşağı"} istiqamətə keçir. Trend dəyişir.`
-        if (cat === "choch") return `CHoCH (Xarakter dəyişikliyi)\nTrend ${type.includes("bullish") ? "yüksələn" : "enən"} ola bilər. Smart money yeni istiqamət hazırlayır.`
-        if (cat === "fvg") return `FVG (Qiymət boşluğu)\n${type.includes("bullish") ? "Yuxarı" : "Aşağı"} likvidite çəkə bilər. Boşluq doldurulmağa meyllidir.`
-        if (cat === "order_block") return `OB (Order Block)\nSmart money ${type.includes("bullish") ? "alış" : "satış"} əmri buraxıb. Böyük oyunçu zonası.`
-        if (cat === "liquidity") return `Likvidite zonası\n${type.includes("above") ? "Yuxarıda" : "Aşağıda"} stop-loss toplanıb. Hədəf zona.`
-        if (cat === "swing") return `Swing ${type === "high" ? "Zirvə" : "Dip"}\nÖnəmli dönüş nöqtəsi.`
-        return `${type}\nStruktur elementi.`
+function findNearestAll(
+  _time: number, price: number, cx: number, cy: number, _ct: number,
+  ohlcv: Candle[], allStructs: Record<string, unknown>[] | undefined,
+  _patterns: Record<string, unknown>[] | undefined,
+  ds: Record<string, unknown> | undefined, bz: Record<string, unknown> | undefined,
+  th: Record<string, unknown> | undefined, cl: Record<string, unknown> | undefined,
+  sp: Record<string, unknown> | undefined,
+): string | null {
+  if (allStructs) {
+    for (const s of allStructs.slice(-20)) {
+      const sp2 = n2(s.price) || n2(s.gap_high) || 0
+      if (sp2 > 0 && Math.abs(sp2 - price) / price < 0.03) {
+        const cat = p2str(s.category); const typ = p2str(s.type)
+        if (cat === "bos") return `BOS (Struktur dəyişikliyi)\nBazar ${typ.includes("bullish") ? "yuxarı" : "aşağı"} istiqamətə keçir. Trend dəyişir.\nTəsdiq: Yeni HH/HL formalaşması.\nLəğv: Qiymət geri dönərsə.`
+        if (cat === "choch") return `CHoCH (Xarakter dəyişikliyi)\nTrend ${typ.includes("bullish") ? "yüksələn" : "enən"} ola bilər. Smart money yeni istiqamət hazırlayır.\nTəsdiq: BOS ilə təsdiqlənməlidir.\nLəğv: Qiymət köhnə trendə qayıtsa.`
+        if (cat === "fvg") return `FVG (Qiymət boşluğu)\n${typ.includes("bullish") ? "Yuxarı" : "Aşağı"} likvidite çəkə bilər. Boşluq doldurulmağa meyllidir.\nTəsdiq: Qiymət boşluğa toxunarsa.\nLəğv: Boşluq doldurulmadan keçib gedərsə.`
+        if (cat === "order_block") return `OB (Order Block)\nSmart money ${typ.includes("bullish") ? "alış" : "satış"} əmri buraxıb. Böyük oyunçu zonası.\nTəsdiq: OB-dən reaksiya (yuxarı/aşağı).\nLəğv: OB dəliklənərsə (gap olarsa).`
+        if (cat === "liquidity") return `Likvidite zonası\n${typ.includes("above") ? "Yuxarıda" : "Aşağıda"} stop-loss toplanıb. Hədəf zona.\nMənbə: ${p2str(s.timeframe)} timeframe.`
+        if (cat === "swing") return `Swing ${typ === "high" ? "Zirvə" : "Dip"}\nÖnəmli dönüş nöqtəsi.`
+      }
+    }
+  }
+  if (ds && n2(ds.channel_top) > 0 && Math.abs(n2(ds.channel_top) - price) / price < 0.02)
+    return `Kanal üst xətti: $${n2(ds.channel_top).toFixed(2)}\n${p2str(ds.label_az)} - ${p2str(ds.breakout_status)}\nMənbə: 1H/4H struktur analizi.`
+  if (ds && n2(ds.channel_bottom) > 0 && Math.abs(n2(ds.channel_bottom) - price) / price < 0.02)
+    return `Kanal alt xətti: $${n2(ds.channel_bottom).toFixed(2)}\n${p2str(ds.label_az)}\nMənbə: 1H/4H struktur analizi.`
+  if (bz && n2(bz.zone_top) > 0 && Math.abs(n2(bz.zone_top) - price) / price < 0.02)
+    return `Breakout zonası üst: $${n2(bz.zone_top).toFixed(2)}\nTest sayı: ${n2(bz.test_count)}\n${n2(bz.bullish_breakout_ready) ? "Bullish breakout hazırdır." : ""} ${n2(bz.bearish_breakout_ready) ? "Bearish breakout hazırdır." : ""}`
+  if (bz && n2(bz.zone_bottom) > 0 && Math.abs(n2(bz.zone_bottom) - price) / price < 0.02)
+    return `Breakout zonası alt: $${n2(bz.zone_bottom).toFixed(2)}\nTest sayı: ${n2(bz.test_count)}\nMənbə: 1H/4H breakout analizi.`
+  if (th) {
+    const tgs = th.targets as { level: string; price: number; type: string; probability: number; time_estimate: string }[] | undefined
+    if (tgs) for (const t of tgs) {
+      if (Math.abs(n2(t.price) - price) / price < 0.02)
+        return `${t.level} ${t.type}\nQiymət: $${n2(t.price).toFixed(2)}\nEhtimal: ${n2(t.probability)}%\nTəxmini müddət: ${p2str(t.time_estimate)}`
+    }
+  }
+  if (sp) {
+    for (const key of ["main_scenario", "alternative_scenario", "fakeout_scenario"]) {
+      const sc = sp[key] as Record<string, unknown> | undefined
+      const pts = sc?.path_points as { time_offset: number; price: number; label: string; phase: string }[] | undefined
+      if (pts && sc) for (const p of pts) {
+        if (p.time_offset > 0 && Math.abs(n2(p.price) - price) / price < 0.03)
+          return `${p.label}\nQiymət: $${n2(p.price).toFixed(2)}\n${p2str(sc.direction_az)} ssenari\nEhtimal: ${n2(sc.probability)}%\nİnam: ${n2(sc.confidence)}%`
       }
     }
   }
   return null
 }
-function num(v: unknown): number { return typeof v === "number" ? v : 0 }
-function str(v: unknown): string { return v == null ? "" : String(v) }
 
 // ─── DRAWING FUNCTIONS ───
 
@@ -265,7 +351,7 @@ function drawHeatmap(ctx: CanvasRenderingContext2D, toX: (t: number) => number, 
   }
 }
 
-function drawChannel(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, cl: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
+function drawChannel(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, cl: Record<string, unknown> | undefined, w: number, ohlcv: Candle[], ds: Record<string, unknown> | undefined) {
   if (!cl || cl.status !== "calculated" || !ohlcv.length) return
   const upper = cl.upper as { time: number; value: number }[] | undefined
   const lower = cl.lower as { time: number; value: number }[] | undefined
@@ -289,19 +375,25 @@ function drawChannel(ctx: CanvasRenderingContext2D, toX: (t: number) => number, 
   drawLine(lower, "rgba(168,85,247,0.5)", [4, 4])
   if (mid) drawLine(mid, "rgba(168,85,247,0.2)", [2, 6])
 
+  const last = ohlcv[ohlcv.length - 1]
+  const xl = toX(last.time)
   if (upper.length > 0) {
-    const last = upper[upper.length - 1]; const x = toX(last.time); const y = toY(last.value)
-    if (x > 0 && y > 0) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(168,85,247,0.6)"; ctx.fillText("Üst kanal", x + 3, y - 2) }
+    const lu = upper[upper.length - 1]; const xu = toX(lu.time); const yu = toY(lu.value)
+    if (xu > 0 && yu > 0) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(168,85,247,0.6)"; ctx.fillText("Üst kanal", xu + 3, yu - 2) }
   }
   if (lower.length > 0) {
-    const last = lower[lower.length - 1]; const x = toX(last.time); const y = toY(last.value)
-    if (x > 0 && y > 0) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(168,85,247,0.6)"; ctx.fillText("Alt kanal", x + 3, y + 10) }
+    const ll = lower[lower.length - 1]; const xll = toX(ll.time); const yll = toY(ll.value)
+    if (xll > 0 && yll > 0) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(168,85,247,0.6)"; ctx.fillText("Alt kanal", xll + 3, yll + 10) }
+  }
+  if (ds) {
+    ctx.font = "7px monospace"; ctx.fillStyle = "rgba(168,85,247,0.5)"
+    ctx.fillText(p2str(ds.label_az) + " - " + p2str(ds.breakout_status), xl - 60, 15)
   }
 }
 
 function drawBreakoutZone(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, bz: Record<string, unknown> | undefined, w: number, h: number, ohlcv: Candle[]) {
   if (!bz || bz.status !== "calculated" || !ohlcv.length) return
-  const zoneTop = num(bz.zone_top); const zoneBottom = num(bz.zone_bottom)
+  const zoneTop = n2(bz.zone_top); const zoneBottom = n2(bz.zone_bottom)
   if (zoneTop <= 0 || zoneBottom <= 0) return
   const yTop = toY(zoneTop); const yBottom = toY(zoneBottom)
   if (yTop <= 0 || yBottom <= 0) return
@@ -316,10 +408,10 @@ function drawBreakoutZone(ctx: CanvasRenderingContext2D, toX: (t: number) => num
 
   ctx.font = "7px monospace"
   ctx.fillStyle = "rgba(168,85,247,0.7)"
-  ctx.fillText(`BO ${zoneTop.toFixed(2)}`, lastX + 3, yTop - 2)
-  ctx.fillText(`BO ${zoneBottom.toFixed(2)}`, lastX + 3, yBottom + 10)
+  ctx.fillText(`BO Üst $${zoneTop.toFixed(2)}`, lastX + 3, yTop - 2)
+  ctx.fillText(`BO Alt $${zoneBottom.toFixed(2)}`, lastX + 3, yBottom + 10)
 
-  const testCount = num(bz.test_count)
+  const testCount = n2(bz.test_count)
   if (testCount > 0) {
     ctx.font = "6px monospace"
     ctx.fillStyle = "rgba(168,85,247,0.4)"
@@ -327,7 +419,53 @@ function drawBreakoutZone(ctx: CanvasRenderingContext2D, toX: (t: number) => num
   }
 }
 
-function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, fib: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
+function drawRetestZone(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, bz: Record<string, unknown> | undefined, ds: Record<string, unknown> | undefined, w: number, h: number, ohlcv: Candle[]) {
+  if (!ohlcv.length) return
+  const lastX = toX(ohlcv[ohlcv.length - 1].time); if (lastX <= 0) return
+  let retestTop = 0; let retestBottom = 0
+  if (bz && bz.status === "calculated") {
+    retestTop = n2(bz.zone_top); retestBottom = n2(bz.zone_bottom)
+  } else if (ds) {
+    retestTop = n2(ds.channel_top); retestBottom = n2(ds.channel_bottom)
+  }
+  if (retestTop <= 0 || retestBottom <= 0) return
+  const yT = toY(retestTop * 0.98); const yB = toY(retestBottom * 1.02)
+  if (yT <= 0 || yB <= 0) return
+  ctx.fillStyle = "rgba(59,130,246,0.05)"; ctx.fillRect(lastX - 30, yT, 60, yB - yT)
+  ctx.strokeStyle = "rgba(59,130,246,0.2)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 4])
+  ctx.strokeRect(lastX - 30, yT, 60, yB - yT); ctx.setLineDash([])
+  ctx.font = "6px monospace"; ctx.fillStyle = "rgba(59,130,246,0.5)"
+  ctx.fillText("Retest Zonası", lastX - 25, yT - 2)
+}
+
+function drawLiquidityZones(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, sr: Record<string, unknown>, ds: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
+  const lastX = ohlcv.length ? toX(ohlcv[ohlcv.length - 1].time) : 0
+  const liqAbove = sr.liquidity_above as { price: number; strength: number }[] | undefined
+  const liqBelow = sr.liquidity_below as { price: number; strength: number }[] | undefined
+  if (liqAbove) for (const l of liqAbove) {
+    const y = toY(l.price); if (y <= 0) continue
+    ctx.strokeStyle = "rgba(239,68,68,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 6])
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+    ctx.font = "6px monospace"; ctx.fillStyle = "rgba(239,68,68,0.3)"; ctx.fillText(`Likvidite $${l.price.toFixed(2)}`, 2, y - 2)
+  }
+  if (liqBelow) for (const l of liqBelow) {
+    const y = toY(l.price); if (y <= 0) continue
+    ctx.strokeStyle = "rgba(34,197,94,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 6])
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+    ctx.font = "6px monospace"; ctx.fillStyle = "rgba(34,197,94,0.3)"; ctx.fillText(`Likvidite $${l.price.toFixed(2)}`, 2, y - 2)
+  }
+}
+
+function drawInvalLine(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, invalLevel: number, w: number) {
+  if (invalLevel <= 0) return
+  const y = toY(invalLevel); if (y <= 0) return
+  ctx.strokeStyle = "rgba(239,68,68,0.4)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4])
+  ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+  ctx.font = "7px monospace"; ctx.fillStyle = "rgba(239,68,68,0.6)"
+  ctx.fillText(`Ləğv $${invalLevel.toFixed(2)}`, w - 65, y - 2)
+}
+
+function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, fib: Record<string, unknown> | undefined, th: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
   if (!fib || fib.status !== "calculated" || !ohlcv.length) return
   const levels = fib.retracement_levels as Record<string, number> | undefined
   if (!levels) return
@@ -347,7 +485,7 @@ function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => 
     ctx.setLineDash(k === "0.5" ? [4, 4] : [2, 4])
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
     ctx.font = "6px monospace"; ctx.fillStyle = colors[k] || "rgba(255,255,255,0.2)"
-    ctx.fillText(`Fib ${labels[k]} $${p.toFixed(2)}`, w - 95, y - 2)
+    ctx.fillText(`Fib ${labels[k]} $${p.toFixed(2)}`, w - 105, y - 2)
   }
 
   const extUp = fib.extension_up as Record<string, number> | undefined
@@ -357,7 +495,7 @@ function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => 
       ctx.strokeStyle = "rgba(34,197,94,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([1, 6])
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
       ctx.font = "6px monospace"; ctx.fillStyle = "rgba(34,197,94,0.35)"
-      ctx.fillText(`Ext ${k} $${v.toFixed(2)}`, w - 95, y - 2)
+      ctx.fillText(`Ext ${k} $${v.toFixed(2)}`, w - 105, y - 2)
     }
   }
   const extDn = fib.extension_down as Record<string, number> | undefined
@@ -367,112 +505,142 @@ function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => 
       ctx.strokeStyle = "rgba(239,68,68,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([1, 6])
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
       ctx.font = "6px monospace"; ctx.fillStyle = "rgba(239,68,68,0.35)"
-      ctx.fillText(`Ext ${k} $${v.toFixed(2)}`, w - 95, y - 2)
+      ctx.fillText(`Ext ${k} $${v.toFixed(2)}`, w - 105, y - 2)
+    }
+  }
+
+  if (th) {
+    const tgs = th.targets as { level: string; price: number; type: string; probability: number }[] | undefined
+    if (tgs) for (const t of tgs.slice(0, 8)) {
+      if (!t.type.includes("Fib")) continue
+      const y = toY(t.price); if (y <= 0) continue
+      ctx.strokeStyle = "rgba(245,158,11,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 4])
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+      ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.4)"
+      ctx.fillText(`${t.level} $${t.price.toFixed(2)} (${t.probability}%)`, w - 105, y - 2)
     }
   }
 }
 
-function drawScenarioPath(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, sp: Record<string, unknown> | undefined, w: number, h: number, cb: Record<string, unknown> | undefined, ohlcv: Candle[]) {
+function drawTargetLines(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, th: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
+  if (!th || !ohlcv.length) return
+  const targets = th.targets as { level: string; price: number; type: string; probability: number; time_estimate: string }[] | undefined
+  if (!targets) return
+  const lastCandle = ohlcv[ohlcv.length - 1]; const lx = toX(lastCandle.time)
+  for (const tgt of targets) {
+    if (!tgt.level.startsWith("TP")) continue
+    const y = toY(tgt.price); if (y <= 0) continue
+    ctx.strokeStyle = "rgba(245,158,11,0.25)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 6])
+    ctx.beginPath(); ctx.moveTo(lx, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+    ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.6)";
+    ctx.fillText(`${tgt.level} $${tgt.price.toFixed(2)} ${tgt.probability}% ${tgt.time_estimate}`, w - 155, y - 2)
+  }
+}
+
+function drawSupportResistanceZones(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, supZone: Record<string, unknown> | undefined, resZone: Record<string, unknown> | undefined, w: number, h: number, ohlcv: Candle[]) {
+  if (!supZone || !resZone || !ohlcv.length) return
+  const sTop = n2(supZone.top); const sBot = n2(supZone.bottom)
+  const rTop = n2(resZone.top); const rBot = n2(resZone.bottom)
+  const lastX = toX(ohlcv[ohlcv.length - 1].time)
+
+  if (sBot > 0 && sTop > 0) {
+    const ys = toY(sBot); const ys2 = toY(sTop)
+    if (ys > 0 && ys2 > 0) {
+      ctx.fillStyle = "rgba(34,197,94,0.06)"; ctx.fillRect(0, ys, w, ys2 - ys)
+      ctx.strokeStyle = "rgba(34,197,94,0.2)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 4])
+      ctx.beginPath(); ctx.moveTo(0, ys); ctx.lineTo(w, ys); ctx.stroke(); ctx.setLineDash([])
+      ctx.font = "7px monospace"; ctx.fillStyle = "rgba(34,197,94,0.5)"
+      ctx.fillText(`Dəstək $${sBot.toFixed(2)}-${sTop.toFixed(2)}`, 2, ys - 2)
+    }
+  }
+  if (rBot > 0 && rTop > 0) {
+    const yr = toY(rBot); const yr2 = toY(rTop)
+    if (yr > 0 && yr2 > 0) {
+      ctx.fillStyle = "rgba(239,68,68,0.06)"; ctx.fillRect(0, yr, w, yr2 - yr)
+      ctx.strokeStyle = "rgba(239,68,68,0.2)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 4])
+      ctx.beginPath(); ctx.moveTo(0, yr); ctx.lineTo(w, yr); ctx.stroke(); ctx.setLineDash([])
+      ctx.font = "7px monospace"; ctx.fillStyle = "rgba(239,68,68,0.5)"
+      ctx.fillText(`Müqavimət $${rBot.toFixed(2)}-${rTop.toFixed(2)}`, 2, yr - 2)
+    }
+  }
+}
+
+function drawScenarioPath(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, sp: Record<string, unknown> | undefined, w: number, h: number, cb: Record<string, unknown> | undefined, ohlcv: Candle[], which: "main" | "alt" | "fakeout") {
   if (!sp || !ohlcv.length) return
-  const main = sp.main_scenario as Record<string, unknown> | undefined
-  const alt = sp.alternative_scenario as Record<string, unknown> | undefined
-  const fake = sp.fakeout_scenario as Record<string, unknown> | undefined
+  const key = which === "main" ? "main_scenario" : which === "alt" ? "alternative_scenario" : "fakeout_scenario"
+  const sc = sp[key] as Record<string, unknown> | undefined
+  if (!sc) return
+  const pts = sc.path_points as { time_offset: number; price: number; label: string; phase: string }[] | undefined
+  if (!pts || pts.length < 2) return
+
   const lastCandle = ohlcv[ohlcv.length - 1]; const startX = toX(lastCandle.time)
   const startY = toY(lastCandle.close)
   if (startX <= 0 || startY <= 0) return
 
-  const drawPath = (pts: { time_offset: number; price: number; label: string; phase: string }[] | undefined, color: string, lineWidth: number, dash: number[], alpha: number) => {
-    if (!pts || pts.length < 2) return
-    const lastTime = lastCandle.time
-    ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.setLineDash(dash)
-    ctx.globalAlpha = alpha; ctx.beginPath()
-    let started = false; let prevX = startX; let prevY = startY
-    for (const p of pts) {
-      if (p.time_offset === 0) continue
-      const x = startX + p.time_offset * 8
-      const y = toY(p.price)
-      if (y <= 0) continue
-      if (!started) { ctx.moveTo(startX, startY); x > 0 && ctx.lineTo(x, y); started = true }
-      else { ctx.lineTo(x, y) }
-      prevX = x; prevY = y
-    }
-    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1
-  }
-
-  const drawPathLabels = (pts: { time_offset: number; price: number; label: string; phase: string }[] | undefined, color: string, alpha: number) => {
-    if (!pts) return
-    ctx.globalAlpha = alpha
-    for (const p of pts) {
-      if (p.time_offset === 0) continue
-      const x = startX + p.time_offset * 8; const y = toY(p.price)
-      if (y <= 0) continue
-      ctx.font = "6px monospace"; ctx.fillStyle = color
-      ctx.fillText(p.label, x + 2, y - 2)
-      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill()
-    }
-    ctx.globalAlpha = 1
-  }
-
-  const signalConf = cb ? num(cb.signal_confidence) : 50
+  const signalConf = cb ? n2(cb.signal_confidence) : 50
   const baseAlpha = Math.max(0.2, Math.min(1, signalConf / 70))
-  const mainAlpha = Math.max(0.3, baseAlpha)
-  const altAlpha = Math.max(0.15, baseAlpha * 0.5)
-  const fakeAlpha = Math.max(0.15, baseAlpha * 0.4)
 
-  const mainPts = main?.path_points as { time_offset: number; price: number; label: string; phase: string }[] | undefined
-  const altPts = alt?.path_points as { time_offset: number; price: number; label: string; phase: string }[] | undefined
-  const fakePts = fake?.path_points as { time_offset: number; price: number; label: string; phase: string }[] | undefined
+  let color: string, lineWidth: number, dash: number[], alpha: number, label: string
+  if (which === "main") {
+    color = "#22c55e"; lineWidth = 2; dash = []; alpha = Math.max(0.3, baseAlpha)
+    label = "ƏSAS SSENARİ"
+  } else if (which === "alt") {
+    color = "#ef4444"; lineWidth = 1; dash = [4, 4]; alpha = Math.max(0.15, baseAlpha * 0.5)
+    label = "ALTERNATİV"
+  } else {
+    color = "#f97316"; lineWidth = 1; dash = [2, 4]; alpha = Math.max(0.15, baseAlpha * 0.4)
+    label = "FAKEOUT"
+  }
 
-  if (signalConf >= 50) {
-    drawPath(mainPts, "#22c55e", 2, [], mainAlpha)
-    drawPathLabels(mainPts, "rgba(34,197,94,0.8)", mainAlpha)
-    if (mainPts && mainPts.length > 2) {
-      const last = mainPts[mainPts.length - 1]; const lx = startX + last.time_offset * 8; const ly = toY(last.price)
-      if (ly > 0) {
-        ctx.font = "bold 8px monospace"; ctx.fillStyle = `rgba(34,197,94,${mainAlpha})`
-        ctx.fillText("ƏSAS SSENARİ", lx - 30, ly - 12)
-      }
+  if (which === "main" && signalConf < 50) return
+
+  ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.setLineDash(dash)
+  ctx.globalAlpha = alpha; ctx.beginPath()
+  ctx.moveTo(startX, startY)
+  for (const p of pts) {
+    if (p.time_offset === 0) continue
+    const x = startX + p.time_offset * 8; const y = toY(p.price)
+    if (y <= 0) continue
+    ctx.lineTo(x, y)
+  }
+  ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1
+
+  ctx.globalAlpha = alpha
+  for (const p of pts) {
+    if (p.time_offset === 0) continue
+    const x = startX + p.time_offset * 8; const y = toY(p.price)
+    if (y <= 0) continue
+    ctx.font = "6px monospace"; ctx.fillStyle = color; ctx.textAlign = "center"
+    ctx.fillText(p.label, x, Math.min(y - 4, h - 2))
+    ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill()
+    ctx.textAlign = "left"
+  }
+  ctx.globalAlpha = 1
+
+  if (pts.length > 2) {
+    const last = pts[pts.length - 1]
+    const lx = startX + last.time_offset * 8 + 10; const ly = toY(last.price)
+    if (ly > 0) {
+      ctx.font = "bold 7px monospace"; ctx.fillStyle = color
+      ctx.fillText(`${label} ${n2(sc.probability)}%`, lx - 30, ly - 12)
+      ctx.font = "6px monospace"; ctx.fillStyle = `rgba(255,255,255,${alpha*0.5})`
+      ctx.fillText(`Hədəf: $${last.price.toFixed(2)}`, lx - 30, ly - 2)
     }
-  }
-
-  drawPath(altPts, "#ef4444", 1, [4, 4], altAlpha)
-  drawPathLabels(altPts, "rgba(239,68,68,0.5)", altAlpha)
-
-  drawPath(fakePts, "#f97316", 1, [2, 4], fakeAlpha)
-  drawPathLabels(fakePts, "rgba(249,115,22,0.5)", fakeAlpha)
-  if (fakePts && fakePts.length > 2) {
-    const last = fakePts[fakePts.length - 1]; const lx = startX + last.time_offset * 8; const ly = toY(last.price)
-    if (ly > 0) { ctx.font = "6px monospace"; ctx.fillStyle = `rgba(249,115,22,${fakeAlpha})`; ctx.fillText("FAKEOUT", lx - 20, ly + 10) }
-  }
-}
-
-function drawTargets(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, th: Record<string, unknown> | undefined, w: number, ohlcv: Candle[]) {
-  if (!th || !ohlcv.length) return
-  const targets = th.targets as { level: string; price: number; type: string; probability: number; time_estimate: string }[] | undefined
-  if (!targets) return
-  const lastCandle = ohlcv[ohlcv.length - 1]
-  for (const tgt of targets) {
-    const y = toY(tgt.price); if (y <= 0) continue
-    ctx.strokeStyle = "rgba(245,158,11,0.2)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 6])
-    ctx.beginPath(); ctx.moveTo(toX(lastCandle.time), y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
-    ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.5)";
-    ctx.fillText(`${tgt.level} ${tgt.type} $${tgt.price.toFixed(2)} ${tgt.probability}% ${tgt.time_estimate}`, w - 150, y - 2)
   }
 }
 
 function drawSMCStructures(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, analysis: Record<string, unknown> | null, ohlcv: Candle[]) {
   if (!analysis || !ohlcv.length) return
-  const w = ctx.canvas.width / window.devicePixelRatio
   const chart = analysis as Record<string, unknown>
   const allStructs = chart.all_structures as Record<string, unknown>[] | undefined
   if (!allStructs) return
 
-  const fvgs = allStructs.filter((s) => str(s.category) === "fvg")
+  const fvgs = allStructs.filter((s) => p2str(s.category) === "fvg")
   for (const fvg of fvgs.slice(-10)) {
-    const idx = num(fvg.index); if (idx <= 0 || idx >= ohlcv.length) continue
-    const x = toX(ohlcv[idx].time); const top = toY(num(fvg.gap_high)); const bot = toY(num(fvg.gap_low))
+    const idx = n2(fvg.index); if (idx <= 0 || idx >= ohlcv.length) continue
+    const x = toX(ohlcv[idx].time); const top = toY(n2(fvg.gap_high)); const bot = toY(n2(fvg.gap_low))
     if (x <= 0 || top <= 0 || bot <= 0) continue
-    const isBullish = str(fvg.type).includes("bullish")
+    const isBullish = p2str(fvg.type).includes("bullish")
     ctx.fillStyle = isBullish ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)"
     ctx.fillRect(x - 4, Math.min(top, bot), 8, Math.abs(top - bot))
     ctx.strokeStyle = isBullish ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 2])
@@ -480,12 +648,12 @@ function drawSMCStructures(ctx: CanvasRenderingContext2D, toX: (t: number) => nu
     ctx.font = "6px monospace"; ctx.fillStyle = isBullish ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)"; ctx.fillText("FVG", x - 4, Math.max(top, bot) + 10)
   }
 
-  const obs = allStructs.filter((s) => str(s.category) === "order_block")
+  const obs = allStructs.filter((s) => p2str(s.category) === "order_block")
   for (const ob of obs.slice(-8)) {
-    const idx = num(ob.index); if (idx <= 0 || idx >= ohlcv.length) continue
-    const x = toX(ohlcv[idx].time); const top = toY(num(ob.high)); const bot = toY(num(ob.low))
+    const idx = n2(ob.index); if (idx <= 0 || idx >= ohlcv.length) continue
+    const x = toX(ohlcv[idx].time); const top = toY(n2(ob.high)); const bot = toY(n2(ob.low))
     if (x <= 0 || top <= 0 || bot <= 0) continue
-    const isBullish = str(ob.type).includes("bullish")
+    const isBullish = p2str(ob.type).includes("bullish")
     ctx.fillStyle = isBullish ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"
     ctx.fillRect(x - 6, Math.min(top, bot), 12, Math.abs(top - bot))
     ctx.strokeStyle = isBullish ? "#22c55e" : "#ef4444"; ctx.lineWidth = 1
@@ -493,12 +661,12 @@ function drawSMCStructures(ctx: CanvasRenderingContext2D, toX: (t: number) => nu
     ctx.font = "7px monospace"; ctx.fillStyle = isBullish ? "#22c55e" : "#ef4444"; ctx.fillText("OB", x - 6, Math.min(top, bot) - 3)
   }
 
-  const bosList = allStructs.filter((s) => str(s.category) === "bos")
+  const bosList = allStructs.filter((s) => p2str(s.category) === "bos")
   for (const bos of bosList.slice(-6)) {
-    const idx = num(bos.index); if (idx <= 0 || idx >= ohlcv.length) continue
-    const x = toX(ohlcv[idx].time); const y = toY(num(bos.price))
+    const idx = n2(bos.index); if (idx <= 0 || idx >= ohlcv.length) continue
+    const x = toX(ohlcv[idx].time); const y = toY(n2(bos.price))
     if (x <= 0 || y <= 0) continue
-    const isBullish = str(bos.type).includes("bullish"); const sz = 5
+    const isBullish = p2str(bos.type).includes("bullish"); const sz = 5
     ctx.strokeStyle = isBullish ? "#22c55e" : "#ef4444"; ctx.lineWidth = 1.5; ctx.beginPath()
     if (isBullish) { ctx.moveTo(x - sz, y + sz); ctx.lineTo(x, y); ctx.lineTo(x + sz, y + sz) }
     else { ctx.moveTo(x - sz, y - sz); ctx.lineTo(x, y); ctx.lineTo(x + sz, y - sz) }
@@ -506,9 +674,9 @@ function drawSMCStructures(ctx: CanvasRenderingContext2D, toX: (t: number) => nu
     ctx.fillText("BOS", x + sz + 1, y + (isBullish ? sz : -sz) + 2)
   }
 
-  const chochList = allStructs.filter((s) => str(s.category) === "choch")
+  const chochList = allStructs.filter((s) => p2str(s.category) === "choch")
   for (const choch of chochList.slice(-4)) {
-    const idx = num(choch.index); if (idx <= 0 || idx >= ohlcv.length) continue
+    const idx = n2(choch.index); if (idx <= 0 || idx >= ohlcv.length) continue
     const x = toX(ohlcv[idx].time); const y = toY(ohlcv[idx].high); if (x <= 0 || y <= 0) continue
     ctx.font = "6px monospace"; ctx.fillStyle = "#a855f7"; ctx.fillText("CHoCH", x + 2, y - 3)
   }
@@ -522,7 +690,7 @@ function drawSR(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: 
     { key: "strongest_resistance", label: "GQ", color: "rgba(239,68,68,0.3)" },
   ]
   for (const l of levels) {
-    const p = num(sr[l.key]); if (p <= 0) continue
+    const p = n2(sr[l.key]); if (p <= 0) continue
     const y = toY(p); if (y <= 0) continue
     ctx.strokeStyle = l.color; ctx.lineWidth = 0.5
     ctx.setLineDash(l.key.startsWith("strongest") ? [4, 4] : [2, 2])
@@ -536,16 +704,16 @@ function drawPatterns(ctx: CanvasRenderingContext2D, toX: (t: number) => number,
   if (!patterns || !ohlcv.length) return
   let yOff = 20; const st: Record<string,string> = { CONFIRMED:"TƏSDİQLƏNDİ", DETECTED:"AŞKAR EDİLDİ", FORMING:"FORMALAŞIR" }
   for (const pat of patterns.slice(0, 3)) {
-    const name = str(pat.name); const prob = num(pat.probability)
-    const bLevel = num(pat.breakout_level) || num(pat.breakdown_level); const mTarget = num(pat.measured_target)
-    ctx.font = "7px monospace"; ctx.fillStyle = str(pat.status) === "CONFIRMED" ? "#22c55e" : str(pat.status) === "DETECTED" ? "#f59e0b" : "#6b7280"
-    ctx.fillText(`${name} ${st[str(pat.status)]||str(pat.status)} ${prob}%`, 10, yOff + 10)
+    const name = p2str(pat.name); const prob = n2(pat.probability)
+    const bLevel = n2(pat.breakout_level) || n2(pat.breakdown_level); const mTarget = n2(pat.measured_target)
+    ctx.font = "7px monospace"; ctx.fillStyle = p2str(pat.status) === "CONFIRMED" ? "#22c55e" : p2str(pat.status) === "DETECTED" ? "#f59e0b" : "#6b7280"
+    ctx.fillText(`${name} ${st[p2str(pat.status)]||p2str(pat.status)} ${prob}%`, 10, yOff + 10)
     if (bLevel > 0 && mTarget > 0) {
       const y1 = toY(bLevel); const y2 = toY(mTarget)
       if (y1 > 0 && y2 > 0) {
-        ctx.strokeStyle = str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3])
+        ctx.strokeStyle = p2str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3])
         ctx.beginPath(); ctx.moveTo(w - 40, y1); ctx.lineTo(w - 40, y2); ctx.stroke(); ctx.setLineDash([])
-        ctx.font = "6px monospace"; ctx.fillStyle = str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.5)" : "rgba(245,158,11,0.5)"
+        ctx.font = "6px monospace"; ctx.fillStyle = p2str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.5)" : "rgba(245,158,11,0.5)"
         ctx.fillText(`→$${mTarget.toFixed(1)}`, w - 38, (y1 + y2) / 2)
       }
     }
@@ -554,8 +722,8 @@ function drawPatterns(ctx: CanvasRenderingContext2D, toX: (t: number) => number,
 }
 
 function drawTradeLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, triggers: Record<string, unknown>, scores: Record<string, unknown>, w: number) {
-  const conf = num(scores.signal_confidence); const ltP = num(triggers.long_trigger_price); const stP = num(triggers.short_trigger_price)
-  const inv = num(triggers.bullish_invalidation) || num(triggers.bearish_invalidation)
+  const conf = n2(scores.signal_confidence); const ltP = n2(triggers.long_trigger_price); const stP = n2(triggers.short_trigger_price)
+  const inv = n2(triggers.bullish_invalidation) || n2(triggers.bearish_invalidation)
   const drawLine = (price: number, color: string, label: string, dash: number[], width: number) => {
     const y = toY(price); if (y <= 0) return
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash)
@@ -590,8 +758,8 @@ function drawSmartMoney(ctx: CanvasRenderingContext2D, toX: (t: number) => numbe
   if (!allStructs) return
   let bc = 0, sc = 0
   for (const s of allStructs) {
-    if (str(s.category) === "order_block" && str(s.type).includes("bullish")) bc++
-    if (str(s.category) === "order_block" && str(s.type).includes("bearish")) sc++
+    if (p2str(s.category) === "order_block" && p2str(s.type).includes("bullish")) bc++
+    if (p2str(s.category) === "order_block" && p2str(s.type).includes("bearish")) sc++
   }
   if (bc > sc * 1.5) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(34,197,94,0.3)"; ctx.fillText("Yığım Zonası", 10, 50) }
   else if (sc > bc * 1.5) { ctx.font = "7px monospace"; ctx.fillStyle = "rgba(239,68,68,0.3)"; ctx.fillText("Paylanma Zonası", 10, 50) }
@@ -614,7 +782,7 @@ function drawElliottWave(ctx: CanvasRenderingContext2D, toX: (t: number) => numb
   }
 }
 
-function drawCone(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, projection: Candle[], confidence: number, w: number, h: number, ohlcv: Candle[]) {
+function drawCone(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, confidence: number, w: number, h: number, ohlcv: Candle[], sp: Record<string, unknown> | undefined) {
   if (confidence < 30 || !ohlcv.length) return
   const lastPrice = ohlcv[ohlcv.length - 1].close; const spread = (1 - confidence / 100) * 0.15 * lastPrice
   const steps = 20; const startX = toX(ohlcv[ohlcv.length - 1].time); if (startX <= 0) return

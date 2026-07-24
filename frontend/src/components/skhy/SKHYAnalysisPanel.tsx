@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, Minus, Activity, BarChart3, Volume2, Zap, Shield, Brain, AlertTriangle } from "lucide-react"
+import { TrendingUp, TrendingDown, Minus, Activity, BarChart3, Volume2, Zap, Shield, Brain, AlertTriangle, Target, Clock, RefreshCw } from "lucide-react"
 
 interface Props {
   timeframes: Record<string, unknown>
@@ -11,7 +11,7 @@ interface Props {
   analysis: Record<string, unknown> | null
 }
 
-function scoreValue(s: Record<string, unknown>, key: string): number {
+function sv(s: Record<string, unknown>, key: string): number {
   const v = s[key]
   return typeof v === "number" ? v : 0
 }
@@ -50,9 +50,45 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
   const bullishInvalidation = numVal(triggers.bullish_invalidation)
   const bearishInvalidation = numVal(triggers.bearish_invalidation)
 
+  const ds = (analysis?.detected_structure || {}) as Record<string, unknown>
+  const bz = (analysis?.breakout_zone || {}) as Record<string, unknown>
+  const th = (analysis?.target_hierarchy || {}) as Record<string, unknown>
+  const cb = (analysis?.confidence_breakdown || {}) as Record<string, unknown>
+  const dataFreshness = strVal(analysis?.data_freshness)
+  const lastUpdated = strVal(analysis?.last_updated || analysis?.timestamp)
+
+  const showStructure = strVal(ds.status) === "detected"
+  const showBreakout = strVal(bz.status) === "calculated"
+  const showTargets = th && Array.isArray(th.targets) && (th.targets as unknown[]).length > 0
+
+  const dsAccum = !!ds.accumulation_zone
+  const dsDistrib = !!ds.distribution_zone
+
+  const structLabel = strVal(ds.label_az)
+  const structBreakout = strVal(ds.breakout_status)
+  const structChannelTop = numVal(ds.channel_top)
+  const structChannelBot = numVal(ds.channel_bottom)
+
+  const bzBot = numVal(bz.zone_bottom)
+  const bzTop = numVal(bz.zone_top)
+  const bzTest = numVal(bz.test_count)
+  const bzPriceZone = strVal(bz.current_price_zone)
+  const bzBullish = !!bz.bullish_breakout_ready
+  const bzBearish = !!bz.bearish_breakout_ready
+
   return (
     <div className="border-b border-gray-800/60">
-      {/* Hazırda nə baş verir? */}
+      <div className="px-3 py-1.5 border-b border-gray-800/40 flex items-center justify-between text-[9px]">
+        <div className="flex items-center gap-1 text-gray-500">
+          <RefreshCw className="w-2.5 h-2.5" />
+          <span>Məlumat: {dataFreshness}</span>
+        </div>
+        <div className="flex items-center gap-1 text-gray-500">
+          <Clock className="w-2.5 h-2.5" />
+          <span>{lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "..."}</span>
+        </div>
+      </div>
+
       <div className="p-3 border-b border-gray-800/40">
         <div className="flex items-center gap-1.5 text-[11px] text-blue-400 font-semibold uppercase tracking-wider mb-2">
           <Brain className="w-3 h-3" /> Hazırda nə baş verir?
@@ -62,7 +98,70 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       </div>
 
-      {/* LONG nə vaxt aktivləşər? */}
+      {showStructure && (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-purple-400 font-semibold uppercase tracking-wider mb-2">
+            <Activity className="w-3 h-3" /> Əsas Struktur
+          </div>
+          <div className="space-y-1 text-[10px]">
+            <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Tip</span>
+              <span className="font-mono text-purple-400">{structLabel}</span>
+            </div>
+            <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Vəziyyət</span>
+              <span className={cn("font-mono", structBreakout.includes("breakout") ? "text-yellow-400" : "text-gray-300")}>{structBreakout}</span>
+            </div>
+            {structChannelTop > 0 && (
+              <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+                <span className="text-gray-400">Kanal üst</span>
+                <span className="font-mono text-purple-400">${structChannelTop.toFixed(2)}</span>
+              </div>
+            )}
+            {structChannelBot > 0 && (
+              <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+                <span className="text-gray-400">Kanal alt</span>
+                <span className="font-mono text-purple-400">${structChannelBot.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-1 px-2 py-1">
+              <span className={cn("w-2 h-2 rounded-full", dsAccum ? "bg-green-400" : dsDistrib ? "bg-red-400" : "bg-gray-600")} />
+              <span className="text-gray-500">{dsAccum ? "Yığım zonası" : dsDistrib ? "Paylanma zonası" : "Neytral"}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBreakout && (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-purple-400 font-semibold uppercase tracking-wider mb-2">
+            <Zap className="w-3 h-3" /> Breakout Statusu
+          </div>
+          <div className="space-y-1 text-[10px]">
+            <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Zona</span>
+              <span className="font-mono text-purple-400">${bzBot.toFixed(2)}-${bzTop.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Test sayı</span>
+              <span className="font-mono text-gray-300">{bzTest}x</span>
+            </div>
+            <div className="flex justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Qiymət</span>
+              <span className={cn("font-mono", bzPriceZone.includes("above") ? "text-green-400" : bzPriceZone.includes("below") ? "text-red-400" : "text-yellow-400")}>{bzPriceZone}</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1">
+              <span className={cn("w-2 h-2 rounded-full", bzBullish ? "bg-green-400" : "bg-gray-600")} />
+              <span className="text-gray-400">Bullish: {bzBullish ? "Hazır" : "Gözlə"}</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1">
+              <span className={cn("w-2 h-2 rounded-full", bzBearish ? "bg-red-400" : "bg-gray-600")} />
+              <span className="text-gray-400">Bearish: {bzBearish ? "Hazır" : "Gözlə"}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="p-3 border-b border-gray-800/40">
         <div className="flex items-center gap-1.5 text-[11px] text-green-400 font-semibold uppercase tracking-wider mb-2">
           <TrendingUp className="w-3 h-3" /> ALIŞ (LONG) nə vaxt aktivləşər?
@@ -72,7 +171,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
             longConditions.slice(0, 4).map((c, i) => (
               <div key={i} className="flex items-start gap-1">
                 <span className="text-green-500/60 mt-0.5">•</span>
-                <span>{c}</span>
+                <span>{String(c)}</span>
               </div>
             ))
           ) : (
@@ -92,7 +191,6 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       </div>
 
-      {/* SHORT nə vaxt aktivləşər? */}
       <div className="p-3 border-b border-gray-800/40">
         <div className="flex items-center gap-1.5 text-[11px] text-red-400 font-semibold uppercase tracking-wider mb-2">
           <TrendingDown className="w-3 h-3" /> SATIŞ (SHORT) nə vaxt aktivləşər?
@@ -102,7 +200,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
             shortConditions.slice(0, 4).map((c, i) => (
               <div key={i} className="flex items-start gap-1">
                 <span className="text-red-500/60 mt-0.5">•</span>
-                <span>{c}</span>
+                <span>{String(c)}</span>
               </div>
             ))
           ) : (
@@ -122,7 +220,62 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       </div>
 
-      {/* Scoring */}
+      {showTargets && (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-yellow-400 font-semibold uppercase tracking-wider mb-2">
+            <Target className="w-3 h-3" /> Hədəflər
+          </div>
+          <div className="space-y-1">
+            {(th.targets as { level: string; price: number; probability: number; type: string; time_estimate: string }[]).slice(0, 6).map((t, i) => (
+              <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20 text-[10px]">
+                <div className="flex items-center gap-1.5">
+                  <span className={cn("font-mono text-[9px]", String(t.level).startsWith("TP") ? "text-yellow-400" : "text-gray-500")}>{String(t.level)}</span>
+                  <span className="text-gray-400">{String(t.type)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-gray-200">${Number(t.price).toFixed(2)}</span>
+                  <span className={cn("text-[8px] px-1 rounded", Number(t.probability) >= 70 ? "bg-green-500/20 text-green-400" : Number(t.probability) >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-gray-500/20 text-gray-400")}>{Number(t.probability)}%</span>
+                  <span className="text-gray-600 text-[8px]">{String(t.time_estimate)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {cb && Object.keys(cb).length > 0 && (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-blue-400 font-semibold uppercase tracking-wider mb-2">
+            <Shield className="w-3 h-3" /> İnam Bölgüsü
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {[
+              { label: "Trend", key: "trend_confidence" },
+              { label: "Struktur", key: "structure_confidence" },
+              { label: "Momentum", key: "momentum_confidence" },
+              { label: "Həcm", key: "volume_confidence" },
+              { label: "Fyuçers", key: "futures_confidence" },
+              { label: "Likvidlik", key: "liquidity_confidence" },
+              { label: "Pattern", key: "pattern_confidence" },
+              { label: "Breakout", key: "breakout_confidence" },
+              { label: "MTF", key: "multitimeframe_confidence" },
+              { label: "Risk", key: "risk_confidence" },
+            ].map(({ label, key }) => {
+              const v = numVal(cb[key])
+              return (
+                <div key={key} className="flex items-center justify-between px-1.5 py-1 rounded bg-gray-800/20 text-[9px]">
+                  <span className="text-gray-500">{label}</span>
+                  <span className={cn("font-mono font-bold", v >= 70 ? "text-green-400" : v >= 50 ? "text-yellow-400" : "text-red-400")}>{v}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-1 text-center text-[9px] text-gray-600">
+            Ümumi: {numVal(cb.signal_confidence)}% - {strVal(cb.overall_assessment)}
+          </div>
+        </div>
+      )}
+
       <div className="p-3 border-b border-gray-800/40">
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">
           <Shield className="w-3 h-3 text-blue-400" /> Bal Sistemi
@@ -134,8 +287,8 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
                 <s.icon className="w-2.5 h-2.5 text-gray-500" />
                 <span className="text-[10px] text-gray-400">{s.label}</span>
               </div>
-              <span className={cn("text-[10px] font-mono font-bold", getScoreColor(scoreValue(scores, s.key)))}>
-                {scoreValue(scores, s.key)}
+              <span className={cn("text-[10px] font-mono font-bold", getScoreColor(sv(scores, s.key)))}>
+                {sv(scores, s.key)}
               </span>
             </div>
           ))}
@@ -143,8 +296,8 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         <div className="flex items-center justify-between px-2 py-1.5 mt-1 rounded bg-gray-800/40">
           <span className="text-xs font-semibold text-gray-300">Ümumi</span>
           <div className="flex items-center gap-2">
-            <span className={cn("text-sm font-bold font-mono", getScoreColor(scoreValue(scores, "overall")))}>
-              {scoreValue(scores, "overall")}
+            <span className={cn("text-sm font-bold font-mono", getScoreColor(sv(scores, "overall")))}>
+              {sv(scores, "overall")}
             </span>
             <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-semibold", getStatusBadge(strVal(scores.status)))}>
               {strVal(scores.status)}
@@ -153,27 +306,32 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       </div>
 
-      {/* MTF Alignment */}
       {alignment && (
         <div className="p-3 border-b border-gray-800/40">
-          <div className={cn("flex items-center gap-1.5 text-[11px] px-2 py-1 rounded",
+          <div className={cn("flex items-center justify-between gap-1.5 text-[11px] px-2 py-1 rounded",
             alignment.status === "ALIGNED" ? "bg-green-500/10 text-green-400" :
             alignment.status === "CONFLICTING" ? "bg-red-500/10 text-red-400" : "bg-yellow-500/10 text-yellow-400")}>
-            {alignment.status === "ALIGNED" ? <TrendingUp className="w-3 h-3" /> :
-             alignment.status === "CONFLICTING" ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-            MTF Uyğunluq: {strVal(alignment.status)} ({typeof alignment.confidence === "number" ? alignment.confidence : 0}%)
+            <div className="flex items-center gap-1">
+              {alignment.status === "ALIGNED" ? <TrendingUp className="w-3 h-3" /> :
+               alignment.status === "CONFLICTING" ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+              <span>MTF: {strVal(alignment.status)}</span>
+            </div>
+            <span className="font-mono">{typeof alignment.confidence === "number" ? alignment.confidence : 0}%</span>
+          </div>
+          <div className="mt-1 text-[9px] text-gray-500 px-2">
+            {alignment.primary_direction === "long" ? "Üstünlük: ALIŞ" : alignment.primary_direction === "short" ? "Üstünlük: SATIŞ" : "Neytral"}
+            {typeof alignment.long_timeframes === "number" && typeof alignment.short_timeframes === "number" && ` (${alignment.long_timeframes}L / ${alignment.short_timeframes}S)`}
           </div>
           {Array.isArray(alignment.conflicts) && alignment.conflicts.length > 0 && (
             <div className="mt-1 space-y-0.5">
               {alignment.conflicts.slice(0, 2).map((c: string, i: number) => (
-                <div key={i} className="text-[10px] text-red-400/80 px-2">⚠ {c}</div>
+                <div key={i} className="text-[10px] text-red-400/80 px-2">⚠ {String(c)}</div>
               ))}
             </div>
           )}
         </div>
       )}
 
-      {/* Timeframe Table */}
       <div className="p-3 border-b border-gray-800/40">
         <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-1.5">Zaman Çərçivələri</div>
         <div className="overflow-x-auto">
@@ -219,7 +377,6 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       </div>
 
-      {/* Ən yaxın risk nədir? */}
       <div className="p-3">
         <div className="flex items-center gap-1.5 text-[11px] text-yellow-400 font-semibold uppercase tracking-wider mb-2">
           <AlertTriangle className="w-3 h-3" /> Ən yaxın risk nədir?
@@ -250,6 +407,11 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
               {bearishInvalidation > 0 ? `SATIŞ ləğvi: $${bearishInvalidation.toFixed(2)}` : ""}
             </span>
           </div>
+          {showStructure && (
+            <div className="text-[9px] text-gray-500 px-2">
+              Struktur: {structLabel} - {structBreakout}
+            </div>
+          )}
         </div>
       </div>
     </div>
