@@ -364,13 +364,43 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
       }
     }
 
-    // Signal levels (fallback if no projection)
-    if (lastCandle && signal && !signal.error && signal.confidence !== undefined
-        && signal.confidence >= 70 && candleSeriesRef.current && !projection) {
-      const lastTime = lastCandle.time
+    // Support/Resistance from trend lines
+    const trendLines = aiAnalysis?.components?.trend_lines
+    if (trendLines && candleSeriesRef.current && lastCandle) {
+      const lines: Array<{ price: number; title: string; color: string }> = []
+      if (trendLines.support_lines && trendLines.support_lines.length > 0) {
+        for (const sl of trendLines.support_lines) {
+          const s = sl as Record<string, unknown>
+          if (typeof s.end_price === "number" && s.end_price > 0) {
+            lines.push({ price: s.end_price as number, title: "DƏSTƏK", color: "#22c55e60" })
+          }
+        }
+      }
+      if (trendLines.resistance_lines && trendLines.resistance_lines.length > 0) {
+        for (const rl of trendLines.resistance_lines) {
+          const r = rl as Record<string, unknown>
+          if (typeof r.end_price === "number" && r.end_price > 0) {
+            lines.push({ price: r.end_price as number, title: "MÜQAVİMƏT", color: "#ef444460" })
+          }
+        }
+      }
+      for (const l of lines.slice(0, 4)) {
+        candleSeriesRef.current.createPriceLine({
+          price: l.price,
+          color: l.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: l.title,
+        })
+      }
+    }
+
+    // Signal levels (show whenever signal data exists, regardless of confidence)
+    if (lastCandle && signal && !signal.error && candleSeriesRef.current && !projection) {
       const levels = [
-        { price: signal.entry_zone?.min, title: "GİRİŞ AŞAĞI", color: "#3b82f6", style: LineStyle.Dashed },
-        { price: signal.entry_zone?.max, title: "GİRİŞ YUXARI", color: "#60a5fa", style: LineStyle.Dashed },
+        { price: signal.entry_zone?.min, title: "GİRİŞ ALT", color: "#3b82f660", style: LineStyle.Dashed },
+        { price: signal.entry_zone?.max, title: "GİRİŞ ÜST", color: "#60a5fa60", style: LineStyle.Dashed },
         { price: signal.stop_loss, title: "ZƏRƏR KƏS", color: "#ef4444", style: LineStyle.Solid },
         { price: signal.take_profit_1, title: "MH1", color: "#22c55e", style: LineStyle.Solid },
         { price: signal.take_profit_2, title: "MH2", color: "#16a34a", style: LineStyle.Dashed },
@@ -381,7 +411,7 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
           candleSeriesRef.current?.createPriceLine({
             price: level.price,
             color: level.color,
-            lineWidth: level.title === "ZƏRƏR KƏS" || level.title === "MH1" ? 2 : 1,
+            lineWidth: 1,
             lineStyle: level.style,
             axisLabelVisible: true,
             title: level.title,
@@ -406,17 +436,53 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
         createSeriesMarkers(candleSeriesRef.current, markers)
       }
 
-      // Direction projection arrow at future time
-      if (projection && projection.pattern_confidence && projection.pattern_confidence >= 70) {
+      // Direction projection arrows - Primary + Alternate scenarios
+      if (lastCandle && candleSeriesRef.current && projection) {
         const projDir = projection.direction || "long"
-        const futureTime = (Number(lastCandle.time) + (TIMEFRAMES.find(t => t.id === selectedTimeframe) ? 3600 : 3600)) as Time
-        const markers: SeriesMarker<Time>[] = [{
+        const futureTime = (Number(lastCandle.time) + 7200) as Time
+        const altDir = projDir === "long" ? "short" : "long"
+        const markers: SeriesMarker<Time>[] = []
+
+        // Primary scenario arrow (thick, opaque)
+        markers.push({
           time: futureTime,
           position: projDir === "long" ? "belowBar" : "aboveBar",
           color: projDir === "long" ? "#22c55e" : "#ef4444",
           shape: projDir === "long" ? "arrowUp" : "arrowDown" as "arrowUp" | "arrowDown",
-          text: `${projDir === "long" ? "↑ HƏDƏF" : "↓ HƏDƏF"} ${projection.pattern_name || ""}`,
-        }]
+          text: `ESAS ${projDir === "long" ? "↑ UZUN" : "↓ QISA"} ${projection.pattern_confidence || ""}%`,
+        })
+
+        // Alternate scenario arrow (smaller, semi-transparent, offset)
+        const altTime = (Number(lastCandle.time) + 14400) as Time
+        markers.push({
+          time: altTime,
+          position: altDir === "long" ? "belowBar" : "aboveBar",
+          color: altDir === "long" ? "#22c55e60" : "#ef444460",
+          shape: altDir === "long" ? "arrowUp" : "arrowDown" as "arrowUp" | "arrowDown",
+          text: `ALT ${altDir === "long" ? "↑ UZUN" : "↓ QISA"}`,
+        })
+
+        // Breakout confirmation marker
+        if (projection.pattern_status === "confirmed" || projection.breakout_confirmed) {
+          const boTime = (Number(lastCandle.time) + 800) as Time
+          markers.push({
+            time: boTime,
+            position: "aboveBar",
+            color: "#22c55e",
+            shape: "circle" as const,
+            text: "✓ BREAKOUT TƏSDİQLƏNDİ",
+          })
+        } else if (projection.pattern_status === "forming") {
+          const boTime = (Number(lastCandle.time) + 800) as Time
+          markers.push({
+            time: boTime,
+            position: "aboveBar",
+            color: "#f59e0b",
+            shape: "circle" as const,
+            text: "⏳ BREAKOUT GÖZLƏNİR",
+          })
+        }
+
         createSeriesMarkers(candleSeriesRef.current, markers)
       }
     }

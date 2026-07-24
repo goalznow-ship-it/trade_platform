@@ -15,6 +15,7 @@ interface AnalysisData {
   short_probability?: number
   risk_level?: string
   scores?: Record<string, number>
+  factor_scores?: Record<string, number>
   details?: Record<string, unknown>
   summary?: string
   current_price?: number
@@ -50,6 +51,7 @@ interface InstitutionalSignal {
     scores?: Record<string, number>
     weights?: Record<string, number>
     details?: Record<string, unknown>
+    factor_scores?: Record<string, number>
   }
   execution?: { rejection_reasons?: string[]; approved?: boolean }
   position_sizing?: { leverage?: number; position_size?: number }
@@ -67,41 +69,54 @@ export function TerminalPage() {
     async function load() {
       setLoading(true)
       try {
-        const [institutional, ai] = await Promise.all([
-          api
-            .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
-            .catch(() => null),
-          api
-            .getPatternAnalysis(selectedSymbol, selectedTimeframe)
-            .catch(() => null),
+        const [institutional, ai, mtfResult] = await Promise.all([
+          api.getInstitutionalSignal(selectedSymbol, selectedTimeframe).catch(() => null),
+          api.getPatternAnalysis(selectedSymbol, selectedTimeframe).catch(() => null),
+          api.getMultiTimeframe(selectedSymbol).catch(() => null),
         ])
         setSignal(institutional)
+        if (ai && mtfResult && typeof ai === "object") {
+          (ai as Record<string, unknown>).multi_timeframe_alignment = mtfResult?.alignment || mtfResult?.aggregated
+            ? {
+                major_aligned: mtfResult.alignment?.major_aligned ?? mtfResult.aggregated?.major_aligned ?? false,
+                aligned_tfs: mtfResult.aggregated?.timeframe_count ?? 0,
+                aggregate_direction: mtfResult.aggregated?.direction ?? mtfResult.alignment?.aggregate_direction ?? "neutral",
+              }
+            : undefined
+        }
         setAiAnalysis(ai)
 
         if (institutional) {
           const direction = institutional.direction
           const score = institutional.institutional_score
+          const details = score?.details || {}
           const factorScores: Record<string, number> = {}
           for (const [key, value] of Object.entries(score?.scores || {})) {
             const weight = score?.weights?.[key]
             if (typeof value === "number" && typeof weight === "number" && weight > 0) {
-              factorScores[key] = value / weight
+              factorScores[key] = (value / weight) * 100
             }
           }
-
+          const ff = score?.factor_scores
+          if (ff) {
+            for (const [key, value] of Object.entries(ff)) {
+              if (typeof value === "number") factorScores[key] = value
+            }
+          }
           const aiConf = ai?.confidence || institutional.confidence || score?.abs_score
           const aiDir = ai?.combined_direction || direction
 
           setAnalysis({
             prediction: institutional.error ? "neutral" : (aiDir as string),
-            confidence: typeof aiConf === "number" ? aiConf : undefined,
+            confidence: typeof aiConf === "number" ? aiConf : 50,
             current_price: institutional.current_price,
-            long_probability: score?.long_probability,
-            short_probability: score?.short_probability,
-            risk_level: score?.risk_level,
+            long_probability: score?.long_probability ?? ai?.long_probability ?? 50,
+            short_probability: score?.short_probability ?? ai?.short_probability ?? 50,
+            risk_level: score?.risk_level || "medium",
             scores: factorScores,
+            factor_scores: factorScores,
             details: {
-              ...(score?.details || {}),
+              ...(details || {}),
               ...(institutional.indicators || {}),
               macd: institutional.indicators?.macd_histogram,
             },
@@ -134,23 +149,30 @@ export function TerminalPage() {
           const aiConf = ai.confidence as number || 50
           const score = ai.institutional_score as Record<string, unknown> || {}
           const scores = score.scores as Record<string, number> || {}
-          const factorScores: Record<string, number> = {}
           const weights = score.weights as Record<string, number> || {}
+          const factorScores: Record<string, number> = {}
           for (const [key, value] of Object.entries(scores)) {
             const weight = weights[key]
             if (typeof value === "number" && typeof weight === "number" && weight > 0) {
-              factorScores[key] = value / weight
+              factorScores[key] = (value / weight) * 100
+            }
+          }
+          const ff = score.factor_scores as Record<string, number> | undefined
+          if (ff) {
+            for (const [key, value] of Object.entries(ff)) {
+              if (typeof value === "number") factorScores[key] = value
             }
           }
           setAnalysis({
             prediction: aiDir,
             confidence: typeof aiConf === "number" ? aiConf : 50,
             current_price: ai.current_price as number || 0,
-            long_probability: (ai.institutional_score as Record<string, number>)?.long_probability || 50,
-            short_probability: (ai.institutional_score as Record<string, number>)?.short_probability || 50,
-            risk_level: (ai.institutional_score as Record<string, string>)?.risk_level || "medium",
+            long_probability: (score.long_probability as number) ?? 50,
+            short_probability: (score.short_probability as number) ?? 50,
+            risk_level: (score.risk_level as string) || "medium",
             scores: factorScores,
-            details: (ai.institutional_score as Record<string, unknown>)?.details as Record<string, unknown> || {},
+            factor_scores: factorScores,
+            details: (score.details as Record<string, unknown>) || {},
           })
         } else {
           setAnalysis(null)
@@ -188,11 +210,9 @@ export function TerminalPage() {
             aiAnalysis={aiAnalysis as Record<string, unknown> as AIChartProps["aiAnalysis"]}
           />
 
-          {/* Bottom Panel - AI Forecast + Summary */}
-          <div className="border-t border-gray-800 bg-gray-950/80 p-3">
-            <div className="max-w-5xl">
-              <AIForecastPanel analysis={displayedAnalysis} signal={signal} loading={loading} />
-            </div>
+          {/* Bottom Panel - AI Forecast (compact) */}
+          <div className="border-t border-gray-800 bg-gray-950/80 px-3 py-1.5">
+            <AIForecastPanel analysis={displayedAnalysis} signal={signal} loading={loading} />
           </div>
         </div>
 

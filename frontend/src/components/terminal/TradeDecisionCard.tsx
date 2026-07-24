@@ -2,8 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import {
-  AlertTriangle,
-  ArrowUpRight, ArrowDownRight, Minus,
+  AlertTriangle, ArrowUpRight, ArrowDownRight, Minus,
 } from "lucide-react"
 
 interface SuggestionsData {
@@ -66,7 +65,7 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
     return (
       <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50 text-center">
         <AlertTriangle className="w-6 h-6 mx-auto mb-1 text-gray-600" />
-        <div className="text-xs text-gray-500">No analysis data available</div>
+        <div className="text-xs text-gray-500">Analiz məlumatı yoxdur</div>
       </div>
     )
   }
@@ -74,11 +73,12 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
   const conf = analysis.confidence || 0
   const isBullish = analysis.prediction === "long" && conf >= 70
   const isBearish = analysis.prediction === "short" && conf >= 70
+  const isWait = !isBullish && !isBearish
   const reasons = explain?.reasons || []
   const warnings = explain?.warnings || []
   const suggestions = explain?.suggestions || {}
 
-  const decision = isBullish ? "BUY" : isBearish ? "SELL" : "WAIT"
+  const decision = isBullish ? "AL" : isBearish ? "SAT" : "GÖZLƏ"
   const decisionColor = isBullish ? "green" : isBearish ? "red" : "yellow"
   const DecisionIcon = isBullish ? ArrowUpRight : isBearish ? ArrowDownRight : Minus
 
@@ -102,7 +102,7 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
             decisionColor === "red" && "text-red-400",
             decisionColor === "yellow" && "text-yellow-400",
           )}>
-            AI RECOMMENDATION: {decision}
+            AI QƏRAR: {decision}
           </span>
         </div>
         <div className={cn("text-xs mt-1 font-medium",
@@ -110,79 +110,128 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
           decisionColor === "red" && "text-red-400/70",
           decisionColor === "yellow" && "text-yellow-400/70",
         )}>
-          Confidence: {conf}% | {analysis.long_probability !== undefined ? `${analysis.long_probability.toFixed(0)}%` : "N/A"} Long / {analysis.short_probability !== undefined ? `${analysis.short_probability.toFixed(0)}%` : "N/A"} Short
+          Etibar: {conf}% | UZUN {analysis.long_probability?.toFixed(0) || "N/A"}% / QISA {analysis.short_probability?.toFixed(0) || "N/A"}%
         </div>
+        {isWait && (
+          <div className="mt-1.5 text-[10px] text-amber-400">
+            Siqnal etibarı 70% altındadır. Aktiv ticarət tövsiyəsi yoxdur.
+          </div>
+        )}
       </div>
 
-      {/* Suggested Levels */}
-      {(suggestions.stop_loss || suggestions.take_profit) && (
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2.5 rounded-lg bg-blue-900/15 border border-blue-900/30">
-            <div className="text-[10px] text-blue-400 mb-0.5">Current Live Price</div>
-            <div className="text-sm font-bold text-white font-mono">
-              {displayPrice(livePrice)}
+      {isWait && (
+        <>
+          {/* WAIT state: Show trigger levels instead of trade plan */}
+          <div className="p-2.5 rounded-lg border border-amber-800/30 bg-amber-900/10">
+            <h4 className="text-[10px] text-amber-400 uppercase tracking-wider mb-1.5">Potensial Trigger Səviyyələri</h4>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2 rounded bg-green-900/15 border border-green-900/30">
+                <div className="text-[9px] text-green-400">Bullish Trigger</div>
+                <div className="text-xs font-bold text-green-300">
+                  {explain?.suggestions?.take_profit && explain.suggestions.entry
+                    ? `$${explain.suggestions.entry.toFixed(2)} üzəri`
+                    : "Breakout təsdiqi"}
+                </div>
+              </div>
+              <div className="p-2 rounded bg-red-900/15 border border-red-900/30">
+                <div className="text-[9px] text-red-400">Bearish Trigger</div>
+                <div className="text-xs font-bold text-red-300">
+                  {explain?.suggestions?.stop_loss
+                    ? `$${explain.suggestions.stop_loss.toFixed(2)} altı`
+                    : "Dəstəyin itirilməsi"}
+                </div>
+              </div>
             </div>
+            {livePrice && (
+              <div className="mt-1.5 text-[9px] text-gray-500">
+                Cari qiymət: ${livePrice.toFixed(2)} — təsdiq gözlənilir
+              </div>
+            )}
           </div>
-          <div className="p-2.5 rounded-lg bg-gray-800/30">
-            <div className="text-[10px] text-gray-500 mb-0.5">Signal Entry Snapshot</div>
-            <div className="text-sm font-bold text-white font-mono">
-              {displayPrice(suggestions.entry)}
-            </div>
-          </div>
-          <div className="p-2.5 rounded-lg bg-red-900/20 border border-red-900/30">
-            <div className="text-[10px] text-red-400 mb-0.5">Stop Loss</div>
-            <div className="text-sm font-bold text-red-400 font-mono">
-              {displayPrice(suggestions.stop_loss)}
-            </div>
-          </div>
-          <div className="p-2.5 rounded-lg bg-green-900/20 border border-green-900/30">
-            <div className="text-[10px] text-green-400 mb-0.5">Take Profit 1</div>
-            <div className="text-sm font-bold text-green-400 font-mono">
-              {displayPrice(suggestions.take_profit)}
-            </div>
-          </div>
-          <div className="p-2.5 rounded-lg bg-green-900/10 border border-green-900/20">
-            <div className="text-[10px] text-green-400/70 mb-0.5">Take Profit 2</div>
-            <div className="text-sm font-bold text-green-400/70 font-mono">
-              {displayPrice(suggestions.take_profit_2)}
-            </div>
-          </div>
-          {livePrice && suggestions.entry && Math.abs(livePrice - suggestions.entry) / livePrice > 0.002 && (
-            <div className="col-span-2 text-[10px] text-amber-300 bg-amber-900/10 border border-amber-900/30 rounded p-2">
-              Entry is the price when this signal snapshot was generated. Live price has moved; do not chase the entry without a fresh validation.
+
+          {/* Key Levels */}
+          {explain?.key_levels && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2 rounded-lg bg-gray-800/30">
+                <div className="text-[9px] text-gray-500">Dəstək</div>
+                <div className="text-xs font-bold text-green-400 font-mono">
+                  {displayPrice((explain.key_levels as Record<string, number>).support)}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-gray-800/30">
+                <div className="text-[9px] text-gray-500">Müqavimət</div>
+                <div className="text-xs font-bold text-red-400 font-mono">
+                  {displayPrice((explain.key_levels as Record<string, number>).resistance)}
+                </div>
+              </div>
             </div>
           )}
-        </div>
+        </>
       )}
 
-      {/* Position Sizing */}
-      {suggestions.suggested_leverage && (
-        <div className="flex gap-2 text-xs">
-          <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
-            <div className="text-gray-500">Leverage</div>
-            <div className="text-white font-bold">{suggestions.suggested_leverage}x</div>
-          </div>
-          {suggestions.position_size && (
-            <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
-              <div className="text-gray-500">Position Size</div>
-              <div className="text-white font-bold">${suggestions.position_size?.toFixed(0)}</div>
+      {!isWait && (
+        <>
+          {/* Trade levels */}
+          {(suggestions.stop_loss || suggestions.take_profit) && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2.5 rounded-lg bg-blue-900/15 border border-blue-900/30">
+                <div className="text-[10px] text-blue-400 mb-0.5">Cari Qiymət</div>
+                <div className="text-sm font-bold text-white font-mono">{displayPrice(livePrice)}</div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-gray-800/30">
+                <div className="text-[10px] text-gray-500 mb-0.5">Giriş</div>
+                <div className="text-sm font-bold text-white font-mono">{displayPrice(suggestions.entry)}</div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-red-900/20 border border-red-900/30">
+                <div className="text-[10px] text-red-400 mb-0.5">Stop Loss</div>
+                <div className="text-sm font-bold text-red-400 font-mono">{displayPrice(suggestions.stop_loss)}</div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-green-900/20 border border-green-900/30">
+                <div className="text-[10px] text-green-400 mb-0.5">Take Profit 1</div>
+                <div className="text-sm font-bold text-green-400 font-mono">{displayPrice(suggestions.take_profit)}</div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-green-900/10 border border-green-900/20">
+                <div className="text-[10px] text-green-400/70 mb-0.5">Take Profit 2</div>
+                <div className="text-sm font-bold text-green-400/70 font-mono">{displayPrice(suggestions.take_profit_2)}</div>
+              </div>
+              {livePrice && suggestions.entry && Math.abs(livePrice - suggestions.entry) / livePrice > 0.002 && (
+                <div className="col-span-2 text-[10px] text-amber-300 bg-amber-900/10 border border-amber-900/30 rounded p-2">
+                  Giriş qiyməti siqnal yaradılma anındakıdır. Cari qiymət dəyişib — yeni doğrulama olmadan təqib etməyin.
+                </div>
+              )}
             </div>
           )}
-          <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
-            <div className="text-gray-500">Risk/Reward</div>
-            <div className="text-white font-bold">
-              {suggestions.entry && suggestions.stop_loss && suggestions.take_profit
-                ? `1:${(Math.abs(suggestions.take_profit - suggestions.entry) / Math.abs(suggestions.entry - suggestions.stop_loss)).toFixed(1)}`
-                : "N/A"}
+
+          {/* Position Sizing */}
+          {suggestions.suggested_leverage && (
+            <div className="flex gap-2 text-xs">
+              <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
+                <div className="text-gray-500">Leverage</div>
+                <div className="text-white font-bold">{suggestions.suggested_leverage}x</div>
+              </div>
+              {suggestions.position_size && (
+                <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
+                  <div className="text-gray-500">Mövqe Ölçüsü</div>
+                  <div className="text-white font-bold">${suggestions.position_size?.toFixed(0)}</div>
+                </div>
+              )}
+              <div className="flex-1 p-2 rounded-lg bg-gray-800/30 text-center">
+                <div className="text-gray-500">Risk/Mükafat</div>
+                <div className="text-white font-bold">
+                  {suggestions.entry && suggestions.stop_loss && suggestions.take_profit
+                    ? `1:${(Math.abs(suggestions.take_profit - suggestions.entry) / Math.abs(suggestions.entry - suggestions.stop_loss)).toFixed(1)}`
+                    : "N/A"}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
 
       {/* Reasons */}
       {reasons.length > 0 && (
         <div>
-          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Why This Decision</h4>
+          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Niyə Bu Qərar?</h4>
           <ul className="space-y-1">
             {reasons.slice(0, 4).map((r: string, i: number) => (
               <li key={i} className="flex items-start gap-1.5 text-xs text-gray-400">
@@ -199,7 +248,7 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
       {warnings.length > 0 && (
         <div>
           <h4 className="text-[10px] text-red-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" /> Invalidation
+            <AlertTriangle className="w-3 h-3" /> İnvalidasiya
           </h4>
           <ul className="space-y-1">
             {warnings.slice(0, 3).map((w: string, i: number) => (
