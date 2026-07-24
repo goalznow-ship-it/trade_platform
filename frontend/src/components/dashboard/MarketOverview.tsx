@@ -2,11 +2,12 @@
 
 import { useEffect, useState, memo } from "react"
 import { useMarketStore } from "@/store/market"
+import { api } from "@/lib/api"
 import type { TickerData } from "@/store/market"
 import { cn, formatPrice, formatPercent, formatVolume } from "@/lib/utils"
 import { TrendingUp, TrendingDown, Clock } from "lucide-react"
 
-const TOP_ASSETS = [
+const FALLBACK_ASSETS = [
   { symbol: "BTC/USDT", color: "bg-orange-500/20 text-orange-400", key: "btc" },
   { symbol: "ETH/USDT", color: "bg-blue-500/20 text-blue-400", key: "eth" },
   { symbol: "SOL/USDT", color: "bg-purple-500/20 text-purple-400", key: "sol" },
@@ -15,7 +16,7 @@ const TOP_ASSETS = [
   { symbol: "SUI/USDT", color: "bg-emerald-500/20 text-emerald-400", key: "sui" },
 ]
 
-const AssetCard = memo(function AssetCard({ asset, ticker }: { asset: typeof TOP_ASSETS[0]; ticker: TickerData | undefined }) {
+const AssetCard = memo(function AssetCard({ asset, ticker }: { asset: typeof FALLBACK_ASSETS[0]; ticker: TickerData | undefined }) {
   const base = asset.symbol.split("/")[0]
   const price = ticker?.price
   const change = ticker?.change
@@ -42,7 +43,8 @@ const AssetCard = memo(function AssetCard({ asset, ticker }: { asset: typeof TOP
       </div>
       <div className="flex items-center justify-between">
         <div className="text-sm font-bold text-white font-mono">
-          {price ? formatPrice(price, price < 10 ? 4 : 2) : "--"}
+          {price ? formatPrice(price, price < 10 ? 4 : 2) : "N/A"}
+          {!price && <span className="text-[8px] text-gray-600 ml-1">provider unavailable</span>}
         </div>
         {volume != null && <span className="text-[9px] text-gray-600">Vol: {formatVolume(volume)}</span>}
       </div>
@@ -59,11 +61,27 @@ const AssetCard = memo(function AssetCard({ asset, ticker }: { asset: typeof TOP
 export function MarketOverview() {
   const tickers = useMarketStore((s) => s.tickers)
   const lastPerChannel = useMarketStore((s) => s.lastPerChannel)
+  const [assets, setAssets] = useState(FALLBACK_ASSETS)
   const [now, setNow] = useState(Date.now)
+
+  useEffect(() => {
+    api.getTopMarkets(6).then(d => {
+      if (d?.symbols?.length >= 4) {
+        const dynamic = d.symbols.slice(0, 6).map((sym: string, i: number) => ({
+          symbol: sym,
+          color: FALLBACK_ASSETS[i % FALLBACK_ASSETS.length].color,
+          key: sym.split("/")[0].toLowerCase(),
+        }))
+        setAssets(dynamic)
+      }
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(interval)
   }, [])
+
   const lastUpdate = lastPerChannel["ticker"]
   const ago = lastUpdate ? `${Math.floor((now - lastUpdate) / 1000)}s` : null
 
@@ -77,10 +95,11 @@ export function MarketOverview() {
               <Clock className="w-2.5 h-2.5" />{ago}
             </span>
           )}
+          {!lastUpdate && <span className="text-red-400">stale data</span>}
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-        {TOP_ASSETS.map((asset) => (
+        {assets.map((asset) => (
           <AssetCard key={asset.symbol} asset={asset} ticker={tickers[asset.symbol]} />
         ))}
       </div>

@@ -26,7 +26,14 @@ class MarketService:
                 timeout=12,
             )
 
-    async def get_ohlcv(self, symbol: str, exchange: str = 'binance', timeframe: str = '1h', limit: int = 200) -> list:
+    def _resolve_exchange(self, symbol: str) -> str:
+        """Auto-detect exchange for a symbol. SKH/SKHY -> bybit, rest -> binance."""
+        base = symbol.split("/")[0] if "/" in symbol else symbol
+        bybit_symbols = {"SKH", "SKHY"}
+        return "bybit" if base in bybit_symbols else "binance"
+
+    async def get_ohlcv(self, symbol: str, exchange: str = None, timeframe: str = '1h', limit: int = 200) -> list:
+        exchange = exchange or self._resolve_exchange(symbol)
         cache_key = f"ohlcv:{exchange}:{symbol}:{timeframe}:{limit}"
         cached = await cache_get(cache_key)
         if cached is not None:
@@ -54,7 +61,8 @@ class MarketService:
             self.logger.error(f"OHLCV fetch failed for {symbol}: {e}")
             return []
 
-    async def get_ticker(self, symbol: str, exchange: str = 'binance') -> dict:
+    async def get_ticker(self, symbol: str, exchange: str = None) -> dict:
+        exchange = exchange or self._resolve_exchange(symbol)
         cache_key = f"ticker:{exchange}:{symbol}"
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -79,7 +87,8 @@ class MarketService:
         except Exception:
             return {}
 
-    async def get_orderbook(self, symbol: str, exchange: str = 'binance', limit: int = 50) -> dict:
+    async def get_orderbook(self, symbol: str, exchange: str = None, limit: int = 50) -> dict:
+        exchange = exchange or self._resolve_exchange(symbol)
         cache_key = f"orderbook:{exchange}:{symbol}:{limit}"
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -121,7 +130,8 @@ class MarketService:
         except Exception:
             return []
 
-    async def get_funding_rate(self, symbol: str, exchange: str = 'binance') -> dict:
+    async def get_funding_rate(self, symbol: str, exchange: str = None) -> dict:
+        exchange = exchange or self._resolve_exchange(symbol)
         cache_key = f"funding:{exchange}:{symbol}"
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -143,7 +153,8 @@ class MarketService:
         except Exception:
             return {}
 
-    async def get_open_interest(self, symbol: str, exchange: str = 'binance') -> dict:
+    async def get_open_interest(self, symbol: str, exchange: str = None) -> dict:
+        exchange = exchange or self._resolve_exchange(symbol)
         cache_key = f"open-interest:{exchange}:{symbol}"
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -202,19 +213,23 @@ class MarketService:
             return cached
 
         results = []
-        try:
-            markets = await self._call_exchange(self.exchanges['binance'].load_markets)
-            for s in markets:
-                if query.upper() in s and '/USDT' in s:
-                    results.append({
-                        'symbol': s,
-                        'exchange': 'binance',
-                        'type': 'crypto'
-                    })
-                    if len(results) >= 20:
-                        break
-        except Exception:
-            pass
+        for exchange_name in ['binance', 'bybit']:
+            try:
+                ex = self.exchanges[exchange_name]
+                markets = await self._call_exchange(ex.load_markets)
+                for s in markets:
+                    if query.upper() in s and '/USDT' in s:
+                        results.append({
+                            'symbol': s,
+                            'exchange': exchange_name,
+                            'type': 'crypto'
+                        })
+                        if len(results) >= 20:
+                            break
+            except Exception:
+                continue
+            if len(results) >= 20:
+                break
 
         await cache_set(cache_key, results, ttl=300)
         return results

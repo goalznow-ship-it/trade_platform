@@ -14,6 +14,7 @@ from app.services.professional_risk import professional_risk
 from app.services.institutional_scoring import institutional_scorer
 from app.services.market import market_service
 from app.services.pattern_analysis import pattern_engine, _convert_numpy
+from app.services.canonical_signal import canonical_signal
 
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
@@ -235,6 +236,66 @@ async def get_trending_coins(
     """Trending coins (volume + gainers composite)"""
     trending = await market_coverage.get_trending_coins(count=count)
     return {"trending": trending, "count": len(trending)}
+
+
+@router.get("/market/matrix")
+async def get_market_matrix(
+    count: int = Query(30, ge=1, le=30),
+    user: dict = Depends(get_current_user),
+):
+    """30-asset Market Matrix with full canonical signals for each symbol"""
+    from app.core.cache import cache_get, cache_set
+    cache_key = "institutional:market:matrix"
+    cached = await cache_get(cache_key)
+    if isinstance(cached, dict) and len(cached.get("symbols", [])) == count:
+        return cached
+
+    symbols = await market_coverage.get_top_symbols(count=30)
+    import asyncio
+
+    async def analyze_one(symbol: str) -> dict:
+        try:
+            exchange = market_coverage.get_symbol_exchange(symbol)
+            ohlcv = await market_service.get_ohlcv(symbol, exchange, "1h", 200) or []
+            signal, mtf, pattern = await asyncio.gather(
+                institutional_signal_engine.generate_signal(symbol, "1h"),
+                multi_timeframe.analyze(symbol),
+                pattern_engine.comprehensive_analysis(symbol, "1h", ohlcv) if ohlcv else asyncio.sleep(0),
+                return_exceptions=True,
+            )
+            if isinstance(pattern, Exception):
+                pattern = None
+            if isinstance(mtf, Exception):
+                mtf = None
+            if isinstance(signal, Exception):
+                signal = None
+            canonical = canonical_signal.build(
+                symbol=symbol,
+                exchange=exchange,
+                signal_data=signal if isinstance(signal, dict) else None,
+                pattern_data=pattern if isinstance(pattern, dict) else None,
+                mtf_data=mtf if isinstance(mtf, dict) else None,
+            )
+            return canonical
+        except Exception:
+            return {
+                "symbol": symbol,
+                "exchange": market_coverage.get_symbol_exchange(symbol),
+                "error": "analysis_failed",
+                "status": "reject",
+                "direction": "neutral",
+                "confidence": 0,
+            }
+
+    semaphore = asyncio.Semaphore(5)
+    async def limited(sym: str):
+        async with semaphore:
+            return await analyze_one(sym)
+
+    results = await asyncio.gather(*(limited(s) for s in symbols))
+    response = {"symbols": results, "count": len(results)}
+    await cache_set(cache_key, response, ttl=30)
+    return response
 
 
 @router.get("/ai-analysis/{symbol}")

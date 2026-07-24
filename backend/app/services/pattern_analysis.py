@@ -3,13 +3,16 @@ Pattern Analysis Engine
 
 Advanced chart pattern recognition:
 - Candlestick patterns (doji, hammer, engulfing, etc.)
+- Chart formations (flags, triangles, channels, H&S, etc.)
 - Trend line detection (S/R from swing points)
 - Elliott Wave counting (impulse 1-5, corrective A-B-C)
 - Fibonacci retracement/extension levels
 - Liquidity zone aggregation from SMC data
+- Future direction projection with entry/SL/TP
 """
 import numpy as np
 from typing import Optional
+from app.services.chart_patterns import chart_pattern_engine
 
 
 def _convert_numpy(obj):
@@ -690,6 +693,7 @@ class PatternAnalysisEngine:
         trend_lines = self.detect_trend_lines(ohlcv_data)
         elliott = self.analyze_elliott_wave(ohlcv_data)
         fibonacci = self.calculate_fibonacci_levels(ohlcv_data)
+        chart_patterns = chart_pattern_engine.detect_all(ohlcv_data)
 
         liquidity_zones = {"zones": [], "nearest_support": None, "nearest_resistance": None,
                            "support_levels": [], "resistance_levels": [], "total_zones": 0}
@@ -724,7 +728,21 @@ class PatternAnalysisEngine:
             if fib_move < 5:
                 fib_bias -= 10
 
-        combined_score = pattern_dir_score + trend_bias + elliott_bias + fib_bias
+        # Chart pattern bias
+        chart_bias = 0
+        best_pattern = None
+        best_confidence = 0
+        for cp in chart_patterns.get("patterns", []):
+            conf = cp.get("confidence", 0)
+            if conf > best_confidence:
+                best_confidence = conf
+                best_pattern = cp
+            if cp.get("projected_direction") == "long":
+                chart_bias += conf / 10
+            elif cp.get("projected_direction") == "short":
+                chart_bias -= conf / 10
+
+        combined_score = pattern_dir_score + trend_bias + elliott_bias + fib_bias + chart_bias
 
         if combined_score > 15:
             direction = "long"
@@ -733,14 +751,27 @@ class PatternAnalysisEngine:
         else:
             direction = "neutral"
 
+        # Generate projection from best chart pattern
+        projection = {}
+        if best_pattern and best_confidence >= 60:
+            projection = chart_pattern_engine.calculate_projection(best_pattern)
+            projection["pattern_name"] = best_pattern["name"]
+            projection["pattern_confidence"] = best_confidence
+            projection["pattern_status"] = "forming" if best_pattern.get("is_forming", False) else "confirmed"
+            projection["breakout_confirmed"] = best_pattern.get("breakout_confirm", False)
+            projection["entry_trigger"] = best_pattern.get("entry_trigger", "")
+            projection["invalidation"] = best_pattern.get("invalidation", "")
+
         return _convert_numpy({
             "symbol": symbol,
             "timeframe": timeframe,
             "current_price": current_price,
             "direction": direction,
             "combined_score": combined_score,
+            "projection": projection,
             "components": {
                 "candlestick_patterns": patterns,
+                "chart_patterns": chart_patterns,
                 "trend_lines": trend_lines,
                 "elliott_wave": elliott,
                 "fibonacci": fibonacci,

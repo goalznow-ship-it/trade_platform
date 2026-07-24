@@ -1,13 +1,14 @@
 "use client"
 
-import { memo } from "react"
+import { memo, useEffect, useState } from "react"
 import { useMarketStore } from "@/store/market"
 import { cn, formatPrice, formatPercent, formatVolume, getChangeColor } from "@/lib/utils"
+import { api } from "@/lib/api"
 import {
   Globe, BarChart3, Activity, Coins,
 } from "lucide-react"
 
-const TOP_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "SUI/USDT"]
+const FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "SUI/USDT"]
 
 interface TickerBarProps {
   symbol: string
@@ -37,6 +38,13 @@ export function MarketSummary() {
   const fearGreed = useMarketStore((s) => s.fearGreed)
   const isLive = useMarketStore((s) => s.isLive)
   const breadth = useMarketStore((s) => s.breadth)
+  const [topSymbols, setTopSymbols] = useState(FALLBACK_SYMBOLS)
+
+  useEffect(() => {
+    api.getTopMarkets(8).then(d => {
+      if (d?.symbols?.length >= 6) setTopSymbols(d.symbols.slice(0, 8))
+    }).catch(() => {})
+  }, [])
 
   const btc = tickers["BTC/USDT"]
   const totalVolume = btc?.volume_24h ? btc.volume_24h * 50 : null
@@ -61,8 +69,8 @@ export function MarketSummary() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 mb-3">
-        {TOP_SYMBOLS.map((sym) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 mb-3">
+        {topSymbols.map((sym) => (
           <TickerBar key={sym} symbol={sym} price={tickers[sym]?.price} change={tickers[sym]?.change} />
         ))}
       </div>

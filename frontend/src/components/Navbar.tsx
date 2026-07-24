@@ -25,6 +25,7 @@ const MODULES = [
   { href: "/news", label: "News Intel", icon: Newspaper, color: "text-yellow-400" },
   { href: "/backtest", label: "Backtest", icon: History, color: "text-green-400" },
   { href: "/dashboard", label: "Portfolio", icon: Shield, color: "text-gray-400" },
+  { href: "/matrix", label: "30 Aktiv", icon: BarChart3, color: "text-cyan-400" },
 ]
 
 export function Navbar() {
@@ -36,7 +37,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/admin" || pathname === "/pricing"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
@@ -183,10 +184,10 @@ export function Navbar() {
           <nav className="flex items-center gap-0.5">
             {MODULES.map((mod) => {
               const isActive = pathname === mod.href || (
-                mod.href === "/dashboard" && (
-                  pathname === "/dashboard" ||
-                  (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner")
-                )
+                  mod.href === "/dashboard" && (
+                    pathname === "/dashboard" ||
+                    (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner" && pathname !== "/matrix")
+                  )
               )
               return (
                 <Link key={mod.href} href={mod.href}
@@ -225,6 +226,7 @@ export function Navbar() {
               { label: "AI Signals", href: "/signals", icon: Radio },
               { label: "Market Radar", href: "/radar", icon: Activity },
               { label: "Market Scanner", href: "/scanner", icon: Scan },
+              { label: "30 Aktiv Monitoru", href: "/matrix", icon: BarChart3 },
               { label: "Futures Intel", href: "/futures", icon: BarChart3 },
               { label: "News Intel", href: "/news", icon: Newspaper },
               { label: "Backtesting", href: "/backtest", icon: History },

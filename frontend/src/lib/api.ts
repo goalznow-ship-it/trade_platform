@@ -367,4 +367,7 @@ export const api = {
   getTrendingCoins: (count = 10) =>
     request<any>(`/api/v1/institutional/market/trending?count=${count}`),
 
+  getMarketMatrix: (count = 30) =>
+    request<any>(`/api/v1/institutional/market/matrix?count=${count}`),
+
 }

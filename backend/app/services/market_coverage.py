@@ -12,12 +12,18 @@ from app.core.logging import logger
 
 TOP_30_FALLBACK = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-    "DOGE/USDT", "ADA/USDT", "SUI/USDT", "LINK/USDT", "AVAX/USDT",
-    "DOT/USDT", "LTC/USDT", "TRX/USDT", "APT/USDT", "ATOM/USDT",
-    "ARB/USDT", "OP/USDT", "NEAR/USDT", "FIL/USDT", "AAVE/USDT",
-    "INJ/USDT", "SEI/USDT", "TIA/USDT", "WIF/USDT", "1000PEPE/USDT",
-    "ETC/USDT", "BCH/USDT", "UNI/USDT", "MKR/USDT", "FET/USDT",
+    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
+    "TRX/USDT", "LTC/USDT", "ATOM/USDT", "NEAR/USDT", "APT/USDT",
+    "FIL/USDT", "ARB/USDT", "OP/USDT", "SUI/USDT", "INJ/USDT",
+    "UNI/USDT", "ETC/USDT", "FET/USDT", "TIA/USDT", "WIF/USDT",
+    "1000PEPE/USDT", "SKY/USDT", "SKH/USDT", "AAVE/USDT", "SEI/USDT",
 ]
+
+# Symbols that require Bybit (not on Binance futures)
+SYMBOL_EXCHANGE_OVERRIDE = {
+    "SKH": "bybit",
+    "SKHY": "bybit",
+}
 
 
 class MarketCoverageService:
@@ -26,6 +32,7 @@ class MarketCoverageService:
         self._cache_key_timestamp = "market:top30:updated"
         self._update_interval_hours = 168  # 7 days
         self._fallback = TOP_30_FALLBACK
+        self._symbol_exchange_override = SYMBOL_EXCHANGE_OVERRIDE
         self._logger = logger
 
     @staticmethod
@@ -34,6 +41,11 @@ class MarketCoverageService:
         # for Binance perpetual contracts.
         aliases = {"PEPE/USDT": "1000PEPE/USDT"}
         return list(dict.fromkeys(aliases.get(symbol, symbol) for symbol in symbols))
+
+    def get_symbol_exchange(self, symbol: str) -> str:
+        """Get the exchange for a symbol. Bybit for SKH/SKHY, Binance otherwise."""
+        base = symbol.split("/")[0] if "/" in symbol else symbol
+        return self._symbol_exchange_override.get(base, "binance")
 
     async def get_top_symbols(self, count: int = 30, force_refresh: bool = False) -> List[str]:
         if force_refresh:
@@ -48,7 +60,15 @@ class MarketCoverageService:
                     normalized,
                     ttl=self._update_interval_hours * 3600,
                 )
-            return normalized[:count]
+            # Always ensure Bybit-only symbols are in the list
+            forced_symbols = ["SKH/USDT", "SKHY/USDT"]
+            symbols = normalized[:count]
+            for fs in forced_symbols:
+                if fs not in symbols:
+                    symbols.append(fs)
+                    if len(symbols) > count + len(forced_symbols):
+                        break
+            return symbols
 
         return await self._fetch_and_cache()
 
@@ -56,6 +76,11 @@ class MarketCoverageService:
         try:
             symbols = self._normalize_symbols(await self._fetch_top_from_exchange())
             if symbols and len(symbols) >= 20:
+                # Always ensure Bybit-only symbols like SKH are in the list
+                forced_symbols = ["SKH/USDT", "SKHY/USDT"]
+                for fs in forced_symbols:
+                    if fs not in symbols:
+                        symbols.append(fs)
                 await cache_set(self._cache_key, symbols, ttl=self._update_interval_hours * 3600)
                 await cache_set(self._cache_key_timestamp, datetime.now(timezone.utc).isoformat(),
                                 ttl=self._update_interval_hours * 3600)
@@ -99,6 +124,32 @@ class MarketCoverageService:
         except Exception as e:
             self._logger.error(f"Exchange fetch failed: {e}")
             return self._fallback
+
+    async def get_bybit_ticker(self, symbol: str) -> dict:
+        """Fetch ticker from Bybit (for symbols not on Binance like SKH/SKHY)."""
+        from app.services.market import market_service
+        bybit_ex = market_service.exchanges.get("bybit")
+        if not bybit_ex:
+            return {}
+        try:
+            t = await market_service._call_exchange(bybit_ex.fetch_ticker, symbol)
+            if t:
+                return {
+                    'symbol': t['symbol'],
+                    'price': t['last'],
+                    'bid': t['bid'],
+                    'ask': t['ask'],
+                    'high_24h': t['high'],
+                    'low_24h': t['low'],
+                    'volume_24h': t['baseVolume'],
+                    'change_24h': t['change'],
+                    'change_percent': t['percentage'],
+                    'timestamp': t['timestamp'],
+                    'exchange': 'bybit',
+                }
+        except Exception:
+            pass
+        return {}
 
     async def get_market_gainers(self, count: int = 10) -> List[dict]:
         symbols = await self.get_top_symbols(count=30)

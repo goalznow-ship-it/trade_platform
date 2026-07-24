@@ -36,6 +36,22 @@ const PATTERN_LABELS: Record<string, { az: string; color: string; icon: string }
   "Three White Soldiers": { az: "Üç Ağ Əsgər", color: "#22c55e", icon: "▲" },
 }
 
+const CHART_PATTERN_LABELS: Record<string, { az: string; color: string }> = {
+  "Bullish Flag": { az: "Yüksələn Bayraq", color: "#22c55e" },
+  "Bearish Flag": { az: "Enən Bayraq", color: "#ef4444" },
+  "Bullish Pennant": { az: "Yüksələn Vimpel", color: "#22c55e" },
+  "Bearish Pennant": { az: "Enən Vimpel", color: "#ef4444" },
+  "Ascending Triangle": { az: "Yüksələn Üçbucaq", color: "#22c55e" },
+  "Descending Triangle": { az: "Enən Üçbucaq", color: "#ef4444" },
+  "Symmetrical Triangle": { az: "Simmetrik Üçbucaq", color: "#f59e0b" },
+  "Double Top": { az: "İkili Zirvə", color: "#ef4444" },
+  "Double Bottom": { az: "İkili Dibar", color: "#22c55e" },
+  "Head and Shoulders": { az: "Baş-Çiyin", color: "#ef4444" },
+  "Inverse Head and Shoulders": { az: "Tərs Baş-Çiyin", color: "#22c55e" },
+  "Rising Wedge": { az: "Yüksələn Paz", color: "#ef4444" },
+  "Falling Wedge": { az: "Enən Paz", color: "#22c55e" },
+}
+
 interface RawOHLCVItem {
   time: number
   open: number
@@ -54,53 +70,9 @@ interface OHLCVItem {
   volume: number
 }
 
-interface AnalysisDetails {
-  rsi?: number
-  macd?: number
-  support?: number
-  resistance?: number
-  [key: string]: unknown
-}
-
-interface AnalysisData {
-  prediction?: string
-  confidence?: number
-  long_probability?: number
-  short_probability?: number
-  risk_level?: string
-  scores?: Record<string, number>
-  details?: AnalysisDetails
-  summary?: string
-  current_price?: number
-  [key: string]: unknown
-}
-
-interface ExplainSuggestions {
-  entry?: number
-  stop_loss?: number
-  take_profit?: number
-  suggested_leverage?: number
-  position_size?: number
-  [key: string]: unknown
-}
-
-interface ExplainKeyLevels {
-  support?: number
-  resistance?: number
-  [key: string]: unknown
-}
-
-interface ExplainData {
-  reasons?: string[]
-  warnings?: string[]
-  suggestions?: ExplainSuggestions
-  key_levels?: ExplainKeyLevels
-  [key: string]: unknown
-}
-
 interface AIChartProps {
-  analysis?: AnalysisData | null
-  explain?: ExplainData | null
+  analysis?: Record<string, unknown> | null
+  explain?: Record<string, unknown> | null
   signal?: {
     error?: string
     direction?: string
@@ -117,12 +89,32 @@ interface AIChartProps {
     confidence?: number
     direction?: string
     combined_direction?: string
+    projection?: {
+      pattern_name?: string
+      pattern_confidence?: number
+      pattern_status?: string
+      breakout_confirmed?: boolean
+      entry_trigger?: string
+      stop_loss?: number
+      take_profit_1?: number
+      take_profit_2?: number
+      take_profit_3?: number
+      risk_reward_1?: number
+      expected_path?: Array<{ level: string; price: number }>
+      entry_zone?: { min: number; max: number; mid: number }
+      direction?: string
+    }
     components?: {
       candlestick_patterns?: {
         patterns?: Array<{ name: string; type: string; signal: string; price: number; strength: string }>
         pattern_direction?: string
         pattern_score?: number
         total_count?: number
+      }
+      chart_patterns?: {
+        patterns?: Array<Record<string, unknown>>
+        forming_patterns?: Array<Record<string, unknown>>
+        count?: number
       }
       fibonacci?: {
         retracements?: Array<{ level: number; price: number }>
@@ -247,7 +239,7 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
       }])
     }
 
-    // Pattern markers
+    // Candlestick pattern markers
     const patterns = aiAnalysis?.components?.candlestick_patterns?.patterns || []
     const patternMarkers: SeriesMarker<Time>[] = []
     for (const p of patterns) {
@@ -263,6 +255,26 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
         })
       }
     }
+
+    // Chart pattern marker
+    const chartPatterns = aiAnalysis?.components?.chart_patterns
+    const bestPattern = chartPatterns?.forming_patterns?.[0] || chartPatterns?.patterns?.[0]
+    if (bestPattern && candleSeriesRef.current) {
+      const bp = bestPattern as Record<string, unknown>
+      const pName = bp.name as string
+      const pLabel = CHART_PATTERN_LABELS[pName]
+      const pDir = bp.projected_direction as string
+      if (pLabel) {
+        patternMarkers.push({
+          time: lastCandle.time,
+          position: "aboveBar" as const,
+          color: pLabel.color,
+          shape: "circle" as const,
+          text: `📐 ${pLabel.az} (${bp.is_forming ? 'FORMALAŞIR' : 'TƏSDİQ'})`,
+        })
+      }
+    }
+
     if (patternMarkers.length > 0 && candleSeriesRef.current) {
       createSeriesMarkers(candleSeriesRef.current, patternMarkers)
     }
@@ -310,9 +322,51 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
       }
     }
 
-    // Signal levels
+    // Projection lines from pattern analysis
+    const projection = aiAnalysis?.projection
+    if (projection && candleSeriesRef.current) {
+      const useProjection = projection.pattern_confidence
+        ? projection.pattern_confidence >= 60
+        : true
+
+      if (useProjection) {
+        const projDir = projection.direction || "long"
+        const projColor = projDir === "long" ? "#22c55e" : "#ef4444"
+
+        // Draw projected path as price lines with arrows
+        const pathItems = projection.expected_path || []
+        for (const item of pathItems) {
+          if (item.price > 0) {
+            const isEntry = item.level === "Entry"
+            const isTp = item.level.startsWith("TP")
+            const isTarget = item.level === "Target"
+            candleSeriesRef.current.createPriceLine({
+              price: item.price,
+              color: isTarget ? "#a855f7" : isTp ? "#22c55e" : "#3b82f6",
+              lineWidth: isEntry ? 2 : 1,
+              lineStyle: isTarget ? LineStyle.Dotted : isTp ? LineStyle.Dashed : LineStyle.Solid,
+              axisLabelVisible: true,
+              title: `${item.level} ${isTarget ? '🎯' : isTp ? '✓' : '→'}`,
+            })
+          }
+        }
+
+        if (projection.stop_loss) {
+          candleSeriesRef.current.createPriceLine({
+            price: projection.stop_loss,
+            color: "#ef4444",
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: "SL ✕",
+          })
+        }
+      }
+    }
+
+    // Signal levels (fallback if no projection)
     if (lastCandle && signal && !signal.error && signal.confidence !== undefined
-        && signal.confidence >= 70 && candleSeriesRef.current) {
+        && signal.confidence >= 70 && candleSeriesRef.current && !projection) {
       const lastTime = lastCandle.time
       const levels = [
         { price: signal.entry_zone?.min, title: "GİRİŞ AŞAĞI", color: "#3b82f6", style: LineStyle.Dashed },
@@ -334,15 +388,34 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
           })
         }
       })
-      if (aiAnalysis?.combined_direction) {
-        const isBullish = aiAnalysis.combined_direction === "long"
-        const finalConf = aiAnalysis.confidence || signal.confidence || 0
+    }
+
+    // Combined direction marker
+    if (lastCandle && candleSeriesRef.current) {
+      const finalConf = aiAnalysis?.confidence || signal?.confidence || 0
+      const finalDir = aiAnalysis?.combined_direction || signal?.direction || "neutral"
+      if (finalDir !== "neutral" && finalConf >= 70) {
+        const isBullishDir = finalDir === "long"
         const markers: SeriesMarker<Time>[] = [{
-          time: lastTime,
-          position: isBullish ? "belowBar" : "aboveBar",
-          color: isBullish ? "#22c55e" : "#ef4444",
+          time: lastCandle.time,
+          position: isBullishDir ? "belowBar" : "aboveBar",
+          color: isBullishDir ? "#22c55e" : "#ef4444",
           shape: "circle" as const,
-          text: `${isBullish ? "UZUN" : "QISA"} ${finalConf}%`,
+          text: `${isBullishDir ? "UZUN ↑" : "QISA ↓"} ${finalConf}%`,
+        }]
+        createSeriesMarkers(candleSeriesRef.current, markers)
+      }
+
+      // Direction projection arrow at future time
+      if (projection && projection.pattern_confidence && projection.pattern_confidence >= 70) {
+        const projDir = projection.direction || "long"
+        const futureTime = (Number(lastCandle.time) + (TIMEFRAMES.find(t => t.id === selectedTimeframe) ? 3600 : 3600)) as Time
+        const markers: SeriesMarker<Time>[] = [{
+          time: futureTime,
+          position: projDir === "long" ? "belowBar" : "aboveBar",
+          color: projDir === "long" ? "#22c55e" : "#ef4444",
+          shape: projDir === "long" ? "arrowUp" : "arrowDown" as "arrowUp" | "arrowDown",
+          text: `${projDir === "long" ? "↑ HƏDƏF" : "↓ HƏDƏF"} ${projection.pattern_name || ""}`,
         }]
         createSeriesMarkers(candleSeriesRef.current, markers)
       }
@@ -362,7 +435,7 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
       chartRef.current = null
       candleSeriesRef.current = null
     }
-  }, [candleData, signal, aiAnalysis])
+  }, [candleData, signal, aiAnalysis, selectedTimeframe])
 
   return (
     <div className="flex flex-col h-full">
@@ -374,7 +447,8 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
             onChange={(e) => setSymbol(e.target.value)}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
           >
-            {["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT"].map((s) => (
+            {["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT",
+              "INJ/USDT", "SKY/USDT", "SKH/USDT"].map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
@@ -411,6 +485,15 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
               })}
             </div>
           )}
+          {/* Chart pattern badge */}
+          {aiAnalysis?.projection?.pattern_name && (
+            <div className="hidden md:flex items-center gap-1 text-[10px]">
+              <span className="px-1.5 py-0.5 rounded font-mono bg-blue-900/20 text-blue-400">
+                📐 {aiAnalysis.projection.pattern_name}
+                {aiAnalysis.projection.pattern_status === "forming" ? " (FORMALAŞIR)" : ""}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-0.5">
           {TIMEFRAMES.map((tf) => (
@@ -430,7 +513,9 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
       {/* Info bar */}
       {(analysis || aiAnalysis) && (
         <div className="flex items-center gap-4 px-3 py-1 bg-gray-900/80 border-b border-gray-800 text-[10px]">
-          <span className="text-gray-400">Real Binance OHLCV</span>
+          <span className="text-gray-400">
+            {aiAnalysis?.projection?.pattern_name ? "📐 Real + Proyeksiya" : "Real Binance OHLCV"}
+          </span>
           {aiAnalysis?.components?.elliott_wave?.count && aiAnalysis.components.elliott_wave.count !== "unknown" && (
             <span className="text-purple-400">
               Elliott: {aiAnalysis.components.elliott_wave.count === "impulse" ? "İmpuls" : "Korrektiv"}
@@ -446,6 +531,14 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
               ({aiAnalysis.components.candlestick_patterns.total_count})
             </span>
           )}
+          {aiAnalysis?.projection && (
+            <span className={cn(
+              aiAnalysis.projection.direction === "long" ? "text-green-400" : "text-red-400"
+            )}>
+              Proyeksiya: {aiAnalysis.projection.direction === "long" ? "↑ YÜKSƏLİŞ" : "↓ ENİŞ"}
+              ({aiAnalysis.projection.pattern_confidence || 0}%)
+            </span>
+          )}
           {signal && !signal.error && (
             <span className={signal.execution?.approved ? "text-green-400" : "text-amber-400"}>
               {signal.execution?.approved ? "Ticarət uyğun" : "Doğrulama tələb olunur"}
@@ -453,13 +546,13 @@ export function AIChart({ analysis, explain, signal, livePrice, aiAnalysis }: AI
           )}
           <div className="flex-1" />
           <div className={cn("font-medium",
-            (aiAnalysis?.combined_direction || analysis?.prediction) === "long" ? "text-green-400" :
-            (aiAnalysis?.combined_direction || analysis?.prediction) === "short" ? "text-red-400" : "text-yellow-400"
+            (aiAnalysis?.combined_direction || (analysis as Record<string, unknown>)?.prediction) === "long" ? "text-green-400" :
+            (aiAnalysis?.combined_direction || (analysis as Record<string, unknown>)?.prediction) === "short" ? "text-red-400" : "text-yellow-400"
           )}>
             {aiAnalysis?.combined_direction
-              ? (aiAnalysis.combined_direction === "long" ? "UZUN" : aiAnalysis.combined_direction === "short" ? "QISA" : "NEYTRAL")
-              : (analysis?.prediction?.toUpperCase() || "NEYTRAL")}
-            {" · "}{aiAnalysis?.confidence || analysis?.confidence || 0}%
+              ? (aiAnalysis.combined_direction === "long" ? "UZUN ↑" : aiAnalysis.combined_direction === "short" ? "QISA ↓" : "NEYTRAL →")
+              : (((analysis as Record<string, unknown>)?.prediction as string)?.toUpperCase() || "NEYTRAL")}
+            {" · "}{String(aiAnalysis?.confidence || (analysis as Record<string, unknown>)?.confidence || 0)}%
           </div>
         </div>
       )}
