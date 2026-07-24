@@ -186,6 +186,54 @@ class InstitutionalSignalEngine:
         await cache_set(cache_key, result, ttl=15)
         return result
 
+    def _enrich_signal(self, signal: dict) -> dict:
+        """Add canonical unified fields to a signal for consistent frontend consumption"""
+        confidence = signal.get("confidence", 0) or 0
+        rr1 = signal.get("risk_reward_1", 0) or 0
+        rr2 = signal.get("risk_reward_2", 0) or 0
+        rr3 = signal.get("risk_reward_3", 0) or 0
+        best_rr = max(rr1, rr2, rr3)
+        opportunity_score = round(confidence * min(best_rr, 5) / 5, 1) if best_rr > 0 else round(confidence * 0.5, 1)
+        opportunity_score = max(0, min(100, opportunity_score))
+
+        inst_score = signal.get("institutional_score", {}) or {}
+        scores = inst_score.get("scores", {}) or {}
+        details = inst_score.get("details", {}) or {}
+        futures_data = signal.get("futures") or {}
+        smc_data = signal.get("market_structure", {}) or {}
+        indicators = signal.get("indicators", {}) or {}
+        entry_zone = signal.get("entry_zone", {}) or {}
+        alignment = signal.get("alignment", {}) or {}
+
+        reasons_breakdown = {
+            "trend": f"EMA/SMA trend: {scores.get('trend', 0):+.0f}/20",
+            "rsi": f"RSI: {details.get('rsi', 'N/A')}" if details.get('rsi') is not None else None,
+            "macd": f"MACD: {details.get('macd_histogram', 'N/A')}" if details.get('macd_histogram') is not None else None,
+            "adx": f"ADX: {details.get('adx', 'N/A')}" if details.get('adx') is not None else None,
+            "volume": f"Volume: {scores.get('volume', 0):+.0f}/15",
+            "funding": f"Funding: {(futures_data.get('funding_rate', 0) or 0) * 100:.4f}% ({futures_data.get('funding_pressure', 'neutral')})" if futures_data else None,
+            "open_interest": f"OI: ${(futures_data.get('open_interest_usd', 0) or 0):,.0f}" if futures_data else None,
+            "liquidation": None,
+            "smc_bos": f"BOS: {smc_data.get('bos_count', 0)} bullish, {smc_data.get('choch_count', 0)} bearish",
+            "liquidity_sweep": f"Liq sweep: {smc_data.get('liquidity_sweep', {}).get('type', 'none')}" if smc_data.get('liquidity_sweep') else None,
+            "support_resistance": f"S/R: {entry_zone.get('min', 'N/A')} / {entry_zone.get('max', 'N/A')}",
+        }
+        reasons_breakdown = {k: v for k, v in reasons_breakdown.items() if v is not None}
+
+        exchange_label = "Binance"
+        if futures_data:
+            fr = futures_data.get("funding_rate", 0) or 0
+            if abs(fr) > 0.002:
+                exchange_label = "Weighted Average (Binance+Bybit+OKX)"
+
+        signal["opportunity_score"] = opportunity_score
+        signal["live_price"] = signal.get("current_price")
+        signal["reasons_breakdown"] = reasons_breakdown
+        signal["exchange"] = exchange_label
+        signal["last_updated"] = signal.get("generated_at", "")
+        signal["composite_score"] = max(0, min(100, confidence))
+        return signal
+
     async def scan_all(self, min_score: float = 70, limit: int = 10) -> List[dict]:
         from app.services.market_coverage import market_coverage
         from app.core.cache import cache_get, cache_set
@@ -193,16 +241,18 @@ class InstitutionalSignalEngine:
         cache_key = "institutional:scan:all"
         cached = await cache_get(cache_key)
         if isinstance(cached, list):
+            results = [self._enrich_signal(s) for s in cached]
             return [
-                signal for signal in cached
+                signal for signal in results
                 if signal.get("confidence", 0) >= min_score
             ][:limit]
 
         async with self._scan_lock:
             cached = await cache_get(cache_key)
             if isinstance(cached, list):
+                results = [self._enrich_signal(s) for s in cached]
                 return [
-                    signal for signal in cached
+                    signal for signal in results
                     if signal.get("confidence", 0) >= min_score
                 ][:limit]
 
@@ -222,9 +272,10 @@ class InstitutionalSignalEngine:
             )
             results = [signal for signal in scanned if signal is not None]
             results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
+            enriched = [self._enrich_signal(s) for s in results]
             await cache_set(cache_key, results, ttl=30)
             return [
-                signal for signal in results
+                signal for signal in enriched
                 if signal.get("confidence", 0) >= min_score
             ][:limit]
 

@@ -5,49 +5,55 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
   TrendingUp, TrendingDown, Activity, Zap,
-  Flame,
+  Flame, Clock,
 } from "lucide-react"
+import {
+  type UnifiedSignal, normalizeSignal, displayPrice, displayPercent,
+  displayDate, isStale, isTradeReady,
+} from "@/lib/unified-signal"
 
-interface SignalItem {
+interface FundingItem {
   symbol: string
-  direction?: string
-  confidence?: number
   funding_rate?: number
-  long_probability?: number
-  short_probability?: number
+  price?: number
+  change_percent?: number
 }
 
 export function FuturesDashboard() {
-  const [data, setData] = useState<SignalItem[]>([])
+  const [data, setData] = useState<UnifiedSignal[]>([])
+  const [fundingData, setFundingData] = useState<FundingItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState<string>("")
 
   useEffect(() => {
     async function load() {
+      setLoading(true)
       try {
         const [scanResponse, fundingResponse] = await Promise.all([
-          api.institutionalScan(0, 30),
-          api.getFundingRates(30),
+          api.institutionalScan(0, 30) as Promise<{ signals?: Record<string, unknown>[] }>,
+          api.getFundingRates(30) as Promise<{ funding_rates?: FundingItem[] }>,
         ])
-        const signals = Array.isArray(scanResponse?.signals) ? scanResponse.signals : []
+        const rawSignals = Array.isArray(scanResponse?.signals) ? scanResponse.signals : []
+        const normalized = rawSignals.map(normalizeSignal)
         const funding = Array.isArray(fundingResponse?.funding_rates)
           ? fundingResponse.funding_rates
           : []
         const fundingBySymbol = new Map<string, number | undefined>(
-          funding.map((item: SignalItem) => [item.symbol, item.funding_rate]),
+          funding.map((item) => [item.symbol, item.funding_rate]),
         )
-        setData(signals.map((signal: SignalItem & {
-          institutional_score?: {
-            long_probability?: number
-            short_probability?: number
-          }
-        }) => ({
-          ...signal,
-          funding_rate: fundingBySymbol.get(signal.symbol),
-          long_probability: signal.institutional_score?.long_probability,
-          short_probability: signal.institutional_score?.short_probability,
+        setData(normalized.map((s) => ({
+          ...s,
+          // enrich with funding from dedicated endpoint
+          futures: s.futures ? {
+            ...s.futures,
+            funding_rate: fundingBySymbol.get(s.symbol) ?? s.futures.funding_rate,
+          } : null,
         })))
+        setFundingData(funding)
+        setLastUpdated(new Date().toISOString())
       } catch {
         setData([])
+        setFundingData([])
       } finally {
         setLoading(false)
       }
@@ -73,10 +79,18 @@ export function FuturesDashboard() {
     )
   }
 
-  const sortedByFunding = [...data].sort((a, b) => Math.abs(b.funding_rate || 0) - Math.abs(a.funding_rate || 0))
-  const sortedByConfidence = [...data].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-  const topGainers = data.filter((d) => d.direction === "long").slice(0, 3)
-  const topLosers = data.filter((d) => d.direction === "short").slice(0, 3)
+  const tradeReady = data.filter(isTradeReady)
+  const longSignals = tradeReady.filter((d) => d.direction === "long")
+  const shortSignals = tradeReady.filter((d) => d.direction === "short")
+  const highConf = tradeReady.filter((d) => d.confidence > 75)
+  const stale = isStale(lastUpdated, 120)
+
+  const sortedByFunding = [...data].sort(
+    (a, b) => Math.abs(b.futures?.funding_rate || 0) - Math.abs(a.futures?.funding_rate || 0),
+  )
+  const sortedByConfidence = [...tradeReady].sort(
+    (a, b) => (b.confidence || 0) - (a.confidence || 0),
+  )
 
   return (
     <div className="h-full overflow-y-auto bg-[#0d1117]">
@@ -86,36 +100,47 @@ export function FuturesDashboard() {
             <h1 className="text-lg font-semibold text-white">Futures Intelligence</h1>
             <p className="text-xs text-gray-500 mt-0.5">Real-time futures market analysis across all assets</p>
           </div>
-          <div className="flex items-center gap-1 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-[10px] text-gray-500">
             <Activity className="w-3 h-3" /> Auto-refresh 60s
+            {lastUpdated && (
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {displayDate(lastUpdated)}
+              </span>
+            )}
+            {stale && <span className="text-amber-400">Stale</span>}
           </div>
         </div>
 
-        {/* Market Overview Cards */}
+        {/* Overview Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="p-4 rounded-xl border border-green-900/30 bg-green-900/10">
             <div className="flex items-center gap-1 text-xs text-green-400 mb-1">
               <TrendingUp className="w-3.5 h-3.5" /> Bullish Signals
             </div>
-            <div className="text-2xl font-bold text-white">{topGainers.length}</div>
+            <div className="text-2xl font-bold text-white">{longSignals.length}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">{longSignals.length > 0 ? `${longSignals.length} trade-ready` : "No setups"}</div>
           </div>
           <div className="p-4 rounded-xl border border-red-900/30 bg-red-900/10">
             <div className="flex items-center gap-1 text-xs text-red-400 mb-1">
               <TrendingDown className="w-3.5 h-3.5" /> Bearish Signals
             </div>
-            <div className="text-2xl font-bold text-white">{topLosers.length}</div>
+            <div className="text-2xl font-bold text-white">{shortSignals.length}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">{shortSignals.length > 0 ? `${shortSignals.length} trade-ready` : "No setups"}</div>
           </div>
           <div className="p-4 rounded-xl border border-yellow-900/30 bg-yellow-900/10">
             <div className="flex items-center gap-1 text-xs text-yellow-400 mb-1">
               <Flame className="w-3.5 h-3.5" /> Funding Extremes
             </div>
-            <div className="text-2xl font-bold text-white">{sortedByFunding.filter((d) => Math.abs(d.funding_rate || 0) > 0.005).length}</div>
+            <div className="text-2xl font-bold text-white">{sortedByFunding.filter((d) => Math.abs(d.futures?.funding_rate || 0) > 0.005).length}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">Top 8 below</div>
           </div>
           <div className="p-4 rounded-xl border border-blue-900/30 bg-blue-900/10">
             <div className="flex items-center gap-1 text-xs text-blue-400 mb-1">
               <Zap className="w-3.5 h-3.5" /> High Confidence
             </div>
-            <div className="text-2xl font-bold text-white">{sortedByConfidence.filter((d) => (d.confidence || 0) > 75).length}</div>
+            <div className="text-2xl font-bold text-white">{highConf.length}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">75%+ confidence</div>
           </div>
         </div>
 
@@ -126,7 +151,7 @@ export function FuturesDashboard() {
           </h2>
           <div className="space-y-1.5">
             {sortedByFunding.slice(0, 8).map((item, i) => {
-              const fr = item.funding_rate
+              const fr = item.futures?.funding_rate
               const isExtreme = typeof fr === "number" && Math.abs(fr) > 0.01
               return (
                 <div key={i}
@@ -136,17 +161,18 @@ export function FuturesDashboard() {
                     item.direction === "long" ? "bg-green-900/50 text-green-400" :
                     item.direction === "short" ? "bg-red-900/50 text-red-400" :
                     "bg-yellow-900/50 text-yellow-400")}>
-                    {item.direction?.toUpperCase() || "--"}
+                    {item.direction.toUpperCase()}
                   </span>
                   <div className="flex-1" />
+                  <span className="text-[10px] text-gray-500">{item.exchange}</span>
                   <span className={cn("text-xs font-mono font-medium",
                     typeof fr === "number" && fr > 0 ? "text-red-400" : typeof fr === "number" && fr < 0 ? "text-green-400" : "text-gray-500")}>
                     {typeof fr === "number" ? `${fr > 0 ? "+" : ""}${(fr * 100).toFixed(4)}%` : "N/A"}
                   </span>
                   {isExtreme && <Flame className="w-3.5 h-3.5 text-orange-400" />}
                   <span className={cn("text-xs font-mono",
-                    (item.confidence || 0) > 75 ? "text-green-400" : "text-gray-500")}>
-                    {item.confidence || 0}%
+                    item.confidence > 75 ? "text-green-400" : "text-gray-500")}>
+                    {item.confidence}%
                   </span>
                 </div>
               )
@@ -154,56 +180,64 @@ export function FuturesDashboard() {
           </div>
         </div>
 
-        {/* Top Opportunities */}
+        {/* Top Setups */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="p-4 rounded-xl border border-green-900/30 bg-gray-900/50">
             <h2 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">
               Top Bullish Setups
             </h2>
-            <div className="space-y-1.5">
-              {sortedByConfidence.filter((d) => d.direction === "long").slice(0, 5).map((item, i) => (
-                <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20">
-                  <span className="text-sm font-mono text-white w-24">{item.symbol}</span>
-                  <div className="flex-1">
-                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-500 rounded-full" style={{ width: `${item.confidence || 0}%` }} />
+            {sortedByConfidence.filter((d) => d.direction === "long").length === 0 ? (
+              <div className="text-center py-4 text-gray-600 text-xs">Hazirda yüksek keyfiyyetli LONG siqnali yoxdur</div>
+            ) : (
+              <div className="space-y-1.5">
+                {sortedByConfidence.filter((d) => d.direction === "long").slice(0, 5).map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20">
+                    <span className="text-sm font-mono text-white w-24">{item.symbol}</span>
+                    <div className="flex-1">
+                      <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-green-500 rounded-full" style={{ width: `${item.confidence}%` }} />
+                      </div>
                     </div>
+                    <span className="text-xs font-mono text-green-400 font-bold">{item.confidence}%</span>
+                    <span className="text-[10px] text-gray-500">
+                      R:R {item.risk_reward_1.toFixed(1)}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      FR: {typeof item.futures?.funding_rate === "number" ? `${(item.futures.funding_rate * 100).toFixed(4)}%` : "N/A"}
+                    </span>
                   </div>
-                  <span className="text-xs font-mono text-green-400 font-bold">{item.confidence || 0}%</span>
-                  <span className="text-[10px] text-gray-500">
-                    FR: {typeof item.funding_rate === "number" ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%` : "N/A"}
-                  </span>
-                </div>
-              ))}
-              {sortedByConfidence.filter((d) => d.direction === "long").length === 0 && (
-                <div className="text-center py-4 text-gray-600 text-xs">No bullish setups</div>
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="p-4 rounded-xl border border-red-900/30 bg-gray-900/50">
             <h2 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">
               Top Bearish Setups
             </h2>
-            <div className="space-y-1.5">
-              {sortedByConfidence.filter((d) => d.direction === "short").slice(0, 5).map((item, i) => (
-                <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20">
-                  <span className="text-sm font-mono text-white w-24">{item.symbol}</span>
-                  <div className="flex-1">
-                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-500 rounded-full" style={{ width: `${item.confidence || 0}%` }} />
+            {sortedByConfidence.filter((d) => d.direction === "short").length === 0 ? (
+              <div className="text-center py-4 text-gray-600 text-xs">Hazirda yüksek keyfiyyetli SHORT siqnali yoxdur</div>
+            ) : (
+              <div className="space-y-1.5">
+                {sortedByConfidence.filter((d) => d.direction === "short").slice(0, 5).map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-800/20">
+                    <span className="text-sm font-mono text-white w-24">{item.symbol}</span>
+                    <div className="flex-1">
+                      <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-500 rounded-full" style={{ width: `${item.confidence}%` }} />
+                      </div>
                     </div>
+                    <span className="text-xs font-mono text-red-400 font-bold">{item.confidence}%</span>
+                    <span className="text-[10px] text-gray-500">
+                      R:R {item.risk_reward_1.toFixed(1)}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      FR: {typeof item.futures?.funding_rate === "number" ? `${(item.futures.funding_rate * 100).toFixed(4)}%` : "N/A"}
+                    </span>
                   </div>
-                  <span className="text-xs font-mono text-red-400 font-bold">{item.confidence || 0}%</span>
-                  <span className="text-[10px] text-gray-500">
-                    FR: {typeof item.funding_rate === "number" ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%` : "N/A"}
-                  </span>
-                </div>
-              ))}
-              {sortedByConfidence.filter((d) => d.direction === "short").length === 0 && (
-                <div className="text-center py-4 text-gray-600 text-xs">No bearish setups</div>
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -220,6 +254,7 @@ export function FuturesDashboard() {
                   <th className="text-left py-2 pr-4">Signal</th>
                   <th className="text-right py-2 pr-4">Confidence</th>
                   <th className="text-right py-2 pr-4">Funding Rate</th>
+                  <th className="text-right py-2 pr-4">Exchange</th>
                   <th className="text-right py-2 pr-4">Long %</th>
                   <th className="text-right py-2 pr-4">Short %</th>
                 </tr>
@@ -233,22 +268,25 @@ export function FuturesDashboard() {
                         item.direction === "long" ? "bg-green-900/50 text-green-400" :
                         item.direction === "short" ? "bg-red-900/50 text-red-400" :
                         "bg-yellow-900/50 text-yellow-400")}>
-                        {(item.direction || "neutral").toUpperCase()}
+                        {item.direction.toUpperCase()}
                       </span>
                     </td>
-                    <td className="py-2.5 pr-4 text-right font-mono">{item.confidence || 0}%</td>
+                    <td className="py-2.5 pr-4 text-right font-mono">{item.confidence}%</td>
                     <td className={cn("py-2.5 pr-4 text-right font-mono",
-                      (item.funding_rate || 0) > 0.005 ? "text-red-400" :
-                      (item.funding_rate || 0) < -0.005 ? "text-green-400" : "text-gray-500")}>
-                      {typeof item.funding_rate === "number"
-                        ? `${item.funding_rate > 0 ? "+" : ""}${(item.funding_rate * 100).toFixed(4)}%`
+                      (item.futures?.funding_rate || 0) > 0.005 ? "text-red-400" :
+                      (item.futures?.funding_rate || 0) < -0.005 ? "text-green-400" : "text-gray-500")}>
+                      {typeof item.futures?.funding_rate === "number"
+                        ? `${item.futures.funding_rate > 0 ? "+" : ""}${(item.futures.funding_rate * 100).toFixed(4)}%`
                         : "N/A"}
                     </td>
+                    <td className="py-2.5 pr-4 text-right text-[10px] text-gray-500">
+                      {item.exchange}
+                    </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-green-400">
-                      {typeof item.long_probability === "number" ? `${item.long_probability.toFixed(0)}%` : "N/A"}
+                      {item.institutional_score.long_probability.toFixed(0)}%
                     </td>
                     <td className="py-2.5 pr-4 text-right font-mono text-red-400">
-                      {typeof item.short_probability === "number" ? `${item.short_probability.toFixed(0)}%` : "N/A"}
+                      {item.institutional_score.short_probability.toFixed(0)}%
                     </td>
                   </tr>
                 ))}

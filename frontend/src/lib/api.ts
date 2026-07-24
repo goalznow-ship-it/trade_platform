@@ -92,6 +92,9 @@ export const api = {
     request<any>(`/api/v1/analysis/indicators/${symbol}?timeframe=${timeframe}`),
 
   getAIAnalysis: (symbol: string, timeframe = "1h") =>
+    request<any>(`/api/v1/analysis/ai/${symbol}?timeframe=${timeframe}`),
+
+  getPatternAnalysis: (symbol: string, timeframe = "1h") =>
     request<any>(`/api/v1/institutional/ai-analysis/${encodeURIComponent(symbol.replace("/", "-"))}?timeframe=${encodeURIComponent(timeframe)}`),
 
   getFullAnalysis: (symbol: string, timeframe = "1h") =>
@@ -107,13 +110,14 @@ export const api = {
   getScannerFilters: () =>
     Promise.resolve([
       "rsi_oversold", "rsi_overbought", "volume_spike", "breakout",
-      "golden_cross", "death_cross", "support_test", "resistance_test",
-      "high_volatility", "low_volatility", "macd_bullish", "macd_bearish",
-      "bull_market", "bear_market", "low_liquidity", "high_liquidity",
+      "breakdown", "ema_bullish", "ema_bearish",
+      "golden_cross", "death_cross", "high_volatility",
+      "strong_trend", "liquidity_grab", "macd_bullish", "macd_bearish",
+      "supertrend_bullish", "supertrend_bearish",
     ]),
 
   scanWithFilters: () =>
-    api.scanAllV2(50),
+    api.institutionalScan(0, 30) as Promise<{ signals?: Record<string, unknown>[] }>,
 
   // Trading
   createOrder: (data: any) =>

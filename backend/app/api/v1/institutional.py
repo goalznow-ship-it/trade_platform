@@ -13,7 +13,7 @@ from app.services.smc_engine import smc_engine
 from app.services.professional_risk import professional_risk
 from app.services.institutional_scoring import institutional_scorer
 from app.services.market import market_service
-from app.services.pattern_analysis import pattern_engine
+from app.services.pattern_analysis import pattern_engine, _convert_numpy
 
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
@@ -275,4 +275,4 @@ async def get_ai_analysis(
     result["combined_direction"] = combined_dir if combined_dir != "neutral" else score_dir
     result["confidence"] = min(100, max(0, abs(score_result.get("abs_score", 50)) + confidence_boost))
 
-    return result
+    return _convert_numpy(result)

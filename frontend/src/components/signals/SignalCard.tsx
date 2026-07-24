@@ -1,173 +1,56 @@
 "use client"
 
-import { useState, type ElementType } from "react"
+import { useState } from "react"
 import { cn, formatPrice } from "@/lib/utils"
 import {
-  Target, Check, X as XIcon,
-  ChevronDown, ChevronUp, BarChart3, Activity,
-  Shield, AlertTriangle, Zap, Flame,
+  Check, X as XIcon,
+  ChevronDown, ChevronUp, Activity,
+  Shield, AlertTriangle, Zap, Clock,
 } from "lucide-react"
-
-interface SignalTechnical {
-  ema_alignment?: boolean | number
-  ema?: boolean | number
-  rsi?: boolean | number
-  macd?: boolean | number
-  volume?: boolean | number
-  atr?: boolean | number
-  support?: boolean | number
-}
-
-interface SignalStructure {
-  bos?: boolean | number
-  choch?: boolean | number
-  order_block?: boolean | number
-  ob?: boolean | number
-  liquidity?: boolean | number
-  fvg?: boolean | number
-}
-
-interface SignalFutures {
-  funding?: boolean | number
-  open_interest?: boolean | number
-  oi?: boolean | number
-  liquidation?: boolean | number
-  liq?: boolean | number
-  long_short_ratio?: boolean | number
-  ls_ratio?: boolean | number
-}
-
-interface SignalNews {
-  impact?: string
-  sentiment?: string
-  score?: number
-}
-
-interface Signal {
-  direction?: string
-  signal?: string
-  symbol: string
-  reason?: string
-  entry_price?: number
-  price?: number
-  entry_zone_high?: number
-  entry_zone?: { min?: number; max?: number; mid?: number }
-  stop_loss?: number
-  take_profit?: number
-  take_profit_1?: number
-  take_profit_2?: number
-  take_profit_3?: number
-  risk_reward?: number
-  risk_reward_ratio?: number
-  risk_reward_1?: number
-  timeframe?: string
-  signal_type?: string
-  sentiment_score?: number
-  technical?: SignalTechnical
-  market_structure?: SignalStructure
-  structure?: SignalStructure
-  futures?: SignalFutures
-  news?: SignalNews
-  confidence?: number
-  classification?: string
-  execution?: {
-    approved?: boolean
-    risk_label?: string
-    rejection_reasons?: string[]
-  }
-}
+import {
+  type UnifiedSignal, displayPrice, displayDate, isStale, gradeSignal,
+} from "@/lib/unified-signal"
 
 interface SignalCardProps {
-  signal: Signal
+  signal: UnifiedSignal
 }
 
-function getScoreLabel(score: number): { label: string; color: string; icon: ElementType } {
-  if (score >= 90) return { label: "Strong Signal", color: "text-orange-400 bg-orange-900/30 border-orange-500/30", icon: Flame }
-  if (score >= 80) return { label: "High Probability", color: "text-green-400 bg-green-900/30 border-green-500/30", icon: Check }
-  if (score >= 70) return { label: "Watch", color: "text-yellow-400 bg-yellow-900/30 border-yellow-500/30", icon: AlertTriangle }
-  return { label: "Ignore", color: "text-gray-500 bg-gray-800 border-gray-700", icon: XIcon }
+function getConfidenceColor(score: number): string {
+  if (score >= 90) return "text-green-400"
+  if (score >= 80) return "text-green-300"
+  if (score >= 70) return "text-yellow-400"
+  if (score >= 50) return "text-yellow-300"
+  return "text-gray-500"
 }
 
-interface WeightedScores {
-  total: number
-  technical: number
-  structure: number
-  futures: number
-  news: number
-  sentiment: number
-}
-
-function calcWeightedScore(signal: Signal): WeightedScores {
-  const tech = signal.technical || {}
-  const structure = signal.market_structure || signal.structure || {}
-  const futures = signal.futures || {}
-  const news = signal.news || {}
-
-  const sc = (v: boolean | number | undefined | null) => typeof v === "boolean" ? (v ? 1 : -1) : typeof v === "number" ? Math.min(v / 100, 1) : 0
-
-  const technicalScore = (sc(tech.ema_alignment ?? tech.ema) * 0.25 + sc(tech.rsi) * 0.25 + sc(tech.macd) * 0.25 + sc(tech.volume) * 0.25) * 100
-  const structureScore = (sc(structure.bos) * 0.25 + sc(structure.choch) * 0.25 + sc(structure.order_block ?? structure.ob) * 0.25 + sc(structure.liquidity) * 0.25) * 100
-  const futuresScore = (sc(futures.funding) * 0.34 + sc(futures.open_interest ?? futures.oi) * 0.33 + sc(futures.liquidation ?? futures.liq) * 0.33) * 100
-  const newsScore = typeof news.score === "number" ? news.score : (news.impact === "positive" ? 80 : news.impact === "negative" ? 30 : 50)
-  const sentimentScore = signal.sentiment_score || 50
-
-  const total = technicalScore * 0.25 + structureScore * 0.25 + futuresScore * 0.20 + newsScore * 0.15 + sentimentScore * 0.15
-  return { total: Math.round(total), technical: Math.round(technicalScore), structure: Math.round(structureScore), futures: Math.round(futuresScore), news: Math.round(newsScore), sentiment: Math.round(sentimentScore) }
+function getConfidenceBg(score: number): string {
+  if (score >= 90) return "bg-green-500"
+  if (score >= 80) return "bg-green-400"
+  if (score >= 70) return "bg-yellow-500"
+  if (score >= 50) return "bg-yellow-400"
+  return "bg-gray-600"
 }
 
 export function SignalCard({ signal }: SignalCardProps) {
   const [expanded, setExpanded] = useState(false)
-  const dir = signal.direction || signal.signal || "neutral"
-  const isLong = dir === "long" || dir === "bullish" || dir === "buy"
-  const isShort = dir === "short" || dir === "bearish" || dir === "sell"
-  const rr = signal.risk_reward_1 || signal.risk_reward || signal.risk_reward_ratio || 0
-  const entry = signal.entry_zone?.min || signal.entry_zone?.mid || signal.entry_price || signal.price || 0
-  const entryZoneHigh = signal.entry_zone?.max || signal.entry_zone_high || entry
-  const sl = signal.stop_loss || 0
-  const tp1 = signal.take_profit || signal.take_profit_1 || 0
-  const tp2 = signal.take_profit_2 || tp1 * 1.025 || 0
-  const tp3 = signal.take_profit_3 || tp1 * 1.05 || 0
-
-  const calculatedScores = calcWeightedScore(signal)
-  const scores = signal.confidence !== undefined
-    ? { ...calculatedScores, total: Math.round(signal.confidence) }
-    : calculatedScores
-  const scoreInfo = getScoreLabel(scores.total)
-
-  const tech = signal.technical || {}
-  const structure = signal.market_structure || signal.structure || {}
-  const futures = signal.futures || {}
-  const news = signal.news || {}
-
-  const hasDetailedAnalysis = Object.keys(tech).length > 0 || Object.keys(structure).length > 0 || Object.keys(futures).length > 0
-
-  function renderCheck(val: boolean | string | number | undefined | null, label: string) {
-    const isGood = val === true || val === "yes" || val === "bullish" || val === "positive" || (typeof val === "number" && val > 0)
-    const isBad = val === false || val === "no" || val === "bearish" || val === "negative" || (typeof val === "number" && val < 0)
-    if (val === undefined || val === null) return null
-    return (
-      <div className="flex items-center gap-1.5">
-        {isGood ? (
-          <Check className="w-3 h-3 text-green-400 flex-shrink-0" />
-        ) : isBad ? (
-          <XIcon className="w-3 h-3 text-red-400 flex-shrink-0" />
-        ) : (
-          <div className="w-3 h-3 rounded-full border border-gray-600 flex-shrink-0" />
-        )}
-        <span className="text-[11px] text-gray-400">{label}</span>
-      </div>
-    )
-  }
+  const isLong = signal.direction === "long"
+  const isShort = signal.direction === "short"
+  const grade = gradeSignal(signal.confidence)
+  const reasons = signal.reasons || []
+  const rb = signal.reasons_breakdown || {}
+  const score = signal.institutional_score
+  const futures = signal.futures
 
   return (
     <div className={cn(
       "rounded-lg border transition-all hover:border-gray-600 overflow-hidden",
       isLong ? "border-green-900/40 bg-gradient-to-r from-green-900/5 to-transparent" :
       isShort ? "border-red-900/40 bg-gradient-to-r from-red-900/5 to-transparent" :
-      "border-gray-800 bg-gray-900/30"
+      "border-gray-800 bg-gray-900/30",
+      grade === "reject" && "opacity-50",
     )}>
-      {/* Main Row */}
       <div className="p-3.5">
+        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2.5">
             <div className={cn(
@@ -189,140 +72,119 @@ export function SignalCard({ signal }: SignalCardProps) {
                 )}>
                   {isLong ? "LONG" : isShort ? "SHORT" : "WAIT"}
                 </span>
+                {grade === "trade_ready" && (
+                  <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-700/30">
+                    Trade Ready
+                  </span>
+                )}
+                {grade === "watchlist" && (
+                  <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/30">
+                    Watchlist
+                  </span>
+                )}
               </div>
-              {signal.reason && (
-                <div className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{signal.reason}</div>
-              )}
-              {signal.execution && (
-                <div className={cn(
-                  "text-[10px] mt-0.5",
-                  signal.execution.approved ? "text-green-400" : "text-amber-400"
-                )}>
-                  {signal.execution.approved ? "Execution gate approved" : "Not execution-approved"}
-                </div>
+              {reasons.length > 0 && (
+                <div className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{reasons[0]}</div>
               )}
             </div>
           </div>
           <div className="text-right">
-            <div className={cn(
-              "text-lg font-bold font-mono",
-              scores.total >= 80 ? "text-green-400" : scores.total >= 70 ? "text-yellow-400" : "text-gray-400"
-            )}>
-              {scores.total}%
+            <div className={cn("text-lg font-bold font-mono", getConfidenceColor(signal.confidence))}>
+              {signal.confidence}%
             </div>
-            <div className={cn(
-              "inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 rounded border mt-0.5",
-              scoreInfo.color
-            )}>
-              {scoreInfo.label}
+            <div className="text-[10px] text-gray-500">
+              Opp: {signal.opportunity_score}
             </div>
           </div>
         </div>
 
-        {/* Price Levels Grid */}
-        <div className="grid grid-cols-5 gap-1.5 mb-3">
-          <div className="col-span-1 p-2 rounded bg-gray-800/40 border border-gray-700/30">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Entry Zone</div>
-            <div className="text-[11px] font-bold text-white font-mono leading-tight">
-              {formatPrice(entry)}
-              {entryZoneHigh > entry && <span className="text-gray-500"> - {formatPrice(entryZoneHigh)}</span>}
-            </div>
-          </div>
-          <div className="col-span-1 p-2 rounded bg-red-900/15 border border-red-900/20">
-            <div className="text-[9px] text-red-400 uppercase tracking-wider mb-0.5">Stop Loss</div>
-            <div className="text-[11px] font-bold text-red-400 font-mono">{formatPrice(sl)}</div>
-          </div>
-          <div className="col-span-1 p-2 rounded bg-green-900/15 border border-green-900/20">
-            <div className="text-[9px] text-green-400 uppercase tracking-wider mb-0.5">TP1</div>
-            <div className="text-[11px] font-bold text-green-400 font-mono">{formatPrice(tp1)}</div>
-          </div>
-          <div className="col-span-1 p-2 rounded bg-green-900/10 border border-green-900/15">
-            <div className="text-[9px] text-green-400/70 uppercase tracking-wider mb-0.5">TP2</div>
-            <div className="text-[11px] font-bold text-green-400/80 font-mono">{formatPrice(tp2)}</div>
-          </div>
-          <div className="col-span-1 p-2 rounded bg-green-900/5 border border-green-900/10">
-            <div className="text-[9px] text-green-400/50 uppercase tracking-wider mb-0.5">TP3</div>
-            <div className="text-[11px] font-bold text-green-400/60 font-mono">{formatPrice(tp3)}</div>
-          </div>
+        {/* Price Levels */}
+        <div className="grid grid-cols-5 gap-1.5 mb-2">
+          <PriceBox label="Entry" value={signal.entry_zone.mid} color="text-blue-400" bg="bg-blue-900/15 border-blue-900/20" />
+          <PriceBox label="Stop Loss" value={signal.stop_loss} color="text-red-400" bg="bg-red-900/15 border-red-900/20" />
+          <PriceBox label="TP1" value={signal.take_profit_1} color="text-green-400" bg="bg-green-900/15 border-green-900/20" />
+          <PriceBox label="TP2" value={signal.take_profit_2} color="text-green-400/80" bg="bg-green-900/10 border-green-900/15" />
+          <PriceBox label="TP3" value={signal.take_profit_3} color="text-green-400/60" bg="bg-green-900/5 border-green-900/10" />
         </div>
 
-        {/* Meta Row */}
+        {/* Meta */}
         <div className="flex items-center gap-2.5 text-[10px] text-gray-500">
-          {rr > 0 && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-800/50">
-              <Target className="w-3 h-3" />
-              <span className="font-medium text-gray-400">R:R 1:{rr.toFixed(1)}</span>
-            </div>
+          {signal.risk_reward_1 > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-gray-800/50 font-medium">R:R 1:{signal.risk_reward_1.toFixed(1)}</span>
           )}
-          {signal.timeframe && (
-            <span className="px-1.5 py-0.5 rounded bg-gray-800/50">{signal.timeframe}</span>
+          <span className="px-1.5 py-0.5 rounded bg-gray-800/50">{signal.timeframe}</span>
+          {signal.expected_hold_time && (
+            <span className="px-1.5 py-0.5 rounded bg-gray-800/50">{signal.expected_hold_time}</span>
           )}
-          {signal.signal_type && (
-            <span className="px-1.5 py-0.5 rounded bg-gray-800/50">{signal.signal_type}</span>
+          {signal.exchange && (
+            <span className="px-1.5 py-0.5 rounded bg-gray-800/50">{signal.exchange}</span>
+          )}
+          {signal.last_updated && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-800/50">
+              <Clock className="w-2.5 h-2.5" />
+              {displayDate(signal.last_updated)}
+              {isStale(signal.last_updated, 120) && <span className="text-amber-400">Stale</span>}
+            </span>
           )}
           <div className="flex-1" />
-          {hasDetailedAnalysis && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              <span className="text-[10px]">Analysis</span>
-              {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-          )}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            <span className="text-[10px]">Details</span>
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
         </div>
       </div>
 
-      {/* Expanded Analysis */}
+      {/* Expanded */}
       {expanded && (
         <div className="border-t border-gray-800/60 px-3.5 py-3 bg-gray-900/40">
-          {/* Weighted Score Bar */}
+          {/* Score breakdown bar */}
           <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-gray-800/40 border border-gray-700/30">
-            <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">Score:</span>
-            <div className="flex-1 flex gap-0.5 h-4 rounded overflow-hidden">
-              <div className="bg-blue-500/70 h-full" style={{ width: `${scores.technical * 0.25}%` }} title="Technical" />
-              <div className="bg-purple-500/70 h-full" style={{ width: `${scores.structure * 0.25}%` }} title="Market Structure" />
-              <div className="bg-orange-500/70 h-full" style={{ width: `${scores.futures * 0.20}%` }} title="Futures" />
-              <div className="bg-yellow-500/70 h-full" style={{ width: `${scores.news * 0.15}%` }} title="News" />
-              <div className="bg-green-500/70 h-full" style={{ width: `${scores.sentiment * 0.15}%` }} title="Sentiment" />
+            <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">Confidence:</span>
+            <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className={cn("h-full rounded-full", getConfidenceBg(signal.confidence))}
+                style={{ width: `${signal.confidence}%` }}
+              />
             </div>
-            <div className="flex items-center gap-1.5 text-[9px] text-gray-500">
-              <span className="w-2 h-2 rounded-sm bg-blue-500/70" />T <span className="w-2 h-2 rounded-sm bg-purple-500/70" />S <span className="w-2 h-2 rounded-sm bg-orange-500/70" />F <span className="w-2 h-2 rounded-sm bg-yellow-500/70" />N <span className="w-2 h-2 rounded-sm bg-green-500/70" />S
-            </div>
-            <span className={cn("text-xs font-bold font-mono", scores.total >= 80 ? "text-green-400" : scores.total >= 70 ? "text-yellow-400" : "text-gray-400")}>
-              {scores.total}
+            <span className="text-xs font-bold font-mono text-white">
+              {signal.confidence}/100
             </span>
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Technical */}
+            {/* Reasons from reasons_breakdown */}
             <div className="p-2.5 rounded bg-gray-800/30 border border-gray-700/20">
               <div className="flex items-center gap-1.5 mb-2">
                 <Activity className="w-3 h-3 text-blue-400" />
-                <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Technical</span>
+                <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Analysis</span>
               </div>
               <div className="space-y-1">
-                {renderCheck(tech.ema_alignment ?? tech.ema, "EMA Alignment")}
-                {renderCheck(tech.rsi, "RSI")}
-                {renderCheck(tech.macd, "MACD")}
-                {renderCheck(tech.volume, "Volume")}
-                {renderCheck(tech.atr ?? tech.support, "ATR")}
-                {Object.keys(tech).length === 0 && <div className="text-[10px] text-gray-600 italic">No data</div>}
+                {Object.entries(rb).slice(0, 6).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-1.5">
+                    <Check className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />
+                    <span className="text-[10px] text-gray-400 truncate">{v}</span>
+                  </div>
+                ))}
+                {Object.keys(rb).length === 0 && (
+                  <div className="text-[10px] text-gray-600 italic">No detailed analysis</div>
+                )}
               </div>
             </div>
 
             {/* Market Structure */}
             <div className="p-2.5 rounded bg-gray-800/30 border border-gray-700/20">
               <div className="flex items-center gap-1.5 mb-2">
-                <BarChart3 className="w-3 h-3 text-purple-400" />
+                <Shield className="w-3 h-3 text-purple-400" />
                 <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Market Structure</span>
               </div>
               <div className="space-y-1">
-                {renderCheck(structure.bos, "BOS")}
-                {renderCheck(structure.choch, "CHoCH")}
-                {renderCheck(structure.order_block ?? structure.ob, "Order Block")}
-                {renderCheck(structure.liquidity, "Liquidity")}
-                {renderCheck(structure.fvg, "FVG")}
-                {Object.keys(structure).length === 0 && <div className="text-[10px] text-gray-600 italic">No data</div>}
+                <MetaCheck label="Trend" value={signal.market_structure.trend} good={["uptrend", "downtrend"].includes(signal.market_structure.trend)} />
+                <MetaCheck label="BOS" value={signal.market_structure.bos_count} good={(signal.market_structure.bos_count || 0) > 0} />
+                <MetaCheck label="CHoCH" value={signal.market_structure.choch_count} good={(signal.market_structure.choch_count || 0) > 0} />
+                <MetaCheck label="Liq Sweep" value={signal.market_structure.liquidity_sweep ? "Yes" : "No"} good={!!signal.market_structure.liquidity_sweep} />
               </div>
             </div>
 
@@ -332,43 +194,68 @@ export function SignalCard({ signal }: SignalCardProps) {
                 <Zap className="w-3 h-3 text-orange-400" />
                 <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Futures</span>
               </div>
-              <div className="space-y-1">
-                {renderCheck(futures.funding, "Funding")}
-                {renderCheck(futures.open_interest ?? futures.oi, "Open Interest")}
-                {renderCheck(futures.liquidation ?? futures.liq, "Liquidation Zones")}
-                {renderCheck(futures.long_short_ratio ?? futures.ls_ratio, "Long/Short Ratio")}
-                {Object.keys(futures).length === 0 && <div className="text-[10px] text-gray-600 italic">No data</div>}
-              </div>
+              {futures ? (
+                <div className="space-y-1">
+                  <MetaCheck label="Funding" value={`${(futures.funding_rate * 100).toFixed(4)}%`} good={futures.funding_pressure !== "neutral"} />
+                  <MetaCheck label="OI" value={`$${(futures.open_interest_usd / 1e6).toFixed(0)}M`} good={futures.open_interest_usd > 0} />
+                  <MetaCheck label="Pressure" value={futures.funding_pressure} good={futures.funding_pressure !== "neutral"} />
+                  <MetaCheck label="Exchange" value={signal.exchange} good />
+                </div>
+              ) : (
+                <div className="text-[10px] text-gray-600 italic">No futures data</div>
+              )}
             </div>
 
-            {/* News */}
+            {/* Score & Risk */}
             <div className="p-2.5 rounded bg-gray-800/30 border border-gray-700/20">
               <div className="flex items-center gap-1.5 mb-2">
-                <Shield className="w-3 h-3 text-yellow-400" />
-                <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">News Impact</span>
+                <AlertTriangle className="w-3 h-3 text-yellow-400" />
+                <span className="text-[10px] font-semibold text-gray-300 uppercase tracking-wider">Risk & Score</span>
               </div>
               <div className="space-y-1">
-                {renderCheck(news.impact === "positive" || news.sentiment === "bullish", "Positive Impact")}
-                {renderCheck(news.impact === "negative" || news.sentiment === "bearish", "Negative Impact")}
-                {news.score !== undefined && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <span className="text-[10px] text-gray-500">Score:</span>
-                    <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                      <div className={cn(
-                        "h-full rounded-full",
-                        (news.score || 0) > 70 ? "bg-green-500" :
-                        (news.score || 0) > 40 ? "bg-yellow-500" : "bg-red-500"
-                      )} style={{ width: `${news.score || 0}%` }} />
-                    </div>
-                    <span className="text-[10px] font-mono text-gray-400">{news.score || 0}</span>
-                  </div>
-                )}
-                {!news.impact && news.score === undefined && <div className="text-[10px] text-gray-600 italic">No data</div>}
+                <MetaCheck label="Total Score" value={`${score.abs_score}/100`} good={score.abs_score >= 70} />
+                <MetaCheck label="Risk Level" value={score.risk_level} good={score.risk_level === "low"} />
+                <MetaCheck label="Opp. Score" value={signal.opportunity_score} good={signal.opportunity_score >= 50} />
+                <MetaCheck label="R:R (TP1)" value={`1:${signal.risk_reward_1.toFixed(1)}`} good={signal.risk_reward_1 >= 2} />
               </div>
             </div>
           </div>
+
+          {/* Invalidation */}
+          {signal.invalidation && (
+            <div className="mt-2 p-2 rounded bg-red-900/10 border border-red-900/20 text-[10px] text-red-300">
+              <span className="font-medium">Invalidation: </span>{signal.invalidation}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+function PriceBox({ label, value, color, bg }: { label: string; value: number; color: string; bg: string }) {
+  return (
+    <div className={`p-2 rounded ${bg}`}>
+      <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">{label}</div>
+      <div className={`text-[11px] font-bold font-mono leading-tight ${color}`}>
+        {value > 0 ? formatPrice(value) : "N/A"}
+      </div>
+    </div>
+  )
+}
+
+function MetaCheck({ label, value, good }: { label: string; value: string | number | boolean | null | undefined; good: boolean }) {
+  const display = typeof value === "string" ? value : typeof value === "number" ? value.toString() : value ? String(value) : "N/A"
+  return (
+    <div className="flex items-center gap-1.5">
+      {good ? (
+        <Check className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />
+      ) : (
+        <XIcon className="w-2.5 h-2.5 text-gray-600 flex-shrink-0" />
+      )}
+      <span className="text-[10px] text-gray-400">
+        {label}: <span className="text-gray-300">{display}</span>
+      </span>
     </div>
   )
 }

@@ -12,6 +12,25 @@ import numpy as np
 from typing import Optional
 
 
+def _convert_numpy(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: _convert_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_numpy(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_convert_numpy(v) for v in obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return _convert_numpy(obj.tolist())
+    return obj
+
+
 class PatternAnalysisEngine:
     def analyze_candlestick_patterns(self, data: list) -> dict:
         if len(data) < 5:
@@ -714,7 +733,7 @@ class PatternAnalysisEngine:
         else:
             direction = "neutral"
 
-        return {
+        return _convert_numpy({
             "symbol": symbol,
             "timeframe": timeframe,
             "current_price": current_price,
@@ -727,7 +746,7 @@ class PatternAnalysisEngine:
                 "fibonacci": fibonacci,
                 "liquidity_zones": liquidity_zones,
             },
-        }
+        })
 
 
 pattern_engine = PatternAnalysisEngine()

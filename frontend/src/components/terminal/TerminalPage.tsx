@@ -72,7 +72,7 @@ export function TerminalPage() {
             .getInstitutionalSignal(selectedSymbol, selectedTimeframe)
             .catch(() => null),
           api
-            .getAIAnalysis(selectedSymbol, selectedTimeframe)
+            .getPatternAnalysis(selectedSymbol, selectedTimeframe)
             .catch(() => null),
         ])
         setSignal(institutional)

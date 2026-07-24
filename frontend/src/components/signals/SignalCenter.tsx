@@ -6,47 +6,34 @@ import { SignalCard } from "@/components/signals/SignalCard"
 import { Button } from "@/components/ui/Button"
 import { cn } from "@/lib/utils"
 import {
-  Filter, ArrowUpDown, Search, RefreshCw,
+  Filter, ArrowUpDown, Search, RefreshCw, Clock, TrendingUp, TrendingDown,
 } from "lucide-react"
-
-interface Signal {
-  direction?: string
-  signal?: string
-  symbol: string
-  reason?: string
-  entry_price?: number
-  price?: number
-  stop_loss?: number
-  take_profit?: number
-  take_profit_1?: number
-  take_profit_2?: number
-  take_profit_3?: number
-  risk_reward?: number
-  risk_reward_ratio?: number
-  timeframe?: string
-  confidence?: number
-  score?: number
-  funding_rate?: number
-  sentiment_score?: number
-}
+import {
+  type UnifiedSignal, normalizeSignal, isTradeReady, isWatchlist, displayDate, isStale,
+} from "@/lib/unified-signal"
 
 type SortKey = "confidence" | "risk_reward" | "opportunity"
 type FilterDir = "all" | "long" | "short"
 type FilterType = "all" | "futures" | "top"
 
 export function SignalCenter() {
-  const [signals, setSignals] = useState<Signal[]>([])
+  const [signals, setSignals] = useState<UnifiedSignal[]>([])
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<SortKey>("confidence")
   const [filterDir, setFilterDir] = useState<FilterDir>("all")
   const [filterType, setFilterType] = useState<FilterType>("all")
   const [highConfidenceOnly, setHighConfidenceOnly] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<string>("")
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.institutionalScan(highConfidenceOnly ? 80 : 70, 30)
-      setSignals(Array.isArray(data?.signals) ? data.signals : [])
+      const minScore = highConfidenceOnly ? 70 : 0
+      const data = await api.institutionalScan(minScore, 50) as { signals?: Record<string, unknown>[] }
+      const rawSignals = Array.isArray(data?.signals) ? data.signals : []
+      const normalized = rawSignals.map(normalizeSignal)
+      setSignals(normalized)
+      setLastUpdated(new Date().toISOString())
     } catch {
       setSignals([])
     } finally {
@@ -54,39 +41,35 @@ export function SignalCenter() {
     }
   }, [highConfidenceOnly])
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
 
   let filtered = [...signals]
   if (filterDir === "long") {
-    filtered = filtered.filter((s) => (s.direction || s.signal) === "long" || (s.direction || s.signal) === "bullish" || (s.direction || s.signal) === "buy")
+    filtered = filtered.filter((s) => s.direction === "long")
   }
   if (filterDir === "short") {
-    filtered = filtered.filter((s) => (s.direction || s.signal) === "short" || (s.direction || s.signal) === "bearish" || (s.direction || s.signal) === "sell")
+    filtered = filtered.filter((s) => s.direction === "short")
   }
   if (filterType === "futures") {
-    filtered = filtered.filter((s) => s.funding_rate !== undefined)
+    filtered = filtered.filter((s) => s.futures !== null)
   }
   if (filterType === "top") {
-    filtered = filtered.filter((s) => (s.confidence || 0) >= 75 && (s.risk_reward || 0) >= 2)
+    filtered = filtered.filter((s) => s.confidence >= 75 && s.risk_reward_1 >= 2)
+  }
+  if (highConfidenceOnly) {
+    filtered = filtered.filter((s) => s.confidence >= 70)
   }
 
   filtered.sort((a, b) => {
-    const aConf = a.confidence || a.score || 0
-    const bConf = b.confidence || b.score || 0
-    if (sortBy === "confidence") return bConf - aConf
-    if (sortBy === "risk_reward") {
-      const aRR = a.risk_reward || a.risk_reward_ratio || 0
-      const bRR = b.risk_reward || b.risk_reward_ratio || 0
-      return bRR - aRR
-    }
-    if (sortBy === "opportunity") {
-      const aScore = (a.confidence || 0) * (a.risk_reward || 1)
-      const bScore = (b.confidence || 0) * (b.risk_reward || 1)
-      return bScore - aScore
-    }
-    return bConf - aConf
+    if (sortBy === "confidence") return b.confidence - a.confidence
+    if (sortBy === "risk_reward") return b.risk_reward_1 - a.risk_reward_1
+    if (sortBy === "opportunity") return b.opportunity_score - a.opportunity_score
+    return b.confidence - a.confidence
   })
+
+  const tradeReadySignals = filtered.filter(isTradeReady)
+  const watchlistSignals = filtered.filter(isWatchlist)
+  const stale = isStale(lastUpdated, 120)
 
   return (
     <div className="h-full overflow-y-auto bg-[#0d1117]">
@@ -96,10 +79,19 @@ export function SignalCenter() {
             <h1 className="text-lg font-semibold text-white">AI Signals</h1>
             <p className="text-xs text-gray-500 mt-0.5">Professional-grade AI trading signals with multi-factor analysis</p>
           </div>
-          <Button size="sm" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("w-3.5 h-3.5 mr-1", loading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                <Clock className="w-3 h-3" />
+                <span>{displayDate(lastUpdated)}</span>
+                {stale && <span className="text-amber-400">Stale</span>}
+              </div>
+            )}
+            <Button size="sm" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("w-3.5 h-3.5 mr-1", loading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -148,9 +140,27 @@ export function SignalCenter() {
           <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer whitespace-nowrap">
             <input type="checkbox" checked={highConfidenceOnly} onChange={(e) => setHighConfidenceOnly(e.target.checked)}
               className="rounded border-gray-600" />
-            High confidence only
+            High confidence only (70%+)
           </label>
         </div>
+
+        {/* Summary */}
+        {!loading && signals.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-2.5 rounded-lg bg-green-900/10 border border-green-900/30 text-center">
+              <div className="text-lg font-bold text-green-400">{tradeReadySignals.length}</div>
+              <div className="text-[10px] text-gray-500">Trade Ready</div>
+            </div>
+            <div className="p-2.5 rounded-lg bg-yellow-900/10 border border-yellow-900/30 text-center">
+              <div className="text-lg font-bold text-yellow-400">{watchlistSignals.length}</div>
+              <div className="text-[10px] text-gray-500">Watchlist</div>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-800/30 border border-gray-700/30 text-center">
+              <div className="text-lg font-bold text-white">{filtered.length}</div>
+              <div className="text-[10px] text-gray-500">Total Active</div>
+            </div>
+          </div>
+        )}
 
         {/* Results */}
         {loading ? (
@@ -173,16 +183,38 @@ export function SignalCenter() {
           <div className="text-center py-12 text-gray-600">
             <Search className="w-8 h-8 mx-auto mb-2" />
             <div className="text-sm">No signals match current filters</div>
+            <div className="text-xs text-gray-600 mt-1">Try adjusting filters or lowering confidence threshold</div>
           </div>
         ) : (
           <div className="grid gap-2.5">
-            {filtered.map((s, i) => (
-              <SignalCard key={`${s.symbol}-${i}`} signal={s} />
-            ))}
+            {/* Trade Ready section */}
+            {tradeReadySignals.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingUp className="w-3.5 h-3.5 text-green-400" />
+                  <span className="text-xs font-semibold text-green-400 uppercase tracking-wider">Trade Ready (70%+)</span>
+                </div>
+                {tradeReadySignals.map((s, i) => (
+                  <SignalCard key={`tr-${s.symbol}-${i}`} signal={s} />
+                ))}
+              </div>
+            )}
+
+            {/* Watchlist section */}
+            {watchlistSignals.length > 0 && (
+              <div className="mt-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingDown className="w-3.5 h-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-wider">Watchlist (50-69%)</span>
+                </div>
+                {watchlistSignals.map((s, i) => (
+                  <SignalCard key={`wl-${s.symbol}-${i}`} signal={s} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   )
 }
-
