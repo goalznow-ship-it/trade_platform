@@ -80,6 +80,8 @@ class SkhyAnalysisEngine:
         time_estimates = self._compute_time_estimates(ohlcv_all)
         activation_conditions = self._compute_activation_conditions(triggers, tf_analysis, snapshot)
         confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure, alignment)
+        whale_analysis = self._compute_whale_analysis(snapshot)
+        time_forecast = self._compute_time_forecast(scores, triggers, snapshot, tf_analysis)
         module_errors = self._collect_module_errors(ohlcv_all, tf_analysis)
         data_freshness = snapshot.get("data_freshness", "live") if isinstance(snapshot, dict) else "unknown"
 
@@ -103,6 +105,7 @@ class SkhyAnalysisEngine:
             "main_scenario_path": sp_main, "alternative_scenario_path": sp_alt, "fakeout_scenario_path": sp_fake,
             "target_hierarchy": target_hierarchy, "time_estimates": time_estimates,
             "activation_conditions": activation_conditions, "confidence_breakdown": confidence_breakdown,
+            "whale_analysis": whale_analysis, "time_forecast": time_forecast,
             "invalidation_level": round(invalidation_level, 2) if invalidation_level else 0,
             "module_errors": module_errors, "data_freshness": data_freshness,
             "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
@@ -282,7 +285,8 @@ class SkhyAnalysisEngine:
             recent = data[-30:]
             for check in [self._check_bull_flag, self._check_bear_flag, self._check_double_top,
                           self._check_double_bottom, self._check_triangle, self._check_abcd,
-                          self._check_rectangle, self._check_wedge, self._check_head_shoulders]:
+                          self._check_rectangle, self._check_wedge, self._check_head_shoulders,
+                          self._check_cup_handle]:
                 p = check(recent, tf)
                 if p: patterns.append(p)
         return patterns
@@ -380,6 +384,26 @@ class SkhyAnalysisEngine:
         if h_slope > 0 and l_slope > 0 and h_slope > l_slope:
             return {"name":"Rising Wedge","timeframe":tf,"status":"FORMING","breakdown_level":min(lows),
                     "measured_target":round(min(lows)-(max(highs)-min(lows))*0.5,2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium"}
+        return None
+
+    def _check_cup_handle(self, data, tf):
+        if len(data) < 30: return None
+        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; lows = [d["low"] for d in data[-30:]]
+        mid = len(closes)//2; cup_start = closes[0]; cup_bottom = min(closes[:mid])
+        cup_rnd = closes[:mid]; handle_rnd = closes[mid:]
+        cup_depth = (cup_start - cup_bottom) / cup_start
+        if 0.05 <= cup_depth <= 0.35:
+            handle_high = max(handle_rnd[:len(handle_rnd)//2]) if handle_rnd else 0
+            handle_low = min(handle_rnd) if handle_rnd else 0
+            handle_retrace = (handle_high - handle_low) / (cup_start - cup_bottom) if (cup_start-cup_bottom) > 0 else 0
+            if 0.1 <= handle_retrace <= 0.5:
+                breakout = max(highs[-5:])
+                target = round(breakout + (cup_start - cup_bottom), 2)
+                return {"name":"Cup and Handle","timeframe":tf,"status":"DETECTED","completion":80,
+                        "breakout_level":breakout,"measured_target":target,
+                        "cup_bottom":round(cup_bottom,2),"cup_rim":round(cup_start,2),
+                        "handle_low":round(handle_low,2),"invalidation":round(min(handle_low,cup_bottom)*0.99,2),
+                        "probability":60,"reliability":"medium"}
         return None
 
     def _check_head_shoulders(self, data, tf):
@@ -989,6 +1013,115 @@ class SkhyAnalysisEngine:
             "multitimeframe_confidence":mtf_conf,
             "risk_confidence":risk_conf,
             "overall_assessment":"yüksək" if signal_conf >= 70 else "orta" if signal_conf >= 50 else "aşağı",
+        }
+
+    # ─── WHALE / SMART MONEY ANALYSIS ───
+    def _compute_whale_analysis(self, snapshot):
+        taker = snapshot.get("taker_buy_sell_ratio", {}) or {}
+        ls = snapshot.get("long_short_ratio", {}) or {}
+        ob = snapshot.get("orderbook", {}) or {}
+        funding = snapshot.get("funding", {}) or {}
+        bid = ob.get("bids", [])
+        ask = ob.get("asks", [])
+        bid_vol = sum(b[1] for b in bid[:5]) if bid else 0
+        ask_vol = sum(a[1] for a in ask[:5]) if ask else 0
+        taker_ratio = taker.get("buy_sell_ratio", 1.0) or 1.0
+        ls_ratio = ls.get("long_short_ratio", 1.0) or 1.0
+        fr = funding.get("funding_rate", 0) or 0
+        whale_bias = "neytrals"
+        whale_desc = "Böyük oyunçular neytral mövqedədir."
+        whale_direction = "neutral"
+        signals = []
+        if taker_ratio > 1.2:
+            signals.append("Taker alışları dominantdır (alış təzyiqi)")
+            whale_bias = "bullish"; whale_direction = "bullish"
+            whale_desc = "Böyük oyunçlar alış tərəfdədir. Taker alış nisbəti yüksəkdir."
+        elif taker_ratio < 0.8:
+            signals.append("Taker satışları dominantdır (satış təzyiqi)")
+            whale_bias = "bearish"; whale_direction = "bearish"
+            whale_desc = "Böyük oyunçular satış tərəfdədir. Taker satış nisbəti yüksəkdir."
+        else:
+            signals.append("Taker alış/satış balanslıdır")
+        if bid_vol > ask_vol * 2 and bid_vol > 0 and ask_vol > 0:
+            signals.append("Order book-da alış tərəfi güclüdür (böyük alış əmrləri)")
+            if whale_bias == "neutral":
+                whale_bias = "bullish"; whale_direction = "bullish"
+                whale_desc = "Order book-da böyük alış əmrləri var."
+        elif ask_vol > bid_vol * 2 and bid_vol > 0 and ask_vol > 0:
+            signals.append("Order book-da satış tərəfi güclüdür (böyük satış əmrləri)")
+            if whale_bias == "neutral":
+                whale_bias = "bearish"; whale_direction = "bearish"
+                whale_desc = "Order book-da böyük satış əmrləri var."
+        if ls_ratio > 1.5:
+            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} - bazarda alış üstünlüyü")
+            if whale_bias == "neutral":
+                whale_bias = "bullish"; whale_direction = "bullish"
+        elif ls_ratio < 0.7:
+            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} - bazarda satış üstünlüyü")
+            if whale_bias == "neutral":
+                whale_bias = "bearish"; whale_direction = "bearish"
+        if fr > 0.001:
+            signals.append("Funding rate yüksəkdir - long tərəf bahalıdır (potensial sıxışdırma)")
+        elif fr < -0.001:
+            signals.append("Funding rate mənfidir - short tərəf bahalıdır (potensial sıxışdırma)")
+        return {
+            "whale_bias": whale_bias, "whale_direction": whale_direction,
+            "whale_description_az": whale_desc,
+            "signals": signals,
+            "taker_buy_sell_ratio": round(taker_ratio, 2),
+            "long_short_ratio": round(ls_ratio, 2),
+            "bid_wall_volume": round(bid_vol, 2),
+            "ask_wall_volume": round(ask_vol, 2),
+            "funding_rate": round(fr, 6),
+            "bid_ask_imbalance": round((bid_vol - ask_vol) / max(bid_vol + ask_vol, 1), 4),
+            "retail_sentiment": "həddindən artıq long" if ls_ratio > 2 else "long üstünlük" if ls_ratio > 1.2 else "balanslı" if ls_ratio > 0.8 else "short üstünlük" if ls_ratio > 0.5 else "həddindən artıq short",
+        }
+
+    # ─── TIME-BASED FORECAST ───
+    def _compute_time_forecast(self, scores, triggers, snapshot, tf_analysis):
+        h4 = tf_analysis.get("4h", {})
+        h1 = tf_analysis.get("1h", {})
+        price = snapshot.get("ticker", {}).get("price", 0) or 155
+        lt = triggers.get("long_trigger_price", 0)
+        st = triggers.get("short_trigger_price", 0)
+        long_prob = scores.get("long_probability", 50)
+        short_prob = scores.get("short_probability", 50)
+        signal_conf = scores.get("signal_confidence", 0)
+        h4_signal = h4.get("signal", "WAIT")
+        h1_signal = h1.get("signal", "WAIT")
+        h4_conf = 60 if h4_signal in ("LONG", "STRONG_LONG") else 60 if h4_signal in ("SHORT", "STRONG_SHORT") else 40
+        h1_conf = 60 if h1_signal in ("LONG", "STRONG_LONG") else 60 if h1_signal in ("SHORT", "STRONG_SHORT") else 40
+        base_bull = long_prob
+        base_bear = short_prob
+        def trend_decay(conf, hours):
+            return max(conf * (1 - hours * 0.05), 15)
+        bull_1h = int(trend_decay(base_bull, 1))
+        bear_1h = 100 - bull_1h
+        bull_2h = int(trend_decay(base_bull, 2))
+        bear_2h = 100 - bull_2h
+        bull_4h = int(trend_decay(base_bull, 4))
+        bear_4h = 100 - bull_4h
+        bull_12h = int(trend_decay(base_bull, 12))
+        bear_12h = 100 - bull_12h
+        best_hour = "1h" if signal_conf >= 70 else "2h" if signal_conf >= 50 else "4h"
+        return {
+            "forecasts": [
+                {"period":"1 saat","bullish_prob":bull_1h,"bearish_prob":bear_1h,
+                 "action":"ALIŞ aktivləşə bilər" if lt and price < lt and abs(price-lt)/lt < 0.02 else
+                          "SATIŞ aktivləşə bilər" if st and price > st and abs(price-st)/st < 0.02 else
+                          "Gözləmə - trigger yaxın deyil","confidence":min(signal_conf, 85)},
+                {"period":"2 saat","bullish_prob":bull_2h,"bearish_prob":bear_2h,
+                 "action":"ALIŞ gözlənilir" if long_prob > 60 else "SATIŞ gözlənilir" if short_prob > 60 else "Qeyri-müəyyən",
+                 "confidence":min(signal_conf-5, 75)},
+                {"period":"4 saat","bullish_prob":bull_4h,"bearish_prob":bear_4h,
+                 "action":f"4H {h4_signal}" if h4_signal != "WAIT" else "Neytral 4H",
+                 "confidence":min(signal_conf-10, 65)},
+                {"period":"12 saat","bullish_prob":bull_12h,"bearish_prob":bear_12h,
+                 "action":f"Trend:{h4.get('trend','neytral')}" if h4.get('trend') else "Neytral",
+                 "confidence":min(signal_conf-20, 50)},
+            ],
+            "best_period":best_hour,
+            "description_az":f"Ən güclü ehtimal {best_hour} vaxtında. {max(bull_1h,bear_1h)}% ehtimal.",
         }
 
     # ─── EXPLANATION ───

@@ -768,12 +768,174 @@ function drawSR(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: 
 function drawPatterns(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, patterns: Record<string, unknown>[] | undefined, ohlcv: Candle[], w: number) {
   if (!patterns || !ohlcv.length) return
   let yOff = 20; const st: Record<string,string> = { CONFIRMED:"TƏSDİQLƏNDİ", DETECTED:"AŞKAR EDİLDİ", FORMING:"FORMALAŞIR" }
-  for (const pat of patterns.slice(0, 3)) {
+
+  const drawMeasuredMove = (bLevel: number, mTarget: number, color: string) => {
+    if (bLevel <= 0 || mTarget <= 0) return
+    const y1 = toY(bLevel); const y2 = toY(mTarget)
+    if (y1 <= 0 || y2 <= 0) return
+    ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3])
+    ctx.beginPath(); ctx.moveTo(w - 40, y1); ctx.lineTo(w - 40, y2); ctx.stroke(); ctx.setLineDash([])
+    ctx.font = "6px monospace"; ctx.fillStyle = color
+    ctx.fillText(`→$${mTarget.toFixed(1)}`, w - 38, (y1 + y2) / 2)
+  }
+
+  for (const pat of patterns.slice(0, 4)) {
     const name = p2str(pat.name); const prob = n2(pat.probability)
-    const bLevel = n2(pat.breakout_level) || n2(pat.breakdown_level); const mTarget = n2(pat.measured_target)
-    ctx.font = "7px monospace"; ctx.fillStyle = p2str(pat.status) === "CONFIRMED" ? "#22c55e" : p2str(pat.status) === "DETECTED" ? "#f59e0b" : "#6b7280"
-    ctx.fillText(`${name} ${st[p2str(pat.status)]||p2str(pat.status)} ${prob}%`, 10, yOff + 10)
-    if (bLevel > 0 && mTarget > 0) { const y1 = toY(bLevel); const y2 = toY(mTarget); if (y1 > 0 && y2 > 0) { ctx.strokeStyle = p2str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(w - 40, y1); ctx.lineTo(w - 40, y2); ctx.stroke(); ctx.setLineDash([]); ctx.font = "6px monospace"; ctx.fillStyle = p2str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.5)" : "rgba(245,158,11,0.5)"; ctx.fillText(`→$${mTarget.toFixed(1)}`, w - 38, (y1 + y2) / 2) } }
+    const bLevel = n2(pat.breakout_level) || n2(pat.breakdown_level)
+    const mTarget = n2(pat.measured_target)
+    const color = p2str(pat.status) === "CONFIRMED" ? "rgba(34,197,94,0.7)" : p2str(pat.status) === "DETECTED" ? "rgba(245,158,11,0.7)" : "rgba(107,114,128,0.5)"
+    const labelColor = p2str(pat.status) === "CONFIRMED" ? "#22c55e" : p2str(pat.status) === "DETECTED" ? "#f59e0b" : "#6b7280"
+    const tf = p2str(pat.timeframe)
+
+    // Draw pattern-specific shapes
+    if (name.includes("Head and Shoulders") || name.includes("Inverse Head")) {
+      // Draw H&S shape: 3 circles at swing points
+      const isInv = name.includes("Inverse")
+      if (ohlcv.length >= 20) {
+        const step = Math.max(1, Math.floor(ohlcv.length / 5))
+        const idxs = [Math.floor(ohlcv.length * 0.15), Math.floor(ohlcv.length * 0.35), Math.floor(ohlcv.length * 0.55)]
+        const prices = idxs.map(i => ohlcv[Math.min(i, ohlcv.length-1)]?.close || 0)
+        if (prices.every(p => p > 0)) {
+          const xs = idxs.map(i => toX(ohlcv[Math.min(i, ohlcv.length-1)].time))
+          const ys = prices.map(p => toY(p))
+          if (xs.every(x => x > 0) && ys.every(y => y > 0)) {
+            ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.setLineDash([])
+            // Left shoulder
+            ctx.beginPath(); ctx.arc(xs[0], ys[0], 5, 0, Math.PI * 2); ctx.stroke()
+            ctx.font = "6px monospace"; ctx.fillStyle = labelColor
+            ctx.fillText("LS", xs[0] + 6, ys[0] + 2)
+            // Head
+            ctx.beginPath(); ctx.arc(xs[1], ys[1], 7, 0, Math.PI * 2); ctx.stroke()
+            ctx.fillText("HD", xs[1] + 8, ys[1] + 2)
+            // Right shoulder
+            ctx.beginPath(); ctx.arc(xs[2], ys[2], 5, 0, Math.PI * 2); ctx.stroke()
+            ctx.fillText("RS", xs[2] + 6, ys[2] + 2)
+            // Neckline
+            const neckMin = isInv ? Math.max(...ys) : Math.min(...ys)
+            ctx.strokeStyle = "rgba(239,68,68,0.3)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3])
+            ctx.beginPath(); ctx.moveTo(xs[0], neckMin); ctx.lineTo(xs[2], neckMin); ctx.stroke(); ctx.setLineDash([])
+            ctx.font = "5px monospace"; ctx.fillStyle = "rgba(239,68,68,0.4)"
+            ctx.fillText("Boyun xətti", xs[1] + 2, neckMin - 2)
+          }
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else if (name.includes("Cup and Handle")) {
+      // Draw cup shape: curve from rim to bottom back to rim, then handle dip
+      if (ohlcv.length >= 15) {
+        const cupRim = n2(pat.cup_rim); const cupBot = n2(pat.cup_bottom)
+        const handleLow = n2(pat.handle_low)
+        const startIdx = Math.max(0, ohlcv.length - 30)
+        const midIdx = Math.floor((ohlcv.length + startIdx) / 2)
+        const lastIdx = ohlcv.length - 1
+        const x0 = toX(ohlcv[startIdx].time); const xm = toX(ohlcv[midIdx].time); const x1 = toX(ohlcv[lastIdx].time)
+        const yRim = toY(cupRim); const yBot = toY(cupBot); const yH = toY(handleLow || cupBot)
+        if (x0 > 0 && xm > 0 && x1 > 0 && yRim > 0 && yBot > 0) {
+          ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([])
+          ctx.beginPath()
+          ctx.moveTo(x0, yRim)
+          const cp1x = (x0 + xm) / 2; const cp1y = yRim
+          const cp2x = xm; const cp2y = yBot
+          ctx.quadraticCurveTo((x0 + xm) / 2, yBot, xm, yBot)
+          ctx.quadraticCurveTo((xm + x1) / 2, yBot, x1, yRim)
+          ctx.stroke()
+          // Handle dip
+          if (handleLow > 0 && cupRim > handleLow) {
+            ctx.strokeStyle = "rgba(245,158,11,0.4)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 3])
+            const handleX = x1 - (x1 - xm) * 0.4
+            ctx.beginPath(); ctx.moveTo(handleX, yRim); ctx.lineTo(handleX, yH); ctx.stroke(); ctx.setLineDash([])
+            ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.5)"
+            ctx.fillText("Handle", handleX + 2, (yRim + yH) / 2)
+          }
+          ctx.font = "7px monospace"; ctx.fillStyle = labelColor
+          ctx.fillText("C&H", xm - 10, yBot + 14)
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else if (name.includes("Double Top") || name.includes("Double Bottom")) {
+      // Draw 2 circles at swing points + neckline
+      if (ohlcv.length >= 15) {
+        const isTop = name.includes("Top")
+        const step = Math.max(1, Math.floor(ohlcv.length / 4))
+        const idx1 = Math.floor(ohlcv.length * 0.25); const idx2 = Math.floor(ohlcv.length * 0.55)
+        const x1 = toX(ohlcv[Math.min(idx1, ohlcv.length-1)].time)
+        const x2 = toX(ohlcv[Math.min(idx2, ohlcv.length-1)].time)
+        const p1 = ohlcv[Math.min(idx1, ohlcv.length-1)]?.close || 0
+        const p2 = ohlcv[Math.min(idx2, ohlcv.length-1)]?.close || 0
+        const y1 = toY(p1); const y2 = toY(p2)
+        if (x1 > 0 && x2 > 0 && y1 > 0 && y2 > 0) {
+          ctx.strokeStyle = color; ctx.lineWidth = 1
+          ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI * 2); ctx.stroke()
+          ctx.beginPath(); ctx.arc(x2, y2, 5, 0, Math.PI * 2); ctx.stroke()
+          ctx.font = "7px monospace"; ctx.fillStyle = labelColor
+          ctx.fillText(isTop ? "1st Top" : "1st Bot", x1 + 6, y1 + 2)
+          ctx.fillText(isTop ? "2nd Top" : "2nd Bot", x2 + 6, y2 + 2)
+          // Neckline
+          const neckY = isTop ? Math.max(y1, y2) : Math.min(y1, y2)
+          ctx.strokeStyle = "rgba(239,68,68,0.2)"; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3])
+          ctx.beginPath(); ctx.moveTo(x1, neckY); ctx.lineTo(x2, neckY); ctx.stroke(); ctx.setLineDash([])
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else if (name.includes("Flag") || name.includes("Pennant")) {
+      // Draw flag pole + rectangle
+      if (ohlcv.length >= 10) {
+        const idxStart = Math.max(0, ohlcv.length - 15)
+        const xStart = toX(ohlcv[idxStart].time)
+        const xEnd = toX(ohlcv[ohlcv.length-1].time)
+        const yHigh = toY(Math.max(...ohlcv.slice(idxStart).map(d => d.high)))
+        const yLow = toY(Math.min(...ohlcv.slice(idxStart).map(d => d.low)))
+        if (xStart > 0 && xEnd > 0 && yHigh > 0 && yLow > 0) {
+          ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.setLineDash([2, 3])
+          ctx.strokeRect(xStart, yHigh, xEnd - xStart, yLow - yHigh)
+          ctx.setLineDash([])
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else if (name.includes("Triangle") || name.includes("Wedge")) {
+      // Draw converging lines
+      if (ohlcv.length >= 10) {
+        const idxs = [Math.max(0, ohlcv.length - 15), ohlcv.length - 1]
+        const highs = idxs.map(i => ohlcv[i].high)
+        const lows = idxs.map(i => ohlcv[i].low)
+        const xs = idxs.map(i => toX(ohlcv[i].time))
+        if (xs.every(x => x > 0)) {
+          const yh1 = toY(highs[0]); const yh2 = toY(highs[1])
+          const yl1 = toY(lows[0]); const yl2 = toY(lows[1])
+          if (yh1 > 0 && yh2 > 0 && yl1 > 0 && yl2 > 0) {
+            ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.setLineDash([2, 3])
+            ctx.beginPath(); ctx.moveTo(xs[0], yh1); ctx.lineTo(xs[1], yh2); ctx.stroke()
+            ctx.beginPath(); ctx.moveTo(xs[0], yl1); ctx.lineTo(xs[1], yl2); ctx.stroke()
+            ctx.setLineDash([])
+          }
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else if (name.includes("Rectangle") || name.includes("Range")) {
+      // Draw rectangular range
+      if (ohlcv.length >= 10) {
+        const idxStart = Math.max(0, ohlcv.length - 20)
+        const xStart = toX(ohlcv[idxStart].time)
+        const xEnd = toX(ohlcv[ohlcv.length-1].time)
+        const topVal = n2(pat.breakout_level) || Math.max(...ohlcv.slice(idxStart).map(d => d.high))
+        const botVal = n2(pat.breakdown_level) || Math.min(...ohlcv.slice(idxStart).map(d => d.low))
+        const yT = toY(topVal); const yB = toY(botVal)
+        if (xStart > 0 && xEnd > 0 && yT > 0 && yB > 0) {
+          ctx.strokeStyle = "rgba(99,102,241,0.3)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4])
+          ctx.strokeRect(xStart, yT, xEnd - xStart, yB - yT)
+          ctx.setLineDash([])
+          ctx.fillStyle = "rgba(99,102,241,0.03)"; ctx.fillRect(xStart, yT, xEnd - xStart, yB - yT)
+        }
+      }
+      drawMeasuredMove(bLevel, mTarget, color)
+    } else {
+      // Generic: draw measured move only
+      drawMeasuredMove(bLevel, mTarget, color)
+    }
+
+    // Draw pattern label on top-left side
+    ctx.font = "7px monospace"; ctx.fillStyle = labelColor
+    ctx.fillText(`${name} ${st[p2str(pat.status)]||p2str(pat.status)} ${prob}% · ${tf}`, 10, yOff + 10)
     yOff += 14
   }
 }
