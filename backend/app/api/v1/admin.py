@@ -390,6 +390,37 @@ async def set_trading_control(
 
 
 # Audit Logs
+@router.get("/execution/stats")
+async def execution_stats(admin: User = Depends(require_admin)):
+    from app.services.execution_engine import execution_engine
+    from app.core.redis import redis_client
+    try:
+        total_validations = int(await redis_client.get("execution:total_validations") or 0)
+        total_approved = int(await redis_client.get("execution:total_approved") or 0)
+        total_rejected = int(await redis_client.get("execution:total_rejected") or 0)
+        last_validation = await redis_client.get("execution:last_validation")
+    except Exception:
+        total_validations = total_approved = total_rejected = 0
+        last_validation = None
+
+    return {
+        "total_validations": total_validations,
+        "total_approved": total_approved,
+        "total_rejected": total_rejected,
+        "approval_rate": round(total_approved / total_validations * 100, 1) if total_validations > 0 else 0,
+        "rejection_rate": round(total_rejected / total_validations * 100, 1) if total_validations > 0 else 0,
+        "last_validation": last_validation,
+        "checks_available": [
+            "trend_alignment", "liquidity", "spread", "funding",
+            "correlation", "risk", "margin", "leverage",
+            "exchange_filters", "liquidation_distance",
+        ],
+        "max_leverage": execution_engine.MAX_LEVERAGE,
+        "min_risk_reward": execution_engine.MIN_RISK_REWARD,
+        "max_spread_pct": execution_engine.MAX_SPREAD_PCT,
+    }
+
+
 @router.get("/logs")
 async def get_logs(
     action: Optional[str] = None,

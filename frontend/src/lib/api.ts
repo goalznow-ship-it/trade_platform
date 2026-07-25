@@ -331,6 +331,7 @@ export const api = {
   getBrainAssessment: (symbol = "BTCUSDT") => request<any>(`/api/v1/admin/brain/assessment?symbol=${symbol}`),
   getBrainSelfLearning: () => request<any>("/api/v1/admin/brain/self-learning"),
   getBrainSystem: () => request<any>("/api/v1/admin/brain/system"),
+  getExecutionStats: () => request<any>("/api/v1/admin/execution/stats"),
 
   // Institutional
   getInstitutionalSignal: (symbol: string, timeframe = "1h", capital = 10000, riskPercent = 0.02) =>

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import {
   Brain, Activity, Server, Zap,
   TrendingUp, TrendingDown, AlertTriangle, BarChart3,
-  Target, Cpu, RefreshCw,
+  Target, Cpu, RefreshCw, Shield,
 } from "lucide-react"
 
 interface BrainAssessment {
@@ -45,6 +45,17 @@ interface SelfLearningReport {
   recommendations?: string[]
   total_trades_recorded?: number
   total_weight_adjustments?: number
+}
+
+interface ExecutionStats {
+  total_validations?: number
+  total_approved?: number
+  total_rejected?: number
+  approval_rate?: number
+  rejection_rate?: number
+  checks_available?: string[]
+  max_leverage?: number
+  min_risk_reward?: number
 }
 
 interface SystemStatus {
@@ -100,6 +111,7 @@ export function AIBrainDashboard() {
   const [engines, setEngines] = useState<EngineStatus | null>(null)
   const [selfLearning, setSelfLearning] = useState<SelfLearningReport | null>(null)
   const [system, setSystem] = useState<SystemStatus | null>(null)
+  const [execStats, setExecStats] = useState<ExecutionStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedSymbol, setSelectedSymbol] = useState("BTCUSDT")
@@ -108,16 +120,18 @@ export function AIBrainDashboard() {
     try {
       setLoading(true)
       setError(null)
-      const [assess, eng, sl, sys] = await Promise.all([
+      const [assess, eng, sl, sys, exec] = await Promise.all([
         api.getBrainAssessment(selectedSymbol).catch(() => null),
         api.getBrainEngines().catch(() => null),
         api.getBrainSelfLearning().catch(() => null),
         api.getBrainSystem().catch(() => null),
+        api.getExecutionStats().catch(() => null),
       ])
       setAssessment(assess)
       setEngines(eng)
       setSelfLearning(sl)
       setSystem(sys)
+      setExecStats(exec)
     } catch {
       setError("Failed to load brain data")
     } finally {
@@ -373,6 +387,47 @@ export function AIBrainDashboard() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Execution Engine Stats */}
+      {execStats && (
+        <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
+          <div className="flex items-center gap-2 mb-3">
+            <Shield className="w-4 h-4 text-gray-400" />
+            <h3 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Execution Engine</h3>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="p-2 rounded-lg bg-gray-800/30">
+              <div className="text-[9px] text-gray-500">Validations</div>
+              <div className="text-sm font-bold text-white font-mono">{execStats.total_validations || 0}</div>
+            </div>
+            <div className="p-2 rounded-lg bg-gray-800/30">
+              <div className="text-[9px] text-gray-500">Approved</div>
+              <div className="text-sm font-bold text-green-400 font-mono">{execStats.total_approved || 0}</div>
+            </div>
+            <div className="p-2 rounded-lg bg-gray-800/30">
+              <div className="text-[9px] text-gray-500">Rejected</div>
+              <div className="text-sm font-bold text-red-400 font-mono">{execStats.total_rejected || 0}</div>
+            </div>
+            <div className="p-2 rounded-lg bg-gray-800/30">
+              <div className="text-[9px] text-gray-500">Approval Rate</div>
+              <div className="text-sm font-bold text-white font-mono">{execStats.approval_rate || 0}%</div>
+            </div>
+            <div className="p-2 rounded-lg bg-gray-800/30">
+              <div className="text-[9px] text-gray-500">Max Leverage</div>
+              <div className="text-sm font-bold text-white font-mono">{execStats.max_leverage || 0}x</div>
+            </div>
+          </div>
+          {execStats.checks_available && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {execStats.checks_available.map((chk: string) => (
+                <span key={chk} className="text-[8px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-mono">
+                  {chk.replace(/_/g, " ")}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

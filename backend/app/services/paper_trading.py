@@ -10,6 +10,14 @@ from app.core.logging import logger
 from app.core.websocket_manager import ws_manager, Channel
 from app.services.market import market_service
 
+try:
+    from app.services.execution_engine import execution_engine
+    HAS_EXECUTION_ENGINE = True
+except ImportError:
+    execution_engine = None
+    HAS_EXECUTION_ENGINE = False
+    logger.warning("PaperTrading: execution_engine not available, trade validation skipped")
+
 COMMISSION_RATE = 0.0004
 FUNDING_INTERVAL_HOURS = 8
 LIQUIDATION_MAINTENANCE_MARGIN = 0.005
@@ -118,6 +126,48 @@ class PaperTradingService:
         db.add(order)
 
         live_price = await self._get_live_price(symbol)
+
+        # Pre-trade validation via Execution Engine
+        if HAS_EXECUTION_ENGINE and order_type in ("market", "limit") and live_price:
+            direction = "long" if side == "buy" else "short"
+            trade_request = {
+                "symbol": symbol,
+                "direction": direction,
+                "entry_price": price or live_price,
+                "stop_loss": stop_price if side == "sell" else (price * 0.97 if price else live_price * 0.97),
+                "take_profit": price if direction == "long" else stop_price,
+                "leverage": leverage,
+                "balance": account.balance,
+                "quantity": quantity,
+                "price": price or live_price,
+                "portfolio": {"symbols": [], "exposures": {}},
+                "timeframe": "1h",
+            }
+            validation = await execution_engine.validate_trade(trade_request)
+            try:
+                from app.core.redis import redis_client
+                await redis_client.incr("execution:total_validations")
+                if validation.get("passed", False):
+                    await redis_client.incr("execution:total_approved")
+                else:
+                    await redis_client.incr("execution:total_rejected")
+                await redis_client.set("execution:last_validation", datetime.now(timezone.utc).isoformat())
+            except Exception:
+                pass
+            if not validation.get("passed", False):
+                reasons = []
+                for check_name, check in validation.get("checks", {}).items():
+                    if not check.get("passed", False):
+                        reasons.append(f"[{check_name}] {check.get('reason', 'failed')}")
+                order.status = "rejected"
+                await db.commit()
+                return {
+                    "order": order,
+                    "position": None,
+                    "error": "Trade rejected by execution validation",
+                    "validation_failures": reasons,
+                    "risk_score": validation.get("risk_score", 0),
+                }
 
         if order_type == "market":
             return await self._fill_market_order(account, order, live_price, db)

@@ -8,6 +8,7 @@ from app.services.exchange.base import (
     PositionResult, BalanceResult,
 )
 from app.services.exchange.binance_futures import BinanceFuturesExchange
+from app.services.exchange.bybit_futures import BybitFuturesExchange
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.exchange import ExchangeCredentials
@@ -233,3 +234,4 @@ class ExchangeManager:
 
 exchange_manager = ExchangeManager()
 exchange_manager.register_exchange("binance", BinanceFuturesExchange)
+exchange_manager.register_exchange("bybit", BybitFuturesExchange)
