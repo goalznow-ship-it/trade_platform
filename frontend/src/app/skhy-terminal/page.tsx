@@ -84,40 +84,79 @@ export default function SkhyTerminalPage() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const wsRef = useRef<WebSocket | null>(null)
   const wsCleanupRef = useRef<(() => void) | null>(null)
+  const lastValidAnalysisRef = useRef<Record<string, unknown> | null>(null)
+  const lastValidScenariosRef = useRef<Record<string, unknown> | null>(null)
+  const requestIdRef = useRef(0)
+
+  function logDebug(tag: string, ...args: unknown[]) {
+    const ts = new Date().toISOString().slice(11, 23)
+    console.log(`[${ts}][SKHY] ${tag}`, ...args)
+  }
+
+  function isValidAnalysisPayload(payload: Record<string, unknown> | null | undefined, tf: string): boolean {
+    if (!payload) { logDebug("ANALYSIS_REJECTED_EMPTY"); return false }
+    const scores = payload.scores as Record<string, unknown> | undefined
+    if (!scores) { logDebug("ANALYSIS_REJECTED_NO_SCORES", { tf }); return false }
+    const atf = payload.active_timeframe || payload.timeframe
+    if (atf && String(atf) !== tf) { logDebug("ANALYSIS_REJECTED_WRONG_TF", { expected: tf, got: atf }); return false }
+    const hasCore = !!payload.scenario_paths || !!payload.detected_structure || !!payload.channel_lines
+    if (!hasCore) { logDebug("ANALYSIS_REJECTED_NO_CORE", { keys: Object.keys(payload).slice(0, 10) }); return false }
+    return true
+  }
+
+  function safeSetAnalysis(payload: Record<string, unknown> | null, tf: string) {
+    if (isValidAnalysisPayload(payload, tf)) {
+      lastValidAnalysisRef.current = payload
+      setAnalysis(payload)
+      setAnalysisError(null)
+      setLastUpdate(new Date())
+      logDebug("ANALYSIS_ACCEPTED", { tf })
+    } else if (lastValidAnalysisRef.current) {
+      logDebug("ANALYSIS_REJECTED_KEEP_CACHED", { tf, hasCache: true })
+    }
+  }
+
+  function safeSetScenarios(payload: Record<string, unknown> | null, tf: string) {
+    if (payload && payload.scenarios) {
+      lastValidScenariosRef.current = payload
+      setScenarios(payload)
+      setScenarioError(null)
+      logDebug("SCENARIOS_ACCEPTED", { tf })
+    } else if (lastValidScenariosRef.current) {
+      logDebug("SCENARIOS_REJECTED_KEEP_CACHED", { tf })
+    }
+  }
 
   const fetchData = useCallback(async (tf: string) => {
+    const reqId = ++requestIdRef.current
     setTfLoading(true)
-    setAnalysisError(null)
-    setScenarioError(null)
     try {
       const [snap, an, sc, hist] = await Promise.all([
         api.getSkhySnapshot(tf).catch(() => null),
-        api.getSkhyAnalysis(tf).catch(() => { setAnalysisError("Analysis endpoint cavab vermədi"); return null }),
-        api.getSkhyScenarios(tf).catch(() => { setScenarioError("Scenarios endpoint cavab vermədi"); return null }),
+        api.getSkhyAnalysis(tf).catch(() => null),
+        api.getSkhyScenarios(tf).catch(() => null),
         api.getSkhyHistory(tf).catch(() => null),
       ])
+      if (reqId !== requestIdRef.current) { logDebug("FETCH_STALE", { reqId, current: requestIdRef.current, tf }); return }
       if (snap) setSnapshot(snap)
-      if (an) { setAnalysis(an); setAnalysisError(null) }
-      if (sc) { setScenarios(sc); setScenarioError(null) }
+      safeSetAnalysis(an as Record<string, unknown> | null, tf)
+      safeSetScenarios(sc as Record<string, unknown> | null, tf)
       if (hist) setHistory(hist)
       if (an || sc) setError(null)
       setLastUpdate(new Date())
+      logDebug("FETCH_ACCEPTED", { tf })
     } catch {
-      setError("Məlumat əldə edilə bilmir")
+      if (reqId === requestIdRef.current) setError("Məlumat əldə edilə bilmir")
     } finally {
-      setLoading(false)
-      setTfLoading(false)
+      if (reqId === requestIdRef.current) { setLoading(false); setTfLoading(false) }
     }
   }, [])
 
   useEffect(() => {
-    setAnalysis(null)
-    setScenarios(null)
-    setHistory(null)
-    setAnalysisError(null)
-    setScenarioError(null)
+    const reqId = ++requestIdRef.current
+    logDebug("TIMEFRAME_CHANGE", { timeframe })
     fetchData(timeframe)
-    api.getSkhyDiagnostics(timeframe).then(setDiagnostics).catch(() => {})
+    api.getSkhyDiagnostics(timeframe).then(d => { if (reqId === requestIdRef.current) setDiagnostics(d) }).catch(() => {})
   }, [timeframe, fetchData])
 
   useEffect(() => {
@@ -139,22 +178,34 @@ export default function SkhyTerminalPage() {
       if (closed) return
       ws = new WebSocket(wsUrl)
       wsRef.current = ws
-      ws.onopen = () => { if (!closed) setWsConnected(true) }
+      ws.onopen = () => { if (!closed) { setWsConnected(true); logDebug("WS_CONNECTED", { tf: timeframe }) } }
       ws.onmessage = (event) => {
         if (closed) return
         try {
           const msg = JSON.parse(event.data)
+          if (msg.event === "pong" || msg.event === "heartbeat" || msg.type === "pong") return
           if (msg.event === "skhy_update") {
-            if (msg.data?.snapshot) setSnapshot(msg.data.snapshot)
-            if (msg.data?.analysis) { setAnalysis(msg.data.analysis); setAnalysisError(null) }
-            if (msg.data?.scenarios) { setScenarios(msg.data.scenarios); setScenarioError(null) }
-            setLastUpdate(new Date())
+            if (msg.data?.snapshot) {
+              setSnapshot(msg.data.snapshot)
+              logDebug("WS_SNAPSHOT", { tf: timeframe })
+            }
+            if (msg.data?.analysis !== undefined) {
+              logDebug("WS_ANALYSIS_RECEIVED", { tf: timeframe, hasData: !!msg.data.analysis, keys: Object.keys(msg.data.analysis || {}).slice(0, 8) })
+              safeSetAnalysis(msg.data.analysis, timeframe)
+            }
+            if (msg.data?.scenarios !== undefined) {
+              safeSetScenarios(msg.data.scenarios, timeframe)
+            }
+          } else if (msg.type === "analysis" && msg.data) {
+            logDebug("WS_ANALYSIS_DIRECT", { tf: timeframe, keys: Object.keys(msg.data).slice(0, 8) })
+            safeSetAnalysis(msg.data, timeframe)
           }
-        } catch { /* ignore */ }
+        } catch { /* ignore parse errors */ }
       }
       ws.onclose = () => {
         if (!closed) {
           setWsConnected(false)
+          logDebug("WS_DISCONNECTED", { tf: timeframe })
           reconnectTimer = setTimeout(connect, 3000)
         }
       }
