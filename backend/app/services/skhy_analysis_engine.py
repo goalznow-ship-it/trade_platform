@@ -9,40 +9,79 @@ from app.core.logging import logger
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 class SkhyAnalysisEngine:
-    async def get_full_analysis(self) -> dict:
-        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200) for tf in TIMEFRAMES}
-        ohlcv_results = await asyncio.gather(*ohlcv_tasks.values())
-        ohlcv_data = dict(zip(ohlcv_tasks.keys(), ohlcv_results))
+    async def get_full_analysis(self, timeframe: str | None = None) -> dict:
+        active_tf = timeframe or "1h"
+        now_iso = datetime.now(timezone.utc).isoformat()
         snapshot = await skhy_market_data.get_snapshot()
 
-        tf_analysis = {}
-        for tf in TIMEFRAMES:
-            data = ohlcv_data.get(tf, [])
+        if timeframe:
+            tfs = [timeframe]
+        else:
+            tfs = TIMEFRAMES
+
+        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200, skip_cache=bool(timeframe)) for tf in tfs}
+        ohlcv_results = await asyncio.gather(*ohlcv_tasks.values(), return_exceptions=True)
+        ohlcv_data = {}
+        for tf, result in zip(ohlcv_tasks.keys(), ohlcv_results):
+            if isinstance(result, Exception):
+                logger.warning(f"OHLCV fetch failed for {tf}: {result}")
+                ohlcv_data[tf] = []
+            else:
+                ohlcv_data[tf] = result
+
+        if timeframe:
+            data = ohlcv_data.get(timeframe, [])
             if len(data) < 30:
-                tf_analysis[tf] = {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}
-                continue
+                return {
+                    "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
+                    "timestamp": now_iso, "last_updated": now_iso, "active_timeframe": timeframe,
+                    "snapshot": snapshot, "timeframes": {timeframe: {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}},
+                    "alignment": {"primary_direction": "neutral", "confidence": 0, "status": "NO_DATA"},
+                    "scores": {k: 0 for k in ["trend_score","structure_score","momentum_score","volume_score","liquidity_score","pattern_score","futures_score","orderflow_score","multitimeframe_score","risk_score"]} | {"overall": 0, "status": "NO_DATA_"+timeframe, "long_probability": 50, "short_probability": 50, "signal_confidence": 0},
+                    "triggers": {}, "patterns": [], "support_resistance": {}, "support_zone": {}, "resistance_zone": {},
+                    "elliott_wave": {"status":"insufficient_data"}, "fibonacci": {"status":"insufficient_data"},
+                    "fibonacci_levels": {"status":"insufficient_data"}, "detected_structure": {"status":"insufficient_data"},
+                    "channel_lines": {"status":"insufficient_data"}, "breakout_zone": {"status":"insufficient_data"},
+                    "scenario_paths": {}, "main_scenario_path": [], "alternative_scenario_path": [], "fakeout_scenario_path": [],
+                    "target_hierarchy": {"targets":[]}, "time_estimates": {"status":"insufficient_data"},
+                    "activation_conditions": {}, "confidence_breakdown": {},
+                    "invalidation_level": 0, "module_errors": {f"{timeframe}_data": f"Insufficient data ({len(data)} candles)"},
+                    "data_freshness": snapshot.get("data_freshness", "unknown") if isinstance(snapshot, dict) else "unknown",
+                    "explanation_az": f"{timeframe} üçün kifayət qədər məlumat yoxdur ({len(data)} şam).",
+                }
             indicators = skhy_indicators.analyze(data)
             structure = skhy_structure.analyze(data)
-            tf_analysis[tf] = self._analyze_timeframe(data, indicators, structure, tf)
+            tf_analysis = {timeframe: self._analyze_timeframe(data, indicators, structure, timeframe)}
+            ohlcv_all = {timeframe: ohlcv_data.get(timeframe, [])}
+        else:
+            tf_analysis = {}
+            for tf in TIMEFRAMES:
+                data = ohlcv_data.get(tf, [])
+                if len(data) < 30:
+                    tf_analysis[tf] = {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}
+                    continue
+                indicators = skhy_indicators.analyze(data)
+                structure = skhy_structure.analyze(data)
+                tf_analysis[tf] = self._analyze_timeframe(data, indicators, structure, tf)
+            ohlcv_all = ohlcv_data
 
         alignment = self._compute_alignment(tf_analysis)
         scores = self._compute_scores(tf_analysis, alignment, snapshot)
         triggers = self._compute_triggers(tf_analysis, alignment, scores, snapshot)
-        patterns = self._detect_patterns(ohlcv_data)
-        support_resistance = self._compute_support_resistance(ohlcv_data, snapshot)
-        elliott_wave = self._detect_elliott_wave(ohlcv_data)
-        fibonacci = self._compute_fibonacci_levels(ohlcv_data, snapshot)
-        detected_structure = self._detect_dominant_structure(ohlcv_data, snapshot)
-        channel_lines = self._detect_channel(ohlcv_data)
-        breakout_zone = self._detect_breakout_zone(ohlcv_data, snapshot, tf_analysis)
-        scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci, detected_structure)
-        target_hierarchy = self._compute_target_hierarchy(ohlcv_data, snapshot, scenario_paths, fibonacci, support_resistance, detected_structure)
-        time_estimates = self._compute_time_estimates(ohlcv_data)
+        patterns = self._detect_patterns(ohlcv_all)
+        support_resistance = self._compute_support_resistance(ohlcv_all, snapshot)
+        elliott_wave = self._detect_elliott_wave(ohlcv_all)
+        fibonacci = self._compute_fibonacci_levels(ohlcv_all, snapshot)
+        detected_structure = self._detect_dominant_structure(ohlcv_all, snapshot)
+        channel_lines = self._detect_channel(ohlcv_all)
+        breakout_zone = self._detect_breakout_zone(ohlcv_all, snapshot, tf_analysis)
+        scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_all, fibonacci, detected_structure)
+        target_hierarchy = self._compute_target_hierarchy(ohlcv_all, snapshot, scenario_paths, fibonacci, support_resistance, detected_structure)
+        time_estimates = self._compute_time_estimates(ohlcv_all)
         activation_conditions = self._compute_activation_conditions(triggers, tf_analysis, snapshot)
         confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure, alignment)
-        module_errors = self._collect_module_errors(ohlcv_data, tf_analysis)
+        module_errors = self._collect_module_errors(ohlcv_all, tf_analysis)
         data_freshness = snapshot.get("data_freshness", "live") if isinstance(snapshot, dict) else "unknown"
-        now_iso = datetime.now(timezone.utc).isoformat()
 
         sp_main = scenario_paths.get("main_scenario", {}).get("path_points", [])
         sp_alt = scenario_paths.get("alternative_scenario", {}).get("path_points", [])
@@ -54,6 +93,7 @@ class SkhyAnalysisEngine:
         return {
             "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
             "timestamp": now_iso, "last_updated": now_iso,
+            "active_timeframe": active_tf,
             "snapshot": snapshot, "timeframes": tf_analysis, "alignment": alignment, "scores": scores,
             "triggers": triggers, "patterns": patterns, "support_resistance": support_resistance,
             "support_zone": sup_zone, "resistance_zone": res_zone,
@@ -976,8 +1016,8 @@ class SkhyAnalysisEngine:
         return "\n".join(lines) if lines else "Məlumat yoxdur."
 
     # ─── SCENARIOS ENDPOINT ───
-    async def get_scenarios(self) -> dict:
-        analysis = await self.get_full_analysis()
+    async def get_scenarios(self, timeframe: str | None = None) -> dict:
+        analysis = await self.get_full_analysis(timeframe)
         return {
             "main_scenario": analysis.get("scenario_paths",{}).get("main_scenario",{}),
             "alternative_scenario": analysis.get("scenario_paths",{}).get("alternative_scenario",{}),

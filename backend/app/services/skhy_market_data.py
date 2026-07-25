@@ -90,11 +90,12 @@ class SkhyMarketData:
             self.logger.error(f"SKHY ticker failed: {e}")
             return {}
 
-    async def get_ohlcv(self, timeframe: str = "1h", limit: int = 200) -> list:
+    async def get_ohlcv(self, timeframe: str = "1h", limit: int = 200, skip_cache: bool = False) -> list:
         cache_key = f"skhy:ohlcv:{timeframe}:{limit}"
-        cached = await cache_get(cache_key)
-        if cached:
-            return cached
+        if not skip_cache:
+            cached = await cache_get(cache_key)
+            if cached:
+                return cached
         try:
             ohlcv = await self._call_ccxt(
                 self._exchange.fetch_ohlcv, BINANCE_SYMBOL, timeframe, limit=limit

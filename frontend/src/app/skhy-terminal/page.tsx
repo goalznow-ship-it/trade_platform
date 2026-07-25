@@ -1,14 +1,15 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Navbar } from "@/components/Navbar"
 import { api } from "@/lib/api"
 import { SKHYChart } from "@/components/skhy/SKHYChart"
 import { SKHYAnalysisPanel } from "@/components/skhy/SKHYAnalysisPanel"
 import { SKHYScenarioPanel } from "@/components/skhy/SKHYScenarioPanel"
 import { SKHYTriggerPanel } from "@/components/skhy/SKHYTriggerPanel"
+import { SKHYHistoryPanel } from "@/components/skhy/SKHYHistoryPanel"
 import { cn } from "@/lib/utils"
-import { Activity, AlertTriangle, BarChart3, Brain, Clock, RefreshCw, TrendingDown, TrendingUp } from "lucide-react"
+import { Activity, AlertTriangle, BarChart3, Brain, Clock, RefreshCw, TrendingDown, TrendingUp, Play, Terminal } from "lucide-react"
 
 interface AlertType {
   id: string
@@ -50,81 +51,141 @@ function PriceItem({ label, value, highlight }: { label: string; value: unknown;
   )
 }
 
+function parseLastUpdated(v: unknown): Date | null {
+  if (v == null) return null
+  if (typeof v === "number") return new Date(v > 1e12 ? v : v * 1000)
+  if (typeof v === "string") {
+    const d = new Date(v)
+    if (!isNaN(d.getTime())) return d
+    const num = Number(v)
+    if (!isNaN(num)) return new Date(num > 1e12 ? num : num * 1000)
+  }
+  if (v instanceof Date) return v
+  return null
+}
+
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+
 export default function SkhyTerminalPage() {
+  const [timeframe, setTimeframe] = useState("1h")
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null)
   const [scenarios, setScenarios] = useState<Record<string, unknown> | null>(null)
+  const [history, setHistory] = useState<Record<string, unknown> | null>(null)
+  const [backtestResult, setBacktestResult] = useState<Record<string, unknown> | null>(null)
+  const [backtestRunning, setBacktestRunning] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tfLoading, setTfLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [alerts, setAlerts] = useState<AlertType[]>([])
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [scenarioError, setScenarioError] = useState<string | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+  const wsRef = useRef<WebSocket | null>(null)
+  const wsCleanupRef = useRef<(() => void) | null>(null)
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (tf: string) => {
+    setTfLoading(true)
+    setAnalysisError(null)
+    setScenarioError(null)
     try {
-      const [snap, an, sc] = await Promise.all([
-        api.getSkhySnapshot().catch(() => null),
-        api.getSkhyAnalysis().catch(() => null),
-        api.getSkhyScenarios().catch(() => null),
+      const [snap, an, sc, hist] = await Promise.all([
+        api.getSkhySnapshot(tf).catch(() => null),
+        api.getSkhyAnalysis(tf).catch(() => { setAnalysisError("Analysis endpoint cavab vermədi"); return null }),
+        api.getSkhyScenarios(tf).catch(() => { setScenarioError("Scenarios endpoint cavab vermədi"); return null }),
+        api.getSkhyHistory(tf).catch(() => null),
       ])
       if (snap) setSnapshot(snap)
-      if (an) setAnalysis(an)
-      if (sc) setScenarios(sc)
-      setError(null)
+      if (an) { setAnalysis(an); setAnalysisError(null) }
+      if (sc) { setScenarios(sc); setScenarioError(null) }
+      if (hist) setHistory(hist)
+      if (an || sc) setError(null)
       setLastUpdate(new Date())
     } catch {
       setError("Məlumat əldə edilə bilmir")
     } finally {
       setLoading(false)
+      setTfLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
-  }, [fetchData])
+    setAnalysis(null)
+    setScenarios(null)
+    setHistory(null)
+    setAnalysisError(null)
+    setScenarioError(null)
+    fetchData(timeframe)
+    api.getSkhyDiagnostics(timeframe).then(setDiagnostics).catch(() => {})
+  }, [timeframe, fetchData])
 
   useEffect(() => {
+    const interval = setInterval(() => fetchData(timeframe), 5000)
+    return () => clearInterval(interval)
+  }, [timeframe, fetchData])
+
+  // WebSocket — fully disconnected on timeframe change, single WS always
+  useEffect(() => {
+    wsCleanupRef.current?.()
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/skhy/stream`
+    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/skhy/stream?timeframe=${timeframe}`
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let pingInterval: ReturnType<typeof setInterval>
+    let closed = false
 
     function connect() {
+      if (closed) return
       ws = new WebSocket(wsUrl)
-      ws.onopen = () => setWsConnected(true)
+      wsRef.current = ws
+      ws.onopen = () => { if (!closed) setWsConnected(true) }
       ws.onmessage = (event) => {
+        if (closed) return
         try {
           const msg = JSON.parse(event.data)
           if (msg.event === "skhy_update") {
             if (msg.data?.snapshot) setSnapshot(msg.data.snapshot)
-            if (msg.data?.analysis) setAnalysis(msg.data.analysis)
-            if (msg.data?.scenarios) setScenarios(msg.data.scenarios)
+            if (msg.data?.analysis) { setAnalysis(msg.data.analysis); setAnalysisError(null) }
+            if (msg.data?.scenarios) { setScenarios(msg.data.scenarios); setScenarioError(null) }
             setLastUpdate(new Date())
           }
         } catch { /* ignore */ }
       }
       ws.onclose = () => {
-        setWsConnected(false)
-        reconnectTimer = setTimeout(connect, 3000)
+        if (!closed) {
+          setWsConnected(false)
+          reconnectTimer = setTimeout(connect, 3000)
+        }
       }
       ws.onerror = () => ws?.close()
     }
 
     connect()
-    const pingInterval = setInterval(() => {
-      if (ws?.readyState === WebSocket.OPEN) {
+
+    pingInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN && !closed) {
         ws.send(JSON.stringify({ type: "ping", data: { t: Date.now() } }))
       }
     }, 15000)
 
-    return () => {
+    const cleanup = () => {
+      closed = true
       clearInterval(pingInterval)
       clearTimeout(reconnectTimer)
-      ws?.close()
+      if (ws) {
+        ws.onclose = null
+        ws.onerror = null
+        ws.onmessage = null
+        ws.close()
+      }
+      wsRef.current = null
+      setWsConnected(false)
     }
-  }, [])
+    wsCleanupRef.current = cleanup
+
+    return cleanup
+  }, [timeframe])
 
   const scores = (analysis?.scores || {}) as Record<string, unknown>
   const triggers = (analysis?.triggers || {}) as Record<string, unknown>
@@ -135,6 +196,28 @@ export default function SkhyTerminalPage() {
   const longProb = numOrZero(scores.long_probability)
   const shortProb = numOrZero(scores.short_probability)
   const confidence = numOrZero(scores.signal_confidence)
+
+  const lastUpdated = parseLastUpdated(analysis?.last_updated || analysis?.timestamp)
+
+  const hasValidAnalysis = analysis !== null && analysisError === null && (numOrZero(scores.overall) > 0 || (scores.status && !String(scores.status).startsWith("NO_DATA")))
+
+  const schemaError = analysis !== null && scores.status === undefined && analysis.scores === undefined
+    ? "Backend response schema uyğun deyil"
+    : null
+
+  const displayError = analysisError || schemaError || (analysis !== null && scores.overall === 0 && String(scores.status || "").startsWith("NO_DATA") ? "Timeframe məlumatı yoxdur" : null)
+
+  const runBacktest = async () => {
+    setBacktestRunning(true)
+    try {
+      const result = await api.runSkhyBacktest(timeframe, "balanced", 500)
+      setBacktestResult(result)
+    } catch {
+      setBacktestResult({ error: "Backtest uğursuz oldu" })
+    } finally {
+      setBacktestRunning(false)
+    }
+  }
 
   return (
     <div className="h-screen flex flex-col bg-[#0d1117]">
@@ -148,13 +231,20 @@ export default function SkhyTerminalPage() {
               <span className="text-sm font-bold text-white">SKHYUSDT</span>
               <span className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">Binance Futures</span>
             </div>
-            {loading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
+            {(loading || tfLoading) && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
             {error && <span className="text-xs text-red-400">{error}</span>}
+            {displayError && <span className="text-xs text-yellow-400">{displayError}</span>}
+            {diagnostics && (diagnostics.diagnostics as Record<string, unknown>)?.candles_loaded != null && (
+              <span className={cn("text-[10px] font-mono",
+                (diagnostics.diagnostics as Record<string, unknown>).candles_sufficient ? "text-green-500" : "text-red-500")}>
+                {String((diagnostics.diagnostics as Record<string, unknown>).candles_loaded)} candles
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 text-[11px]">
             <div className="flex items-center gap-1">
               <Clock className="w-3 h-3 text-gray-500" />
-              <span className="text-gray-400">{lastUpdate.toLocaleTimeString()}</span>
+              <span className="text-gray-400">{lastUpdated ? lastUpdated.toLocaleTimeString() : "--:--:--"}</span>
             </div>
             <div className={cn("flex items-center gap-1", wsConnected ? "text-green-400" : "text-red-400")}>
               <Activity className="w-3 h-3" />
@@ -187,7 +277,8 @@ export default function SkhyTerminalPage() {
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex-1 min-h-0">
-              <SKHYChart symbol="SKHYUSDT" snapshot={snapshot} analysis={analysis} triggers={triggers} sr={sr} />
+              <SKHYChart symbol="SKHYUSDT" snapshot={snapshot} analysis={analysis} triggers={triggers} sr={sr}
+                activeTimeframe={timeframe} onTimeframeChange={setTimeframe} />
             </div>
             {scores && (
               <div className="h-16 border-t border-gray-800/40 px-3 flex items-center gap-3 text-xs bg-gray-950/30">
@@ -212,18 +303,18 @@ export default function SkhyTerminalPage() {
                 </div>
                 <div className="w-px h-6 bg-gray-800" />
                 <span className={cn("font-semibold", getStatusColor(String(scores.status || "WAIT")))}>{String(scores.status || "WAIT")}</span>
-              </div>
-            )}
-            {alerts.length > 0 && (
-              <div className="h-12 border-t border-gray-800/40 px-3 flex items-center gap-2 overflow-x-auto text-[11px]">
-                {alerts.slice(-5).map((a) => (
-                  <span key={a.id} className={cn("flex items-center gap-1 px-2 py-0.5 rounded whitespace-nowrap",
-                    a.severity === "warning" ? "bg-yellow-500/10 text-yellow-400" :
-                    a.severity === "error" ? "bg-red-500/10 text-red-400" :
-                    a.severity === "success" ? "bg-green-500/10 text-green-400" : "bg-blue-500/10 text-blue-400")}>
-                    <AlertTriangle className="w-3 h-3" />{a.message}
+                {!hasValidAnalysis && !loading && !tfLoading && (
+                  <span className="text-[10px] text-yellow-500/70 ml-2">
+                    {displayError || "Analiz məlumatı gözlənilir..."}
                   </span>
-                ))}
+                )}
+                {/* Backtest button */}
+                <div className="flex-1" />
+                <button onClick={runBacktest} disabled={backtestRunning}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-50">
+                  <Play className="w-3 h-3" />
+                  {backtestRunning ? "İşləyir..." : "Backtest"}
+                </button>
               </div>
             )}
           </div>
@@ -233,11 +324,47 @@ export default function SkhyTerminalPage() {
             <div className="flex-1 overflow-y-auto">
               <SKHYTriggerPanel triggers={triggers} scores={scores} />
               <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis} />
-              <SKHYScenarioPanel scenarios={scenarios} />
+              <SKHYScenarioPanel scenarios={hasValidAnalysis ? scenarios : null} />
+              <SKHYHistoryPanel history={history} />
+              {backtestResult && (
+                <div className="border-b border-gray-800/60 p-3">
+                  <div className="flex items-center gap-1.5 text-[11px] text-cyan-400 font-semibold uppercase tracking-wider mb-2">
+                    <Terminal className="w-3 h-3" /> Backtest ({timeframe})
+                  </div>
+                  {(backtestResult as Record<string, unknown>).error ? (
+                    <div className="text-[10px] text-red-400">{String((backtestResult as Record<string, unknown>).error)}</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-1 text-[10px]">
+                      {(() => {
+                        const bt = backtestResult as Record<string, unknown> | null
+                        const r = bt?.results as Record<string, unknown> | undefined
+                        if (!r) return null
+                        return (
+                          <>
+                            <MetricBox label="Trell sayı" value={String(r.total_trades ?? "—")} />
+                            <MetricBox label="Qazanma %" value={String(r.win_rate ?? "—") + "%"} color="text-green-400" />
+                            <MetricBox label="Balans dəyişimi" value={String(r.return_pct ?? "—") + "%"} color="text-yellow-400" />
+                            <MetricBox label="Profit Factor" value={String(r.profit_factor ?? "—")} color="text-blue-400" />
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function MetricBox({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="px-1.5 py-1 rounded bg-gray-800/20 text-center">
+      <div className="text-[9px] text-gray-500">{label}</div>
+      <div className={cn("text-[10px] font-mono font-bold", color || "text-gray-300")}>{value}</div>
     </div>
   )
 }

@@ -27,6 +27,9 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
   const longActive = entryReady && longProb > shortProb
   const shortActive = entryReady && shortProb > longProb
 
+  const hasTriggers = Object.keys(triggers).length > 0
+  const showWaiting = !hasTriggers || !showTradePlan
+
   return (
     <div className="border-b border-gray-800/60 p-3">
       <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Triggerlər</div>
@@ -37,13 +40,13 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
             <TrendingUp className={cn("w-3 h-3", longActive ? "text-green-400" : "text-gray-500")} />
             <span className="text-[11px] font-semibold text-gray-300">ALIŞ (LONG)</span>
           </div>
-          {triggers.long_trigger_price != null && (
+          {hasTriggers && numVal(triggers.long_trigger_price) > 0 && (
             <span className={cn("text-[11px] font-mono font-bold", longActive ? "text-green-400" : "text-gray-500")}>
               ${numVal(triggers.long_trigger_price).toFixed(2)}
             </span>
           )}
         </div>
-        {Array.isArray(triggers.long_trigger_conditions) && (
+        {hasTriggers && Array.isArray(triggers.long_trigger_conditions) && (triggers.long_trigger_conditions as string[]).length > 0 ? (
           <div className="space-y-0.5">
             {(triggers.long_trigger_conditions as string[]).slice(0, 4).map((c: string, i: number) => (
               <div key={i} className="flex items-start gap-1 text-[10px] text-gray-400">
@@ -52,8 +55,10 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
               </div>
             ))}
           </div>
+        ) : (
+          <div className="text-[10px] text-gray-500 italic">Şərtlər formalaşmayıb</div>
         )}
-        {triggers.bullish_invalidation != null && (
+        {hasTriggers && triggers.bullish_invalidation != null && (
           <div className="flex items-center gap-1 mt-1 text-[10px] text-red-400/70">
             <XCircle className="w-2.5 h-2.5" />
             <span>Ləğvetmə: ${numVal(triggers.bullish_invalidation).toFixed(2)}</span>
@@ -67,13 +72,13 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
             <TrendingDown className={cn("w-3 h-3", shortActive ? "text-red-400" : "text-gray-500")} />
             <span className="text-[11px] font-semibold text-gray-300">SATIŞ (SHORT)</span>
           </div>
-          {triggers.short_trigger_price != null && (
+          {hasTriggers && numVal(triggers.short_trigger_price) > 0 && (
             <span className={cn("text-[11px] font-mono font-bold", shortActive ? "text-red-400" : "text-gray-500")}>
               ${numVal(triggers.short_trigger_price).toFixed(2)}
             </span>
           )}
         </div>
-        {Array.isArray(triggers.short_trigger_conditions) && (
+        {hasTriggers && Array.isArray(triggers.short_trigger_conditions) && (triggers.short_trigger_conditions as string[]).length > 0 ? (
           <div className="space-y-0.5">
             {(triggers.short_trigger_conditions as string[]).slice(0, 4).map((c: string, i: number) => (
               <div key={i} className="flex items-start gap-1 text-[10px] text-gray-400">
@@ -82,8 +87,10 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
               </div>
             ))}
           </div>
+        ) : (
+          <div className="text-[10px] text-gray-500 italic">Şərtlər formalaşmayıb</div>
         )}
-        {triggers.bearish_invalidation != null && (
+        {hasTriggers && triggers.bearish_invalidation != null && (
           <div className="flex items-center gap-1 mt-1 text-[10px] text-red-400/70">
             <XCircle className="w-2.5 h-2.5" />
             <span>Ləğvetmə: ${numVal(triggers.bearish_invalidation).toFixed(2)}</span>
@@ -91,7 +98,7 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
         )}
       </div>
 
-      {showTradePlan && longActive && (
+      {showTradePlan && longActive && numVal(triggers.long_trigger_price) > 0 && (
         <div className="rounded border border-green-500/30 bg-green-500/5 p-2">
           <div className="text-[11px] font-semibold text-green-400 mb-1">⚡ ALIŞ PLANI</div>
           <div className="text-[10px] text-gray-400 space-y-0.5">
@@ -102,7 +109,7 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
         </div>
       )}
 
-      {showTradePlan && shortActive && (
+      {showTradePlan && shortActive && numVal(triggers.short_trigger_price) > 0 && (
         <div className="rounded border border-red-500/30 bg-red-500/5 p-2">
           <div className="text-[11px] font-semibold text-red-400 mb-1">⚡ SATIŞ PLANI</div>
           <div className="text-[10px] text-gray-400 space-y-0.5">
@@ -113,12 +120,13 @@ export function SKHYTriggerPanel({ triggers, scores }: Props) {
         </div>
       )}
 
-      {!showTradePlan && (
+      {showWaiting && (
         <div className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-yellow-500/5 border border-yellow-500/20">
           <AlertTriangle className="w-3 h-3 text-yellow-400 shrink-0" />
           <div>
             <span className="text-[10px] text-yellow-400 font-semibold">{status === "WAIT" ? "Gözləyin" : "İzləmə"}</span>
             {confidence > 0 && <p className="text-[9px] text-gray-500">İnam {confidence}% - təsdiq gözlənilir</p>}
+            {!hasTriggers && <p className="text-[9px] text-gray-500">Məlumat gözlənilir...</p>}
           </div>
         </div>
       )}

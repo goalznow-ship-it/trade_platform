@@ -11,22 +11,32 @@ interface Props {
   analysis: Record<string, unknown> | null
 }
 
-function sv(s: Record<string, unknown>, key: string): number {
-  const v = s[key]
-  return typeof v === "number" ? v : 0
-}
-
-function strVal(v: unknown): string {
-  if (v == null) return "N/A"
-  return String(v)
-}
-
 function numVal(v: unknown): number {
   return typeof v === "number" ? v : 0
 }
 
+function safeVal(v: unknown, fallback: string = "—"): string {
+  if (v == null) return fallback
+  return String(v)
+}
+
+function parseLastUpdated(v: unknown): Date | null {
+  if (v == null) return null
+  if (typeof v === "number") return new Date(v > 1e12 ? v : v * 1000)
+  if (typeof v === "string") {
+    const d = new Date(v)
+    if (!isNaN(d.getTime())) return d
+    const num = Number(v)
+    if (!isNaN(num)) return new Date(num > 1e12 ? num : num * 1000)
+  }
+  if (v instanceof Date) return v
+  return null
+}
+
 export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis }: Props) {
   const tfList = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+
+  const hasAnalysis = analysis !== null && Object.keys(scores).length > 0
 
   const scoreItems = [
     { label: "Trend", key: "trend_score", icon: TrendingUp },
@@ -41,7 +51,8 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
     { label: "Risk", key: "risk_score", icon: Shield },
   ]
 
-  const explanation = strVal(analysis?.explanation_az)
+  const explanation = hasAnalysis ? safeVal(analysis?.explanation_az) : "Məlumat hazırlanır..."
+
   const triggers = (analysis?.triggers || {}) as Record<string, unknown>
   const ltPrice = numVal(triggers.long_trigger_price)
   const stPrice = numVal(triggers.short_trigger_price)
@@ -54,27 +65,29 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
   const bz = (analysis?.breakout_zone || {}) as Record<string, unknown>
   const th = (analysis?.target_hierarchy || {}) as Record<string, unknown>
   const cb = (analysis?.confidence_breakdown || {}) as Record<string, unknown>
-  const dataFreshness = strVal(analysis?.data_freshness)
-  const lastUpdated = strVal(analysis?.last_updated || analysis?.timestamp)
+  const dataFreshness = hasAnalysis ? safeVal(analysis?.data_freshness, "bilinmir") : "gözlənilir"
+  const lastUpdated = parseLastUpdated(analysis?.last_updated || analysis?.timestamp)
 
-  const showStructure = strVal(ds.status) === "detected"
-  const showBreakout = strVal(bz.status) === "calculated"
-  const showTargets = th && Array.isArray(th.targets) && (th.targets as unknown[]).length > 0
+  const showStructure = hasAnalysis && safeVal(ds.status) === "detected"
+  const showBreakout = hasAnalysis && safeVal(bz.status) === "calculated"
+  const showTargets = hasAnalysis && th && Array.isArray(th.targets) && (th.targets as unknown[]).length > 0
 
   const dsAccum = !!ds.accumulation_zone
   const dsDistrib = !!ds.distribution_zone
 
-  const structLabel = strVal(ds.label_az)
-  const structBreakout = strVal(ds.breakout_status)
+  const structLabel = safeVal(ds.label_az)
+  const structBreakout = safeVal(ds.breakout_status)
   const structChannelTop = numVal(ds.channel_top)
   const structChannelBot = numVal(ds.channel_bottom)
 
   const bzBot = numVal(bz.zone_bottom)
   const bzTop = numVal(bz.zone_top)
   const bzTest = numVal(bz.test_count)
-  const bzPriceZone = strVal(bz.current_price_zone)
+  const bzPriceZone = safeVal(bz.current_price_zone)
   const bzBullish = !!bz.bullish_breakout_ready
   const bzBearish = !!bz.bearish_breakout_ready
+
+  const overallScore = numVal(scores.overall)
 
   return (
     <div className="border-b border-gray-800/60">
@@ -85,7 +98,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
         <div className="flex items-center gap-1 text-gray-500">
           <Clock className="w-2.5 h-2.5" />
-          <span>{lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "..."}</span>
+          <span>{lastUpdated ? lastUpdated.toLocaleTimeString() : "--:--:--"}</span>
         </div>
       </div>
 
@@ -94,7 +107,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
           <Brain className="w-3 h-3" /> Hazırda nə baş verir?
         </div>
         <div className="text-[10px] text-gray-400 leading-relaxed">
-          {explanation || "Məlumat hazırlanır..."}
+          {hasAnalysis ? explanation : "Məlumat hazırlanır..."}
         </div>
       </div>
 
@@ -175,7 +188,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
               </div>
             ))
           ) : (
-            <span>ALIŞ üçün hələ şərtlər formalaşmayıb</span>
+            <span>{hasAnalysis ? "ALIŞ üçün hələ şərtlər formalaşmayıb" : "Məlumat gözlənilir..."}</span>
           )}
           {ltPrice > 0 && (
             <div className="mt-1 text-[11px] font-mono text-green-400">
@@ -204,7 +217,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
               </div>
             ))
           ) : (
-            <span>SATIŞ üçün hələ şərtlər formalaşmayıb</span>
+            <span>{hasAnalysis ? "SATIŞ üçün hələ şərtlər formalaşmayıb" : "Məlumat gözlənilir..."}</span>
           )}
           {stPrice > 0 && (
             <div className="mt-1 text-[11px] font-mono text-red-400">
@@ -243,7 +256,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         </div>
       )}
 
-      {cb && Object.keys(cb).length > 0 && (
+      {hasAnalysis && cb && Object.keys(cb).length > 0 && (
         <div className="p-3 border-b border-gray-800/40">
           <div className="flex items-center gap-1.5 text-[11px] text-blue-400 font-semibold uppercase tracking-wider mb-2">
             <Shield className="w-3 h-3" /> İnam Bölgüsü
@@ -271,7 +284,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
             })}
           </div>
           <div className="mt-1 text-center text-[9px] text-gray-600">
-            Ümumi: {numVal(cb.signal_confidence)}% - {strVal(cb.overall_assessment)}
+            Ümumi: {numVal(cb.signal_confidence)}% - {safeVal(cb.overall_assessment)}
           </div>
         </div>
       )}
@@ -287,8 +300,8 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
                 <s.icon className="w-2.5 h-2.5 text-gray-500" />
                 <span className="text-[10px] text-gray-400">{s.label}</span>
               </div>
-              <span className={cn("text-[10px] font-mono font-bold", getScoreColor(sv(scores, s.key)))}>
-                {sv(scores, s.key)}
+              <span className={cn("text-[10px] font-mono font-bold", getScoreColor(numVal(scores[s.key])))}>
+                {numVal(scores[s.key])}
               </span>
             </div>
           ))}
@@ -296,17 +309,17 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
         <div className="flex items-center justify-between px-2 py-1.5 mt-1 rounded bg-gray-800/40">
           <span className="text-xs font-semibold text-gray-300">Ümumi</span>
           <div className="flex items-center gap-2">
-            <span className={cn("text-sm font-bold font-mono", getScoreColor(sv(scores, "overall")))}>
-              {sv(scores, "overall")}
+            <span className={cn("text-sm font-bold font-mono", getScoreColor(overallScore))}>
+              {overallScore}
             </span>
-            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-semibold", getStatusBadge(strVal(scores.status)))}>
-              {strVal(scores.status)}
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-semibold", getStatusBadge(safeVal(scores.status)))}>
+              {safeVal(scores.status)}
             </span>
           </div>
         </div>
       </div>
 
-      {alignment && (
+      {hasAnalysis && alignment && (
         <div className="p-3 border-b border-gray-800/40">
           <div className={cn("flex items-center justify-between gap-1.5 text-[11px] px-2 py-1 rounded",
             alignment.status === "ALIGNED" ? "bg-green-500/10 text-green-400" :
@@ -314,7 +327,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
             <div className="flex items-center gap-1">
               {alignment.status === "ALIGNED" ? <TrendingUp className="w-3 h-3" /> :
                alignment.status === "CONFLICTING" ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-              <span>MTF: {strVal(alignment.status)}</span>
+              <span>MTF: {safeVal(alignment.status)}</span>
             </div>
             <span className="font-mono">{typeof alignment.confidence === "number" ? alignment.confidence : 0}%</span>
           </div>
@@ -354,8 +367,8 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
                   <tr key={tf} className="border-b border-gray-800/20 hover:bg-gray-800/10">
                     <td className="py-1 pr-2 font-mono text-gray-300">{tf}</td>
                     <td className="py-1 pr-2">
-                      <span className={cn("font-semibold", getSignalColor(strVal(d.signal)))}>
-                        {strVal(d.signal)}
+                      <span className={cn("font-semibold", getSignalColor(safeVal(d.signal)))}>
+                        {safeVal(d.signal)}
                       </span>
                     </td>
                     <td className="py-1 pr-2">

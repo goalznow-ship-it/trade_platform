@@ -14,6 +14,8 @@ interface Props {
   analysis: Record<string, unknown> | null
   triggers: Record<string, unknown>
   sr: Record<string, unknown>
+  activeTimeframe: string
+  onTimeframeChange: (tf: string) => void
 }
 
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number }
@@ -23,7 +25,7 @@ function str(v: unknown): string { return v == null ? "" : String(v) }
 
 type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"
 
-export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
+export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTimeframe, onTimeframeChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -35,7 +37,6 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
   const atrStopRef = useRef<ISeriesApi<"Line"> | null>(null)
 
   const [ohlcv, setOhlcv] = useState<Candle[]>([])
-  const [tf, setTf] = useState("1h")
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
     structure: true, channel: true, breakout: true, retest: true,
@@ -73,8 +74,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
   }, [])
 
   useEffect(() => {
-    api.getSkhyOHLCV(tf, 240).then((res) => { if (res?.data) setOhlcv(res.data) }).catch(() => {})
-  }, [tf])
+    api.getSkhyOHLCV(activeTimeframe, 240).then((res) => { if (res?.data) setOhlcv(res.data) }).catch(() => {})
+  }, [activeTimeframe])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -148,9 +149,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
     if (overlays.fibonacci) drawFibonacciLevels(ctx, toX, toY, fib, th, w, ohlcv)
     if (overlays.targets) drawInvalLine(ctx, toX, toY, invalLevel, w)
     if (overlays.targets) drawTargetLines(ctx, toX, toY, th, w, ohlcv)
-    if (overlays.mainScenario) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "main")
-    if (overlays.altScenario) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "alt")
-    if (overlays.fakeout) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "fakeout")
+    if (overlays.mainScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "main")
+    if (overlays.altScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "alt")
+    if (overlays.fakeout && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, ohlcv, "fakeout")
     if (overlays.smc) drawSMCStructures(ctx, toX, toY, analysis, ohlcv)
     if (overlays.structure) {
       drawSR(ctx, toX, toY, sr, price, w)
@@ -208,8 +209,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
           const sig = str((tfs[t] as Record<string, unknown>)?.signal)
           const sigColor = sig.includes("LONG") ? "text-green-400 bg-green-500/10" : sig.includes("SHORT") ? "text-red-400 bg-red-500/10" : "text-gray-500 bg-gray-800/30"
           return (
-            <button key={t} onClick={() => setTf(t)}
-              className={cn("flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-mono rounded transition-colors mr-0.5", tf === t ? "bg-blue-600/20 border border-blue-500/30" : "hover:bg-gray-800/30")}>
+            <button key={t} onClick={() => onTimeframeChange(t)}
+              className={cn("flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-mono rounded transition-colors mr-0.5", activeTimeframe === t ? "bg-blue-600/20 border border-blue-500/30" : "hover:bg-gray-800/30")}>
               <span className="text-gray-500">{t}</span>
               {sig && <span className={cn("px-0.5 rounded text-[8px] font-bold", sigColor)}>{sig.includes("LONG") ? "↑" : sig.includes("SHORT") ? "↓" : "−"}</span>}
             </button>
@@ -248,19 +249,19 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr }: Props) {
           <div className={cn("px-2 py-0.5 rounded font-bold font-mono text-right", longProb > shortProb ? "bg-green-500/20 text-green-400" : "bg-gray-800/40 text-gray-600")}>ALIŞ {longProb}%</div>
           <div className={cn("px-2 py-0.5 rounded font-bold font-mono text-right", shortProb > longProb ? "bg-red-500/20 text-red-400" : "bg-gray-800/40 text-gray-600")}>SATIŞ {shortProb}%</div>
         </div>
-        {confidence >= 70 && (
+        {confidence >= 70 && (ltPrice > 0 || stPrice > 0) && (
           <div className="absolute bottom-2 left-2 z-[6] bg-gray-950/90 border border-gray-700/60 rounded px-2 py-1 text-[9px] font-mono space-y-0.5 max-w-[200px]">
-            {longProb > shortProb ? (
+            {longProb > shortProb && ltPrice > 0 ? (
               <><div className="text-green-400 font-bold text-[10px]">ALIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${ltPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${invalLevel.toFixed(2)}</span></div></>
-            ) : (
+            ) : stPrice > 0 ? (
               <><div className="text-red-400 font-bold text-[10px]">SATIŞ PLANI</div><div className="text-gray-400">Giriş: <span className="text-white">${stPrice.toFixed(2)}</span></div><div className="text-gray-400">Zərər kəsmə: <span className="text-red-400">${invalLevel.toFixed(2)}</span></div></>
-            )}
+            ) : null}
           </div>
         )}
         {confidence < 70 && confidence > 0 && (
           <div className={cn("absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[6] text-center pointer-events-none", status === "WAIT" ? "opacity-100" : "opacity-60")}>
             <div className="text-[11px] font-bold text-yellow-500 mb-1">⏳ GÖZLƏYİN</div>
-            <div className="text-[9px] text-gray-500">{longProb > shortProb ? `ALIŞ triggeri: $${ltPrice.toFixed(2)} üzərində təsdiq` : `SATIŞ triggeri: $${stPrice.toFixed(2)} altında təsdiq`}</div>
+            <div className="text-[9px] text-gray-500">{longProb > shortProb && ltPrice > 0 ? `ALIŞ triggeri: $${ltPrice.toFixed(2)} üzərində təsdiq` : stPrice > 0 ? `SATIŞ triggeri: $${stPrice.toFixed(2)} altında təsdiq` : "Trigger qiyməti gözlənilir..."}</div>
           </div>
         )}
       </div>
@@ -783,7 +784,7 @@ function drawElliottWave(ctx: CanvasRenderingContext2D, toX: (t: number) => numb
 }
 
 function drawCone(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, confidence: number, w: number, h: number, ohlcv: Candle[], sp: Record<string, unknown> | undefined) {
-  if (confidence < 30 || !ohlcv.length) return
+  if (confidence < 30 || !ohlcv.length || !sp) return
   const lastPrice = ohlcv[ohlcv.length - 1].close; const spread = (1 - confidence / 100) * 0.15 * lastPrice
   const steps = 20; const startX = toX(ohlcv[ohlcv.length - 1].time); if (startX <= 0) return
   const sliceW = (w - startX) / steps

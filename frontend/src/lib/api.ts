@@ -385,16 +385,22 @@ export const api = {
     request<any>(`/api/v1/institutional/market/matrix?count=${count}`),
 
   // SKHY Terminal
-  getSkhySnapshot: () => request<any>("/api/v1/skhy/snapshot"),
+  getSkhySnapshot: (timeframe = "1h") => request<any>(`/api/v1/skhy/snapshot?timeframe=${encodeURIComponent(timeframe)}`),
 
-  getSkhyAnalysis: () => request<any>("/api/v1/skhy/analysis"),
+  getSkhyAnalysis: (timeframe?: string) =>
+    request<any>(`/api/v1/skhy/analysis${timeframe ? `?timeframe=${encodeURIComponent(timeframe)}` : ""}`),
 
-  getSkhyScenarios: () => request<any>("/api/v1/skhy/scenarios"),
+  getSkhyScenarios: (timeframe?: string) =>
+    request<any>(`/api/v1/skhy/scenarios${timeframe ? `?timeframe=${encodeURIComponent(timeframe)}` : ""}`),
 
-  getSkhyHistory: (limit = 30) => request<any>(`/api/v1/skhy/history?limit=${limit}`),
+  getSkhyHistory: (timeframe = "1h", limit = 30) =>
+    request<any>(`/api/v1/skhy/history?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
 
   getSkhyOHLCV: (timeframe = "1h", limit = 200) =>
     request<any>(`/api/v1/skhy/ohlcv?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
+
+  getSkhyDiagnostics: (timeframe = "1h") =>
+    request<any>(`/api/v1/skhy/diagnostics?timeframe=${encodeURIComponent(timeframe)}`),
 
   runSkhyBacktest: (timeframe = "1h", mode = "balanced", limit = 500) =>
     request<any>(`/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}`),

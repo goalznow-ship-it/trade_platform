@@ -17,11 +17,23 @@ function numVal(v: unknown): number {
 }
 
 export function SKHYScenarioPanel({ scenarios }: Props) {
-  if (!scenarios) return null
+  if (!scenarios) return (
+    <div className="border-b border-gray-800/60 p-3">
+      <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Ssenarilər</div>
+      <div className="text-[10px] text-gray-500 italic">Ssenari məlumatı gözlənilir...</div>
+    </div>
+  )
 
   const main = scenarios.main_scenario as Record<string, unknown> | undefined
   const alt = scenarios.alternative_scenario as Record<string, unknown> | undefined
   const risk = scenarios.risk_fakeout_scenario as Record<string, unknown> | undefined
+
+  if (!main) return (
+    <div className="border-b border-gray-800/60 p-3">
+      <div className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Ssenarilər</div>
+      <div className="text-[10px] text-gray-500 italic">Ssenari məlumatı hazırlanır...</div>
+    </div>
+  )
 
   return (
     <div className="border-b border-gray-800/60 p-3">
@@ -49,26 +61,24 @@ export function SKHYScenarioPanel({ scenarios }: Props) {
         />
       </div>
 
-      {main && (
-        <div className="mt-3 pt-2 border-t border-gray-800/40">
-          <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-1">
-            <Info className="w-2.5 h-2.5" />
-            <span>Pattern izahı:</span>
-          </div>
-          <div className="text-[9px] text-gray-500 leading-relaxed">
-            <strong className="text-gray-400">BOS</strong> - struktur dəyişikliyi.
-          </div>
-          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">CHoCH</strong> - xarakter dəyişikliyi.
-          </div>
-          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">FVG</strong> - qiymət boşluğu.
-          </div>
-          <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
-            <strong className="text-gray-400">OB</strong> - order block.
-          </div>
+      <div className="mt-3 pt-2 border-t border-gray-800/40">
+        <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-1">
+          <Info className="w-2.5 h-2.5" />
+          <span>Pattern izahı:</span>
         </div>
-      )}
+        <div className="text-[9px] text-gray-500 leading-relaxed">
+          <strong className="text-gray-400">BOS</strong> - struktur dəyişikliyi.
+        </div>
+        <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+          <strong className="text-gray-400">CHoCH</strong> - xarakter dəyişikliyi.
+        </div>
+        <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+          <strong className="text-gray-400">FVG</strong> - qiymət boşluğu.
+        </div>
+        <div className="text-[9px] text-gray-500 leading-relaxed mt-0.5">
+          <strong className="text-gray-400">OB</strong> - order block.
+        </div>
+      </div>
     </div>
   )
 }
