@@ -19,13 +19,13 @@ interface Props {
 }
 
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number }
-interface PathPoint { time_offset: number; price: number; label: string; phase: string }
+interface PathPoint { time_offset: number; price: number; label: string; phase: string; probability?: number; reason?: string }
 interface Target { level: string; price: number; type: string; probability: number; time_estimate: string }
 
 function num(v: unknown): number { return typeof v === "number" ? v : 0 }
 function str(v: unknown): string { return v == null ? "" : String(v) }
 
-type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"|"volumeProfile"|"elliott"|"triggers"|"patterns"
+type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"|"volumeProfile"|"elliott"|"triggers"|"patterns"|"cone"
 
 export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTimeframe, onTimeframeChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -46,7 +46,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
     fibonacci: true, targets: true, mainScenario: true, altScenario: false,
     fakeout: false, smc: true, liquidity: false, ema: false, atrStop: false,
     volumeProfile: false, elliott: false, triggers: true,
-    patterns: true,
+    patterns: true, cone: true,
   })
   const timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
@@ -77,10 +77,56 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
   const ltPrice = num(triggers.long_trigger_price)
   const stPrice = num(triggers.short_trigger_price)
   const price = num(snapshot?.live_price)
+  const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
+  const mainDir = str(mainSc?.direction_az || mainSc?.direction || "")
+  const mainProb = num(mainSc?.probability)
 
   const toggleOverlay = useCallback((key: OverlayKey) => {
     setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
   }, [])
+
+  const drawOverlay = useCallback(() => {
+    const canvas = overlayRef.current; const chart = chartRef.current
+    if (!canvas || !chart || !ohlcv.length) return
+    const rect = canvas.getBoundingClientRect()
+    canvas.width = rect.width * window.devicePixelRatio; canvas.height = rect.height * window.devicePixelRatio
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    ctx.clearRect(0, 0, rect.width, rect.height)
+    const ts = chart.timeScale(); const vr = ts.getVisibleLogicalRange()
+    if (!vr) return
+    const toX = (t: number) => ts.timeToCoordinate(t as Time) ?? 0
+    const toY = (p: number) => candleSeriesRef.current?.priceToCoordinate(p) ?? 0
+    const w = rect.width; const h = rect.height
+    const candleWidth = ohlcv.length >= 2 ? Math.max(1, (toX(ohlcv[ohlcv.length - 1].time) - toX(ohlcv[ohlcv.length - 2].time))) : 8
+    const lastCandleX = toX(ohlcv[ohlcv.length - 1].time)
+    const lastPrice = ohlcv[ohlcv.length - 1].close
+    const toFutureX = (offset: number) => lastCandleX + candleWidth * offset
+
+    if (overlays.volumeProfile) drawVolumeProfile(ctx, toX, toY, ohlcv, w, h)
+    if (overlays.channel) drawChannel(ctx, toX, toY, cl, w, ohlcv, ds, lastCandleX, candleWidth, toFutureX)
+    if (overlays.breakout) drawBreakoutZone(ctx, toX, toY, bz, w, h, ohlcv, lastCandleX, candleWidth, toFutureX)
+    if (overlays.liquidity) drawLiquidityZones(ctx, toX, toY, sr, ds, w, ohlcv)
+    if (overlays.fibonacci) drawFibonacciLevels(ctx, toX, toY, fib, w, ohlcv, lastCandleX, candleWidth)
+    if (overlays.retest && ds) drawRetestZone(ctx, toX, toY, ds, w, ohlcv, lastCandleX, candleWidth)
+    if (overlays.targets) drawInvalLine(ctx, toX, toY, invalLevel, w, lastCandleX, candleWidth)
+    if (overlays.targets) drawTargetLines(ctx, toX, toY, th, fib, w, ohlcv, lastCandleX, lastPrice, candleWidth)
+    if (overlays.triggers) drawTradeLevels(ctx, toX, toY, triggers, scores, w, lastCandleX, candleWidth, confidence)
+    if (overlays.cone && sp) drawProbabilityCone(ctx, toX, toY, sp, ohlcv, lastCandleX, lastPrice, candleWidth, toFutureX)
+    if (overlays.mainScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "main", lastCandleX, lastPrice, candleWidth, toFutureX)
+    if (overlays.altScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "alt", lastCandleX, lastPrice, candleWidth, toFutureX)
+    if (overlays.fakeout && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "fakeout", lastCandleX, lastPrice, candleWidth, toFutureX)
+    if (overlays.smc) drawSMCStructures(ctx, toX, toY, analysis, ohlcv, w)
+    if (overlays.elliott) drawElliottWave(ctx, toX, toY, ew, w, ohlcv, confidence)
+    if (overlays.structure) {
+      drawSR(ctx, toX, toY, sr, price, w)
+      drawSupportResistanceZones(ctx, toX, toY, supZone, resZone, w, h, ohlcv)
+    }
+    if (overlays.patterns) drawPatterns(ctx, toX, toY, activePatterns || patterns, ohlcv, w)
+    drawSmartMoney(ctx, toX, toY, analysis, ohlcv)
+    drawLegend(ctx, w, h, overlays, activePatterns || (patterns as Record<string, unknown>[] | undefined), mainSc, confidence)
+  }, [ohlcv, analysis, triggers, scores, sr, patterns, confidence, price, ew, fib, ds, cl, bz, sp, th, cb, supZone, resZone, invalLevel, overlays, tradePlan, activePatterns, mainSc])
 
   useEffect(() => {
     api.getSkhyOHLCV(activeTimeframe, 240).then((res) => {
@@ -148,52 +194,11 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
       chart.timeScale().fitContent()
       const vr = chart.timeScale().getVisibleLogicalRange()
       if (vr) {
-        chart.timeScale().setVisibleLogicalRange({ from: vr.from, to: Math.max(vr.to, ohlcv.length + 35) })
+        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, ohlcv.length - 60), to: ohlcv.length + 50 })
       }
     }
     drawOverlay()
   }, [ohlcv, overlays])
-
-  const drawOverlay = useCallback(() => {
-    const canvas = overlayRef.current; const chart = chartRef.current
-    if (!canvas || !chart || !ohlcv.length) return
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width * window.devicePixelRatio; canvas.height = rect.height * window.devicePixelRatio
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-    ctx.clearRect(0, 0, rect.width, rect.height)
-    const ts = chart.timeScale(); const vr = ts.getVisibleLogicalRange()
-    if (!vr) return
-    const toX = (t: number) => ts.timeToCoordinate(t as Time) ?? 0
-    const toY = (p: number) => candleSeriesRef.current?.priceToCoordinate(p) ?? 0
-    const w = rect.width; const h = rect.height
-    const candleWidth = ohlcv.length >= 2 ? Math.max(1, (toX(ohlcv[ohlcv.length - 1].time) - toX(ohlcv[ohlcv.length - 2].time))) : 8
-    const lastCandleX = toX(ohlcv[ohlcv.length - 1].time)
-    const lastPrice = ohlcv[ohlcv.length - 1].close
-    const toFutureX = (offset: number) => lastCandleX + candleWidth * offset
-
-    if (overlays.volumeProfile) drawVolumeProfile(ctx, toX, toY, ohlcv, w, h)
-    if (overlays.channel) drawChannel(ctx, toX, toY, cl, w, ohlcv, ds, lastCandleX, candleWidth, toFutureX)
-    if (overlays.breakout) drawBreakoutZone(ctx, toX, toY, bz, w, h, ohlcv, lastCandleX, candleWidth, toFutureX)
-    if (overlays.liquidity) drawLiquidityZones(ctx, toX, toY, sr, ds, w, ohlcv)
-    if (overlays.fibonacci) drawFibonacciLevels(ctx, toX, toY, fib, w, ohlcv, lastCandleX, candleWidth)
-    if (overlays.retest && ds) drawRetestZone(ctx, toX, toY, ds, w, ohlcv, lastCandleX, candleWidth)
-    if (overlays.targets) drawInvalLine(ctx, toX, toY, invalLevel, w, lastCandleX, candleWidth)
-    if (overlays.targets) drawTargetLines(ctx, toX, toY, th, w, ohlcv, lastCandleX, lastPrice, candleWidth)
-    if (overlays.triggers) drawTradeLevels(ctx, toX, toY, triggers, scores, w, lastCandleX, candleWidth, confidence)
-    if (overlays.mainScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "main", lastCandleX, lastPrice, candleWidth, toFutureX)
-    if (overlays.altScenario && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "alt", lastCandleX, lastPrice, candleWidth, toFutureX)
-    if (overlays.fakeout && sp) drawScenarioPath(ctx, toX, toY, sp, w, h, cb, confidence, ohlcv, "fakeout", lastCandleX, lastPrice, candleWidth, toFutureX)
-    if (overlays.smc) drawSMCStructures(ctx, toX, toY, analysis, ohlcv, w)
-    if (overlays.elliott) drawElliottWave(ctx, toX, toY, ew, w, ohlcv, confidence)
-    if (overlays.structure) {
-      drawSR(ctx, toX, toY, sr, price, w)
-      drawSupportResistanceZones(ctx, toX, toY, supZone, resZone, w, h, ohlcv)
-    }
-    if (overlays.patterns) drawPatterns(ctx, toX, toY, activePatterns || patterns, ohlcv, w)
-    drawSmartMoney(ctx, toX, toY, analysis, ohlcv)
-  }, [ohlcv, analysis, triggers, scores, sr, patterns, confidence, price, ew, fib, ds, cl, bz, sp, th, cb, supZone, resZone, invalLevel, overlays, tradePlan])
 
   useEffect(() => { drawOverlay() }, [drawOverlay])
 
@@ -230,11 +235,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
     { key: "volumeProfile", label: "Həcm" },
     { key: "elliott", label: "Elliott" },
     { key: "patterns" as OverlayKey, label: "Patternlər" },
+    { key: "cone" as OverlayKey, label: "Konus" },
   ]
-
-  const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
-  const mainDir = str(mainSc?.direction_az || mainSc?.direction || "")
-  const mainProb = num(mainSc?.probability)
 
   return (
     <div className="h-full flex flex-col relative">
@@ -553,28 +555,105 @@ function drawFibonacciLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => 
   if (swingLow > 0) { const y = toY(swingLow); if (y > 0) { ctx.beginPath(); ctx.arc(0, y, 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.2)"; ctx.fill(); ctx.font = "6px monospace"; ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.fillText(`SL $${swingLow.toFixed(2)}`, 2, y - 4) } }
 }
 
-function drawTargetLines(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, th: Record<string, unknown> | undefined, w: number, ohlcv: Candle[], lastCandleX: number, lastPrice: number, candleWidth: number) {
-  if (!th || !ohlcv.length) return
-  const targets = th.targets as Target[] | undefined
-  if (!targets) return
-  const filtered = targets.filter(t => t.price > 0 && !t.level.includes("Retracement") && !t.level.includes("Extension"))
-  if (!filtered.length) return
-  const longTargets = filtered.filter(t => t.price >= lastPrice).sort((a, b) => a.price - b.price)
-  const shortTargets = filtered.filter(t => t.price < lastPrice).sort((a, b) => b.price - a.price)
-  let tpNum = 1
+function getTPLevels(th: Record<string, unknown> | undefined, fib: Record<string, unknown> | undefined, lastPrice: number, isLong: boolean): { level: string; price: number; prob: number; distPct: number }[] {
+  const result: { level: string; price: number; prob: number; distPct: number }[] = []
+  const usedPrices = new Set<number>()
 
-  const drawSingleTarget = (tgt: Target, color: string) => {
-    const y = toY(tgt.price); if (y <= 0) return
-    ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.setLineDash([3, 6])
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
-    const distPct = Math.abs(tgt.price - lastPrice) / lastPrice * 100
-    ctx.font = "bold 6px monospace"; ctx.fillStyle = color
-    ctx.fillText(`Hədəf ${tpNum} $${tgt.price.toFixed(2)} ${tgt.probability}% · +${distPct.toFixed(1)}% · ${tgt.time_estimate}`, lastCandleX + candleWidth * 2, y - 2)
-    tpNum++
+  // Collect from target_hierarchy
+  if (th) {
+    const targets = (th.targets as Target[] | undefined) || []
+    for (const t of targets) {
+      if (t.price <= 0 || usedPrices.has(t.price)) continue
+      const isTargetLong = t.price >= lastPrice
+      if (isTargetLong !== isLong) continue
+      const match = t.level.match(/^TP(\d)$/)
+      if (match || t.level.includes("TP")) {
+        usedPrices.add(t.price)
+        result.push({ level: t.level, price: t.price, prob: t.probability || 50, distPct: Math.abs(t.price - lastPrice) / lastPrice * 100 })
+      }
+    }
   }
 
-  for (const tgt of longTargets) drawSingleTarget(tgt, "rgba(34,197,94,0.55)")
-  for (const tgt of shortTargets) drawSingleTarget(tgt, "rgba(239,68,68,0.55)")
+  // Collect from fib extensions
+  if (fib) {
+    const extKey = isLong ? "extension_up" : "extension_down"
+    const extData = fib[extKey] as Record<string, number> | undefined
+    if (extData) {
+      const extLevels = isLong
+        ? [["1.272", "TP1"], ["1.618", "TP2"], ["2.618", "TP3"], ["3.618", "TP4"]]
+        : [["1.272", "TP1"], ["1.618", "TP2"], ["2.618", "TP3"], ["3.618", "TP4"]]
+      for (const [key, label] of extLevels) {
+        const price = extData[key]
+        if (price && price > 0 && !usedPrices.has(price)) {
+          const isTargetLong = price >= lastPrice
+          if (isTargetLong === isLong) {
+            usedPrices.add(price)
+            const prob = key === "1.272" ? 75 : key === "1.618" ? 60 : key === "2.618" ? 40 : 25
+            result.push({ level: label, price, prob, distPct: Math.abs(price - lastPrice) / lastPrice * 100 })
+          }
+        }
+      }
+    }
+  }
+
+  // Deduplicate + sort by distance
+  const seen = new Set<string>()
+  const deduped = result.filter(r => {
+    const k = r.level
+    if (seen.has(k)) return false
+    seen.add(k); return true
+  })
+  deduped.sort((a, b) => a.distPct - b.distPct)
+
+  // Renumber TP1-TP5
+  const final: { level: string; price: number; prob: number; distPct: number }[] = []
+  let counter = 1
+  for (const r of deduped) {
+    if (counter > 5) break
+    final.push({ ...r, level: `TP${counter}` })
+    counter++
+  }
+
+  // If less than 5, extrapolate from slope of last 2
+  while (final.length < 5 && final.length >= 2) {
+    const last = final[final.length - 1]
+    const prev = final[final.length - 2]
+    const ratio = last.price / prev.price
+    const nextPrice = isLong ? last.price * ratio : last.price / ratio
+    if (nextPrice > 0 && !usedPrices.has(Math.round(nextPrice * 100))) {
+      final.push({ level: `TP${final.length + 1}`, price: Math.round(nextPrice * 100) / 100, prob: Math.max(5, last.prob - 10), distPct: Math.abs(nextPrice - lastPrice) / lastPrice * 100 })
+      usedPrices.add(Math.round(nextPrice * 100))
+    } else break
+  }
+
+  return final
+}
+
+function drawTargetLines(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, th: Record<string, unknown> | undefined, fib: Record<string, unknown> | undefined, w: number, ohlcv: Candle[], lastCandleX: number, lastPrice: number, candleWidth: number) {
+  if (!th || !ohlcv.length) return
+
+  const longTPs = getTPLevels(th, fib, lastPrice, true)
+  const shortTPs = getTPLevels(th, fib, lastPrice, false)
+
+  const drawSingleTarget = (tgt: { level: string; price: number; prob: number; distPct: number }, color: string, idx: number) => {
+    const y = toY(tgt.price); if (y <= 0) return
+    const isFirst = idx === 0
+    ctx.strokeStyle = color; ctx.lineWidth = isFirst ? 0.75 : 0.5; ctx.setLineDash(isFirst ? [] : [3, 6])
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
+
+    const labelX = lastCandleX + candleWidth * (2 + idx * 1.5)
+    const bgW = 110; const bgH = 14
+    ctx.fillStyle = "rgba(11,17,23,0.8)"; ctx.fillRect(labelX - 2, y - 8, bgW, bgH)
+    ctx.strokeStyle = color; ctx.lineWidth = 0.5; ctx.strokeRect(labelX - 2, y - 8, bgW, bgH)
+
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = color
+    ctx.fillText(`${tgt.level} $${tgt.price.toFixed(2)}`, labelX, y + 3)
+    ctx.font = "7px monospace"; ctx.fillStyle = color.replace(")", ",0.5)").replace("0.55", "0.35").replace("0.65", "0.45")
+    ctx.fillText(`${tgt.prob}% ${tgt.distPct.toFixed(1)}%`, labelX, y - 12)
+  }
+
+  for (let i = 0; i < longTPs.length; i++) drawSingleTarget(longTPs[i], "rgba(34,197,94,0.65)", i)
+  for (let i = 0; i < shortTPs.length; i++) drawSingleTarget(shortTPs[i], "rgba(239,68,68,0.65)", i)
 }
 
 function drawSupportResistanceZones(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, supZone: Record<string, unknown> | undefined, resZone: Record<string, unknown> | undefined, w: number, h: number, ohlcv: Candle[]) {
@@ -630,7 +709,7 @@ function drawScenarioPath(
   const style = getConfidenceStyle(signalConf, which)
   const dir = str(sc.direction)
   const isLong = dir === "LONG" || dir === "BULLISH"
-  const color = which === "fakeout" ? "#f59e0b" : isLong ? "#22c55e" : "#ef4444"
+  const color = which === "fakeout" ? "#f59e0b" : which === "alt" ? "#6b7280" : isLong ? "#22c55e" : "#ef4444"
 
   ctx.save()
   ctx.strokeStyle = color; ctx.lineWidth = style.lineWidth; ctx.setLineDash(style.dash)
@@ -645,6 +724,25 @@ function drawScenarioPath(
   }
   if (drawn) ctx.stroke()
   ctx.setLineDash([])
+
+  // Draw zig-zag arrows between path segments (main scenario only)
+  if (which === "main" && signalConf >= 50) {
+    ctx.save(); ctx.globalAlpha = Math.min(style.alpha * 1.8, 0.9)
+    const pathPts = [{ x: startX, y: startY }, ...pts.filter(p => p.time_offset > 0).map(p => ({ x: toFutureX(p.time_offset), y: toY(p.price), p: p.price }))]
+    for (let i = 1; i < pathPts.length; i++) {
+      const p0 = pathPts[i - 1]; const p1 = pathPts[i] as { x: number; y: number; p?: number }
+      if (p0.y <= 0 || p1.y <= 0 || p0.x <= 0 || p1.x <= 0) continue
+      const midX = (p0.x + p1.x) / 2; const midY = (p0.y + p1.y) / 2
+      const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x)
+      const arrowLen = 6; const arrowAngle = 0.4
+      ctx.fillStyle = color; ctx.beginPath()
+      ctx.moveTo(midX + arrowLen * Math.cos(angle), midY + arrowLen * Math.sin(angle))
+      ctx.lineTo(midX - arrowLen * Math.cos(angle - arrowAngle), midY - arrowLen * Math.sin(angle - arrowAngle))
+      ctx.lineTo(midX - arrowLen * Math.cos(angle + arrowAngle), midY - arrowLen * Math.sin(angle + arrowAngle))
+      ctx.closePath(); ctx.fill()
+    }
+    ctx.restore()
+  }
 
   if (signalConf >= 50) {
     ctx.globalAlpha = Math.min(style.alpha * 1.5, 1)
@@ -976,22 +1074,228 @@ function drawTradeLevels(ctx: CanvasRenderingContext2D, toX: (t: number) => numb
 }
 
 function drawVolumeProfile(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, ohlcv: Candle[], w: number, h: number) {
-  if (ohlcv.length < 50) { return }
-  const priceRange = Math.max(...ohlcv.map(d => d.high)) - Math.min(...ohlcv.map(d => d.low)); if (priceRange <= 0) return
-  const buckets = 30; const bs = priceRange / buckets; const minP = Math.min(...ohlcv.map(d => d.low))
+  if (ohlcv.length < 50) return
+  const maxH = Math.max(...ohlcv.map(d => d.high)); const minL = Math.min(...ohlcv.map(d => d.low))
+  const priceRange = maxH - minL; if (priceRange <= 0) return
+  const buckets = 30; const bs = priceRange / buckets
   const volB = new Array(buckets).fill(0)
-  for (const d of ohlcv) volB[Math.min(buckets-1, Math.max(0, Math.floor((d.close - minP) / bs)))] += d.volume
+  for (const d of ohlcv) {
+    const idx = Math.min(buckets - 1, Math.max(0, Math.floor((d.close - minL) / bs)))
+    volB[idx] += d.volume
+  }
   const maxV = Math.max(...volB); if (maxV <= 0) return
-  for (let i = 0; i < buckets; i++) { const y = toY(minP + bs * (i + 0.5)); if (y <= 0) continue; const bw = (volB[i] / maxV) * 40; ctx.fillStyle = volB[i] >= maxV * 0.7 ? "rgba(245,158,11,0.2)" : volB[i] >= maxV * 0.3 ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"; ctx.fillRect(w - bw, y - bs * 100 / 2, bw, Math.max(1, 2)) }
-  const pocIdx = volB.indexOf(maxV); const pocP = minP + bs * (pocIdx + 0.5); const pocY = toY(pocP)
-  if (pocY > 0) { ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.5)"; ctx.textAlign = "right"; ctx.fillText(`POC $${pocP.toFixed(2)}`, w, pocY - 2); ctx.textAlign = "left" }
-  const hvnThreshold = maxV * 0.7; const lvnThreshold = maxV * 0.3
-  for (let i = 0; i < buckets; i++) {
-    if (volB[i] >= hvnThreshold) { const y = toY(minP + bs * (i + 0.5)); if (y > 0) { ctx.font = "5px monospace"; ctx.fillStyle = "rgba(245,158,11,0.3)"; ctx.textAlign = "right"; ctx.fillText("HVN", w - 42, y - 1); ctx.textAlign = "left"; break } }
+  const totalVol = volB.reduce((a, b) => a + b, 0)
+  const barMaxWidth = 70; const barGap = 1.5
+
+  // Sort by volume to find Value Area (70% of total)
+  const volSorted = [...volB].map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v)
+  let cumVol = 0; const vaIndices = new Set<number>()
+  for (const item of volSorted) {
+    if (cumVol / totalVol >= 0.7) break
+    vaIndices.add(item.i); cumVol += item.v
   }
-  for (let i = 0; i < buckets; i++) {
-    if (volB[i] <= lvnThreshold && volB[i] > 0 && volB[i] < maxV * 0.1) { const y = toY(minP + bs * (i + 0.5)); if (y > 0) { ctx.font = "5px monospace"; ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.textAlign = "right"; ctx.fillText("LVN", w - 42, y - 1); ctx.textAlign = "left"; break } }
+  let vaHigh = -Infinity; let vaLow = Infinity
+  for (const i of vaIndices) {
+    const p = minL + bs * (i + 0.5)
+    vaHigh = Math.max(vaHigh, p); vaLow = Math.min(vaLow, p)
   }
+
+  // Draw bars from right edge going left
+  const rightEdge = w - 2
+  for (let i = 0; i < buckets; i++) {
+    const price = minL + bs * (i + 0.5)
+    const y = toY(price)
+    if (y <= 0 || y > h) continue
+    const volRatio = volB[i] / maxV
+    const bw = Math.max(1, volRatio * barMaxWidth)
+    const inVA = vaIndices.has(i)
+    const isPOC = volB[i] === maxV
+    const alpha = isPOC ? 0.45 : inVA ? 0.2 : 0.08
+    ctx.fillStyle = `rgba(245,158,11,${alpha})`
+    ctx.fillRect(rightEdge - bw, y - barGap, bw, Math.max(1.5, bs * 0.08))
+    if (isPOC) {
+      ctx.fillStyle = "rgba(245,158,11,0.15)"
+      ctx.fillRect(0, y - 1, w, 2)
+    }
+  }
+
+  // POC label
+  const pocIdx = volB.indexOf(maxV); const pocP = minL + bs * (pocIdx + 0.5); const pocY = toY(pocP)
+  if (pocY > 0) {
+    ctx.save()
+    ctx.fillStyle = "rgba(11,17,23,0.8)"; ctx.fillRect(rightEdge - 48, pocY - 7, 50, 14)
+    ctx.strokeStyle = "rgba(245,158,11,0.4)"; ctx.lineWidth = 0.5; ctx.strokeRect(rightEdge - 48, pocY - 7, 50, 14)
+    ctx.font = "bold 7px monospace"; ctx.fillStyle = "rgba(245,158,11,0.8)"; ctx.textAlign = "right"
+    ctx.fillText(`POC $${pocP.toFixed(2)}`, w - 4, pocY + 3); ctx.textAlign = "left"
+    ctx.restore()
+  }
+
+  // Value Area labels
+  if (vaHigh > 0 && vaLow > 0 && vaHigh !== vaLow) {
+    const vaHighY = toY(vaHigh); const vaLowY = toY(vaLow)
+    if (vaHighY > 0 && vaLowY > 0) {
+      ctx.fillStyle = "rgba(245,158,11,0.06)"; ctx.fillRect(0, vaHighY, w, vaLowY - vaHighY)
+      ctx.strokeStyle = "rgba(245,158,11,0.15)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 4])
+      ctx.beginPath(); ctx.moveTo(0, vaHighY); ctx.lineTo(rightEdge - barMaxWidth - 4, vaHighY); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(0, vaLowY); ctx.lineTo(rightEdge - barMaxWidth - 4, vaLowY); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.font = "6px monospace"; ctx.fillStyle = "rgba(245,158,11,0.4)"; ctx.textAlign = "right"
+      ctx.fillText(`VAH $${vaHigh.toFixed(2)}`, rightEdge - barMaxWidth - 6, vaHighY - 2)
+      ctx.fillText(`VAL $${vaLow.toFixed(2)}`, rightEdge - barMaxWidth - 6, vaLowY + 10)
+      ctx.textAlign = "left"
+    }
+  }
+}
+
+function drawProbabilityCone(
+  ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number,
+  sp: Record<string, unknown> | undefined, ohlcv: Candle[],
+  lastCandleX: number, lastPrice: number, candleWidth: number,
+  toFutureX: (offset: number) => number,
+) {
+  if (!sp || !ohlcv.length) return
+  const sc = sp.main_scenario as Record<string, unknown> | undefined
+  if (!sc) return
+  const pts = sc.path_points as PathPoint[] | undefined
+  if (!pts || pts.length < 2) return
+
+  // Estimate base volatility from recent candles
+  const lookback = Math.min(20, ohlcv.length)
+  let sumRange = 0
+  for (let i = ohlcv.length - lookback; i < ohlcv.length; i++) {
+    sumRange += (ohlcv[i].high - ohlcv[i].low) / ohlcv[i].close
+  }
+  const avgRange = sumRange / lookback
+
+  const startX = toFutureX(0.5)
+  const startY = toY(lastPrice)
+  if (startX <= 0 || startY <= 0) return
+
+  const points: { x: number; y: number; prob: number; offset: number; price: number }[] = [{ x: startX, y: startY, prob: 100, offset: 0, price: lastPrice }]
+  for (const p of pts) {
+    if (p.time_offset === 0) continue
+    const x = toFutureX(p.time_offset); const y = toY(p.price)
+    if (y <= 0) continue
+    points.push({ x, y, prob: p.probability || 50, offset: p.time_offset, price: p.price })
+  }
+
+  // Build upper/lower bands
+  const upper: { x: number; y: number }[] = []
+  const lower: { x: number; y: number }[] = []
+
+  for (const pt of points) {
+    const uncertainty = avgRange * (1 - pt.prob / 100) * Math.sqrt(pt.offset + 1) * 2.5
+    const priceOffset = pt.price * uncertainty
+    const upperY = toY(pt.price + priceOffset)
+    const lowerY = toY(pt.price - priceOffset)
+    if (upperY > 0 && lowerY > 0) {
+      upper.push({ x: pt.x, y: upperY })
+      lower.push({ x: pt.x, y: lowerY })
+    }
+  }
+
+  if (upper.length < 2 || lower.length < 2) return
+
+  // Draw cone fill (gradient from center outward)
+  ctx.save()
+  ctx.beginPath(); ctx.moveTo(upper[0].x, upper[0].y)
+  for (let i = 1; i < upper.length; i++) ctx.lineTo(upper[i].x, upper[i].y)
+  for (let i = lower.length - 1; i >= 0; i--) ctx.lineTo(lower[i].x, lower[i].y)
+  ctx.closePath()
+  const grad = ctx.createLinearGradient(startX, upper[0].y, startX, lower[0].y)
+  grad.addColorStop(0, "rgba(34,197,94,0.08)")
+  grad.addColorStop(0.5, "rgba(34,197,94,0.04)")
+  grad.addColorStop(1, "rgba(34,197,94,0.08)")
+  ctx.fillStyle = grad; ctx.fill()
+
+  // Cone outline (subtle)
+  ctx.strokeStyle = "rgba(34,197,94,0.12)"; ctx.lineWidth = 0.5; ctx.setLineDash([2, 6])
+  ctx.beginPath(); ctx.moveTo(upper[0].x, upper[0].y)
+  for (let i = 1; i < upper.length; i++) ctx.lineTo(upper[i].x, upper[i].y); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(lower[0].x, lower[0].y)
+  for (let i = 1; i < lower.length; i++) ctx.lineTo(lower[i].x, lower[i].y); ctx.stroke()
+  ctx.setLineDash([])
+  ctx.restore()
+
+  // Label the cone
+  const lastPt = points[points.length - 1]
+  if (lastPt.y > 0) {
+    ctx.font = "7px monospace"; ctx.fillStyle = "rgba(34,197,94,0.3)"
+    ctx.textAlign = "center"; ctx.fillText("Ehtimal konusu", lastPt.x, Math.min(upper[upper.length - 1].y, lower[lower.length - 1].y) - 6)
+    ctx.textAlign = "left"
+  }
+}
+
+function drawLegend(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  overlays: Record<string, boolean>, activePatterns: Record<string, unknown>[] | undefined,
+  mainSc: Record<string, unknown> | undefined, confidence: number,
+) {
+  const items: { label: string; color: string; active: boolean }[] = [
+    { label: "Şam (OHLCV)", color: "#22c55e", active: true },
+    { label: "Əsas ssenari", color: "#22c55e", active: overlays.mainScenario },
+    { label: "Alternativ", color: "#6b7280", active: overlays.altScenario },
+    { label: "Fakeout", color: "#f59e0b", active: overlays.fakeout },
+    { label: "Hədəflər (TP1-TP5)", color: "#22c55e", active: overlays.targets },
+    { label: "Ehtimal konusu", color: "rgba(34,197,94,0.4)", active: overlays.cone },
+    { label: "Breakout zonası", color: "#a855f7", active: overlays.breakout },
+    { label: "Retest zonası", color: "#3b82f6", active: overlays.retest },
+    { label: "Kanal", color: "#a855f7", active: overlays.channel },
+    { label: "Fibonacci", color: "#f59e0b", active: overlays.fibonacci },
+    { label: "Patternlər", color: "#f59e0b", active: overlays.patterns },
+    { label: "Elliott dalğaları", color: "#a855f7", active: overlays.elliott },
+    { label: "SMC (FVG/OB/BOS)", color: "#a855f7", active: overlays.smc },
+    { label: "Likvidlik", color: "#ef4444", active: overlays.liquidity },
+    { label: "Trigger səviyyələri", color: "#22c55e", active: overlays.triggers },
+    { label: "Həcm profili", color: "#f59e0b", active: overlays.volumeProfile },
+    { label: "Struktur", color: "#6b7280", active: overlays.structure },
+  ]
+  const activeItems = items.filter(i => i.active)
+  if (!activeItems.length) return
+
+  // Detect patterns
+  const patternNames = (activePatterns || []).slice(0, 3).map(p => String(p.name || ""))
+  const extraLines: string[] = []
+  if (patternNames.length > 0) {
+    extraLines.push(`Pattern: ${patternNames.join(", ")}`)
+  }
+  if (mainSc) {
+    const dir = String(mainSc.direction_az || mainSc.direction || "")
+    const prob = typeof (mainSc as Record<string, unknown>).probability === "number" ? (mainSc as Record<string, unknown>).probability as number : 0
+    if (dir) extraLines.push(`${dir} ${prob}%`)
+  }
+
+  const lineH = 11; const pad = 4; const colW = 130
+  const totalLines = Math.ceil(activeItems.length / 2)
+  const boxH = totalLines * lineH + pad * 2 + extraLines.length * lineH + pad
+  const boxW = colW * 2 + pad * 2
+  const bx = w - boxW - 8; const by = h - boxH - 8
+
+  ctx.save()
+  ctx.fillStyle = "rgba(11,17,23,0.85)"
+  ctx.strokeStyle = "rgba(55,65,81,0.5)"; ctx.lineWidth = 0.5
+  ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 3); ctx.fill(); ctx.stroke()
+
+  ctx.font = "7px monospace"
+  let yy = by + pad + 8
+  for (let i = 0; i < activeItems.length; i++) {
+    const col = Math.floor(i / totalLines)
+    const row = i % totalLines
+    const ix = bx + pad + col * colW
+    const iy = by + pad + row * lineH + 8
+    ctx.fillStyle = activeItems[i].color; ctx.fillRect(ix, iy - 5, 6, 6)
+    ctx.fillStyle = "rgba(156,163,175,0.8)"; ctx.fillText(activeItems[i].label, ix + 9, iy + 1)
+    yy = iy + lineH
+  }
+
+  for (const line of extraLines) {
+    ctx.fillStyle = "rgba(156,163,175,0.5)"; ctx.fillText(line, bx + pad, yy + lineH)
+    yy += lineH
+  }
+
+  ctx.fillStyle = "rgba(156,163,175,0.3)"; ctx.font = "6px monospace"
+  ctx.fillText(`AI inam: ${confidence}%`, bx + pad, yy + lineH)
+  ctx.restore()
 }
 
 function drawSmartMoney(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, analysis: Record<string, unknown> | null, ohlcv: Candle[]) {
