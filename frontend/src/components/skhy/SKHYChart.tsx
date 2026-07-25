@@ -25,7 +25,7 @@ interface Target { level: string; price: number; type: string; probability: numb
 function num(v: unknown): number { return typeof v === "number" ? v : 0 }
 function str(v: unknown): string { return v == null ? "" : String(v) }
 
-type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"|"volumeProfile"|"elliott"|"triggers"
+type OverlayKey = "structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"|"volumeProfile"|"elliott"|"triggers"|"patterns"
 
 export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTimeframe, onTimeframeChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -43,9 +43,10 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
   const [emaValues, setEmaValues] = useState<{ ema20: number; ema50: number; ema100: number }>({ ema20: 0, ema50: 0, ema100: 0 })
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
     structure: true, channel: true, breakout: true, retest: true,
-    fibonacci: true, targets: true, mainScenario: true, altScenario: true,
-    fakeout: true, smc: true, liquidity: true, ema: true, atrStop: true,
-    volumeProfile: true, elliott: true, triggers: true,
+    fibonacci: true, targets: true, mainScenario: true, altScenario: false,
+    fakeout: false, smc: true, liquidity: false, ema: false, atrStop: false,
+    volumeProfile: false, elliott: false, triggers: true,
+    patterns: true,
   })
   const timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
@@ -64,6 +65,10 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
   const supZone = analysis?.support_zone as Record<string, unknown> | undefined
   const resZone = analysis?.resistance_zone as Record<string, unknown> | undefined
   const invalLevel = num(analysis?.invalidation_level)
+  const activePatterns = analysis?.active_patterns as Record<string, unknown>[] | undefined
+  const patternCompletion = analysis?.pattern_completion as Record<string, number> | undefined
+  const patternInvalidation = analysis?.pattern_invalidation as Record<string, unknown> | undefined
+  const tradePlan = analysis?.trade_plan as Record<string, unknown> | undefined
 
   const confidence = num(scores.signal_confidence)
   const longProb = num(scores.long_probability)
@@ -186,9 +191,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
       drawSR(ctx, toX, toY, sr, price, w)
       drawSupportResistanceZones(ctx, toX, toY, supZone, resZone, w, h, ohlcv)
     }
-    drawPatterns(ctx, toX, toY, patterns, ohlcv, w)
+    if (overlays.patterns) drawPatterns(ctx, toX, toY, activePatterns || patterns, ohlcv, w)
     drawSmartMoney(ctx, toX, toY, analysis, ohlcv)
-  }, [ohlcv, analysis, triggers, scores, sr, patterns, confidence, price, ew, fib, ds, cl, bz, sp, th, cb, supZone, resZone, invalLevel, overlays])
+  }, [ohlcv, analysis, triggers, scores, sr, patterns, confidence, price, ew, fib, ds, cl, bz, sp, th, cb, supZone, resZone, invalLevel, overlays, tradePlan])
 
   useEffect(() => { drawOverlay() }, [drawOverlay])
 
@@ -224,6 +229,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
     { key: "atrStop", label: "ATR" },
     { key: "volumeProfile", label: "Həcm" },
     { key: "elliott", label: "Elliott" },
+    { key: "patterns" as OverlayKey, label: "Patternlər" },
   ]
 
   const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
@@ -263,6 +269,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers, sr, activeTime
           <span className={cn("text-[8px] px-1 py-0.5 rounded font-semibold",
             confTier >= 4 ? "bg-green-500/20 text-green-400" : confTier >= 3 ? "bg-blue-500/20 text-blue-400" : confTier >= 2 ? "bg-yellow-500/20 text-yellow-400" : "bg-gray-500/20 text-gray-400")}>
             {confTier >= 4 ? "GÜCLÜ HAZIR" : confTier >= 3 ? "HAZIRDIR" : confTier >= 2 ? "İZLƏMƏ" : "GÖZLƏYİN"}</span>
+            {tradePlan?.trade_ready ? <span className="text-[8px] px-1 py-0.5 rounded font-semibold bg-green-500/20 text-green-400 border border-green-500/30">TP HAZIR</span> : null}
         </div>
         <span className="text-[9px] text-gray-600 font-mono mr-1">{symbol}</span>
       </div>

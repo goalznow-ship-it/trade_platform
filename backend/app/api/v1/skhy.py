@@ -12,7 +12,7 @@ from app.core.logging import logger
 
 router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
-TF_REGEX = "^(1m|5m|15m|30m|1h|4h|1d)$"
+TF_PATTERN = "^(1m|5m|15m|30m|1h|4h|1d)$"
 
 @router.get("/ohlcv")
 async def get_ohlcv(timeframe: str = "1h", limit: int = 200):
@@ -25,7 +25,7 @@ async def get_ohlcv(timeframe: str = "1h", limit: int = 200):
         return {"symbol": "SKHYUSDT", "timeframe": timeframe, "data": [], "error": str(e)}
 
 @router.get("/snapshot")
-async def get_snapshot(timeframe: str = Query(default="1h", regex=TF_REGEX)):
+async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
     try:
         snapshot = await skhy_market_data.get_snapshot()
         ticker = snapshot.get("ticker", {})
@@ -80,7 +80,7 @@ async def get_snapshot(timeframe: str = Query(default="1h", regex=TF_REGEX)):
         )
 
 @router.get("/analysis")
-async def get_analysis(timeframe: str = Query(default=None, regex=TF_REGEX)):
+async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN)):
     try:
         result = await skhy_analysis.get_full_analysis(timeframe)
         if "error" in result:
@@ -94,7 +94,7 @@ async def get_analysis(timeframe: str = Query(default=None, regex=TF_REGEX)):
         )
 
 @router.get("/scenarios")
-async def get_scenarios(timeframe: str = Query(default=None, regex=TF_REGEX)):
+async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN)):
     try:
         return await skhy_analysis.get_scenarios(timeframe)
     except Exception as e:
@@ -105,7 +105,7 @@ async def get_scenarios(timeframe: str = Query(default=None, regex=TF_REGEX)):
         )
 
 @router.get("/history")
-async def get_history(timeframe: str = Query(default="1h", regex=TF_REGEX), limit: int = Query(30, ge=1, le=100)):
+async def get_history(timeframe: str = Query(default="1h", pattern=TF_PATTERN), limit: int = Query(30, ge=1, le=100)):
     try:
         history = await skhy_history.get_history(limit)
         performance = await skhy_history.get_performance()
@@ -124,8 +124,8 @@ async def get_history(timeframe: str = Query(default="1h", regex=TF_REGEX), limi
 
 @router.get("/backtest")
 async def run_backtest(
-    timeframe: str = Query("1h", regex=TF_REGEX),
-    mode: str = Query("balanced", regex="^(strict|balanced|exploratory)$"),
+    timeframe: str = Query("1h", pattern=TF_PATTERN),
+    mode: str = Query("balanced", pattern="^(strict|balanced|exploratory)$"),
     limit: int = Query(500, ge=100, le=2000),
 ):
     try:
@@ -151,7 +151,7 @@ async def run_backtest(
         )
 
 @router.get("/diagnostics")
-async def get_diagnostics(timeframe: str = Query(default="1h", regex=TF_REGEX)):
+async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
     try:
         ohlcv = await skhy_market_data.get_ohlcv(timeframe, 200, skip_cache=True)
         snapshot = await skhy_market_data.get_snapshot()

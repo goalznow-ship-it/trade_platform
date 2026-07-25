@@ -76,12 +76,14 @@ class SkhyAnalysisEngine:
         channel_lines = self._detect_channel(ohlcv_all)
         breakout_zone = self._detect_breakout_zone(ohlcv_all, snapshot, tf_analysis)
         scenario_paths = self._compute_scenario_paths(tf_analysis, scores, triggers, snapshot, ohlcv_all, fibonacci, detected_structure)
-        target_hierarchy = self._compute_target_hierarchy(ohlcv_all, snapshot, scenario_paths, fibonacci, support_resistance, detected_structure)
+        target_hierarchy = self._compute_target_hierarchy(ohlcv_all, snapshot, scenario_paths, fibonacci, support_resistance, detected_structure, patterns)
         time_estimates = self._compute_time_estimates(ohlcv_all)
         activation_conditions = self._compute_activation_conditions(triggers, tf_analysis, snapshot)
         confidence_breakdown = self._compute_confidence_breakdown(scores, tf_analysis, patterns, detected_structure, alignment)
         whale_analysis = self._compute_whale_analysis(snapshot)
         time_forecast = self._compute_time_forecast(scores, triggers, snapshot, tf_analysis)
+        pattern_conflicts = self._compute_pattern_conflicts(patterns)
+        trade_plan = self._compute_trade_plan(scores, triggers, snapshot, tf_analysis, fibonacci, target_hierarchy, patterns)
         module_errors = self._collect_module_errors(ohlcv_all, tf_analysis)
         data_freshness = snapshot.get("data_freshness", "live") if isinstance(snapshot, dict) else "unknown"
 
@@ -106,6 +108,14 @@ class SkhyAnalysisEngine:
             "target_hierarchy": target_hierarchy, "time_estimates": time_estimates,
             "activation_conditions": activation_conditions, "confidence_breakdown": confidence_breakdown,
             "whale_analysis": whale_analysis, "time_forecast": time_forecast,
+            "active_patterns": [p for p in patterns if p.get("probability", 0) >= 50],
+            "pattern_conflicts": pattern_conflicts,
+            "pattern_completion": {p["name"]: p.get("completion_pct", p.get("completion", 0)) for p in patterns if p.get("probability", 0) >= 50},
+            "pattern_invalidation": {p["name"]: {"price": p.get("invalidation", 0), "condition": p.get("invalidation_condition", "")} for p in patterns if p.get("probability", 0) >= 50},
+            "trade_plan": trade_plan,
+            "future_path_v2": scenario_paths,
+            "hourly_forecast": time_forecast,
+            "recalculation_timestamp": now_iso,
             "invalidation_level": round(invalidation_level, 2) if invalidation_level else 0,
             "module_errors": module_errors, "data_freshness": data_freshness,
             "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
@@ -298,9 +308,16 @@ class SkhyAnalysisEngine:
         if pole_rise > 0 and pole_rise / pole[0]["close"] > 0.03:
             flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
+                flag_price = data[-1]["close"]
+                near_breakout = flag_price >= max(flag_highs) * 0.98
                 return {"name":"Bull Flag","timeframe":tf,"status":"DETECTED","completion":70,
                         "breakout_level":max(flag_highs),"measured_target":round(flag[-1]["close"]+pole_rise,2),
-                        "invalidation":min(flag_lows),"probability":60,"reliability":"medium"}
+                        "invalidation":min(flag_lows),"probability":60,"reliability":"medium",
+                        "detection_reason":"Güclü yüksəlişdən sonra üfüqi konsolidasiya (bayraq forması)",
+                        "invalidation_condition":f"Qiymət ${min(flag_lows)} altında bağlanarsa",
+                        "completion_pct":90 if near_breakout else 70,
+                        "neckline":round(max(flag_highs),2),
+                        "retest_zone_low":round(min(flag_lows),2),"retest_zone_high":round(max(flag_highs),2)}
         return None
 
     def _check_bear_flag(self, data, tf):
@@ -310,9 +327,16 @@ class SkhyAnalysisEngine:
         if pole_drop > 0 and pole_drop / pole[0]["close"] > 0.03:
             flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
+                flag_price = data[-1]["close"]
+                near_breakdown = flag_price <= min(flag_lows) * 1.02
                 return {"name":"Bear Flag","timeframe":tf,"status":"DETECTED","completion":70,
                         "breakout_level":min(flag_lows),"measured_target":round(flag[-1]["close"]-pole_drop,2),
-                        "invalidation":max(flag_highs),"probability":60,"reliability":"medium"}
+                        "invalidation":max(flag_highs),"probability":60,"reliability":"medium",
+                        "detection_reason":"Güclü enişdən sonra üfüqi konsolidasiya (bayraq forması)",
+                        "invalidation_condition":f"Qiymət ${max(flag_highs)} üzərində bağlanarsa",
+                        "completion_pct":90 if near_breakdown else 70,
+                        "neckline":round(min(flag_lows),2),
+                        "retest_zone_low":round(min(flag_lows),2),"retest_zone_high":round(max(flag_highs),2)}
         return None
 
     def _check_double_top(self, data, tf):
@@ -321,9 +345,18 @@ class SkhyAnalysisEngine:
         left = max(highs[:mid]); right = max(highs[mid:])
         if abs(left-right)/left < 0.015:
             neckline = min(d["low"] for d in data)
+            dt_price = data[-1]["close"]
+            dt_range = left - neckline
+            dt_dist = abs(dt_price - neckline)
+            dt_completion = min(95, max(30, int(50 + 40 * (1 - dt_dist / max(dt_range, 0.01)))) if dt_range > 0 else 50)
             return {"name":"Double Top","timeframe":tf,"status":"DETECTED","completion":50,
                     "breakdown_level":neckline,"measured_target":round(neckline-(left-neckline),2),
-                    "invalidation":max(left,right)*1.01,"probability":55,"reliability":"medium"}
+                    "invalidation":max(left,right)*1.01,"probability":55,"reliability":"medium",
+                    "detection_reason":"Eyni səviyyədə iki yüksək zirvə — dönüş patterni",
+                    "invalidation_condition":f"Qiymət ${max(left,right)*1.01} üzərində bağlanarsa",
+                    "completion_pct":dt_completion,
+                    "neckline":round(neckline,2),
+                    "retest_zone_low":round(neckline,2),"retest_zone_high":round(neckline+(left-neckline)*0.3,2)}
         return None
 
     def _check_double_bottom(self, data, tf):
@@ -332,24 +365,53 @@ class SkhyAnalysisEngine:
         left = min(lows[:mid]); right = min(lows[mid:])
         if abs(left-right)/left < 0.015:
             neckline = max(d["high"] for d in data)
+            db_price = data[-1]["close"]
+            db_range = neckline - left
+            db_dist = abs(db_price - neckline)
+            db_completion = min(95, max(30, int(50 + 40 * (1 - db_dist / max(db_range, 0.01)))) if db_range > 0 else 50)
             return {"name":"Double Bottom","timeframe":tf,"status":"DETECTED","completion":50,
                     "breakout_level":neckline,"measured_target":round(neckline+(neckline-left),2),
-                    "invalidation":min(left,right)*0.99,"probability":55,"reliability":"medium"}
+                    "invalidation":min(left,right)*0.99,"probability":55,"reliability":"medium",
+                    "detection_reason":"Eyni səviyyədə iki aşağı dib — dönüş patterni",
+                    "invalidation_condition":f"Qiymət ${min(left,right)*0.99} altında bağlanarsa",
+                    "completion_pct":db_completion,
+                    "neckline":round(neckline,2),
+                    "retest_zone_low":round(neckline-(neckline-left)*0.3,2),"retest_zone_high":round(neckline,2)}
         return None
 
     def _check_triangle(self, data, tf):
         if len(data) < 15: return None
         highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
         h_slope = (highs[-1]-highs[0])/len(highs); l_slope = (lows[-1]-lows[0])/len(lows)
+        tr_price = data[-1]["close"]
+        tr_range = max(highs) - min(lows)
+        initial_range = max(highs[:5]) - min(lows[:5])
+        tri_convergence = min(95, max(20, int(100 * (1 - tr_range / max(initial_range, 0.01)))) if initial_range > 0 else 50)
         if abs(h_slope) < 0.001 and l_slope > 0:
             return {"name":"Ascending Triangle","timeframe":tf,"status":"FORMING","breakout_level":max(highs),
-                    "measured_target":round(max(highs)+(max(highs)-min(lows)),2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium"}
+                    "measured_target":round(max(highs)+(max(highs)-min(lows)),2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium",
+                    "detection_reason":"Yuxarı müqavimət xətti, yüksələn dəstək — yüksəlişə hazırlıq",
+                    "invalidation_condition":f"Qiymət ${min(lows)*0.99} altında bağlanarsa",
+                    "completion_pct":tri_convergence,
+                    "neckline":round(max(highs),2),
+                    "retest_zone_low":round(min(lows),2),"retest_zone_high":round(max(highs),2)}
         if h_slope < 0 and abs(l_slope) < 0.001:
             return {"name":"Descending Triangle","timeframe":tf,"status":"FORMING","breakdown_level":min(lows),
-                    "measured_target":round(min(lows)-(max(highs)-min(lows)),2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium"}
+                    "measured_target":round(min(lows)-(max(highs)-min(lows)),2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium",
+                    "detection_reason":"Aşağı dəstək xətti, enən müqavimət — enişə hazırlıq",
+                    "invalidation_condition":f"Qiymət ${max(highs)*1.01} üzərində bağlanarsa",
+                    "completion_pct":tri_convergence,
+                    "neckline":round(min(lows),2),
+                    "retest_zone_low":round(min(lows),2),"retest_zone_high":round(max(highs),2)}
         if h_slope < 0 and l_slope > 0:
+            sym_inval = max(highs) if abs(max(highs)-tr_price) < abs(min(lows)-tr_price) else min(lows)
             return {"name":"Symmetrical Triangle","timeframe":tf,"status":"FORMING","probability":45,"reliability":"medium",
-                    "invalidation":max(highs) if abs(max(highs)-data[-1]["close"]) < abs(min(lows)-data[-1]["close"]) else min(lows)}
+                    "invalidation":sym_inval,
+                    "detection_reason":"Yaxınlaşan müqavimət və dəstək xətləri — sıxılma",
+                    "invalidation_condition":f"Qiymət ${sym_inval} səviyyəsindən kənara çıxarsa",
+                    "completion_pct":tri_convergence,
+                    "neckline":round(tr_price,2),
+                    "retest_zone_low":round(min(lows),2),"retest_zone_high":round(max(highs),2)}
         return None
 
     def _check_abcd(self, data, tf):
@@ -360,8 +422,16 @@ class SkhyAnalysisEngine:
         ab = abs(b-a); bc = abs(c-b)
         if ab > 0 and bc/ab > 0.6 and bc/ab < 0.9:
             target = dv + (ab-bc)*(1 if b>a else -1)
+            cd_len = abs(closes[-1] - c)
+            expected_cd = abs(b - a) * 0.786
+            abcd_completion = min(95, max(20, int(cd_len / max(expected_cd, 0.01) * 100)))
             return {"name":"ABCD Pattern","timeframe":tf,"status":"FORMING","completion":80,
-                    "measured_target":round(target,2),"probability":50,"reliability":"low"}
+                    "measured_target":round(target,2),"probability":50,"reliability":"low",
+                    "detection_reason":"Harmonik ABCD formalaşması — ardıcıl impuls və korreksiya",
+                    "invalidation_condition":f"Qiymət {c} səviyyəsindən geri dönərsə",
+                    "completion_pct":abcd_completion,
+                    "neckline":round(c,2),
+                    "retest_zone_low":round(min(c, dv),2),"retest_zone_high":round(max(c, dv),2)}
         return None
 
     def _check_rectangle(self, data, tf):
@@ -369,8 +439,16 @@ class SkhyAnalysisEngine:
         highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
         top = max(highs); bottom = min(lows)
         if abs(top-np.mean(highs[-5:]))/top < 0.01 and abs(bottom-np.mean(lows[-5:]))/bottom < 0.01:
+            rect_price = data[-1]["close"]
+            rect_dist = min(abs(rect_price - top), abs(rect_price - bottom)) / max(top - bottom, 0.01)
+            rect_completion = min(95, max(30, int(100 * (1 - rect_dist))))
             return {"name":"Rectangle","timeframe":tf,"status":"FORMING","breakout_level":top,"breakdown_level":bottom,
-                    "measured_target":round(top+(top-bottom),2),"probability":45,"reliability":"low"}
+                    "measured_target":round(top+(top-bottom),2),"probability":45,"reliability":"low",
+                    "detection_reason":"Üfüqi müqavimət və dəstək arasında konsolidasiya",
+                    "invalidation_condition":f"Qiymət ${bottom} altında və ya ${top} üzərində bağlanarsa",
+                    "completion_pct":rect_completion,
+                    "neckline":round(top,2),
+                    "retest_zone_low":round(bottom,2),"retest_zone_high":round(top,2)}
         return None
 
     def _check_wedge(self, data, tf):
@@ -378,12 +456,25 @@ class SkhyAnalysisEngine:
         highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
         h_slope = (highs[-1]-highs[0])/len(highs) if len(highs)>1 else 0
         l_slope = (lows[-1]-lows[0])/len(lows) if len(lows)>1 else 0
+        wedge_initial = max(highs[:5]) - min(lows[:5])
+        wedge_current = max(highs[-5:]) - min(lows[-5:])
+        wedge_convergence = min(95, max(30, int(100 * (1 - wedge_current / max(wedge_initial, 0.01)))) if wedge_initial > 0 else 50)
         if h_slope < 0 and l_slope < 0 and h_slope > l_slope:
             return {"name":"Falling Wedge","timeframe":tf,"status":"FORMING","breakout_level":max(highs),
-                    "measured_target":round(max(highs)+(max(highs)-min(lows))*0.5,2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium"}
+                    "measured_target":round(max(highs)+(max(highs)-min(lows))*0.5,2),"invalidation":min(lows)*0.99,"probability":50,"reliability":"medium",
+                    "detection_reason":"Enən müqavimət və dəstək xətləri — daralma və potensial yuxarı breakout",
+                    "invalidation_condition":f"Qiymət ${min(lows)*0.99} altında bağlanarsa",
+                    "completion_pct":wedge_convergence,
+                    "neckline":round(max(highs),2),
+                    "retest_zone_low":round(min(lows),2),"retest_zone_high":round(max(highs),2)}
         if h_slope > 0 and l_slope > 0 and h_slope > l_slope:
             return {"name":"Rising Wedge","timeframe":tf,"status":"FORMING","breakdown_level":min(lows),
-                    "measured_target":round(min(lows)-(max(highs)-min(lows))*0.5,2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium"}
+                    "measured_target":round(min(lows)-(max(highs)-min(lows))*0.5,2),"invalidation":max(highs)*1.01,"probability":50,"reliability":"medium",
+                    "detection_reason":"Yüksələn müqavimət və dəstək xətləri — daralma və potensial aşağı breakdown",
+                    "invalidation_condition":f"Qiymət ${max(highs)*1.01} üzərində bağlanarsa",
+                    "completion_pct":wedge_convergence,
+                    "neckline":round(min(lows),2),
+                    "retest_zone_low":round(min(lows),2),"retest_zone_high":round(max(highs),2)}
         return None
 
     def _check_cup_handle(self, data, tf):
@@ -399,11 +490,18 @@ class SkhyAnalysisEngine:
             if 0.1 <= handle_retrace <= 0.5:
                 breakout = max(highs[-5:])
                 target = round(breakout + (cup_start - cup_bottom), 2)
+                cup_handle_progress = len(handle_rnd) / 15.0
+                cup_completion = min(95, max(40, int(60 + cup_handle_progress * 30)))
                 return {"name":"Cup and Handle","timeframe":tf,"status":"DETECTED","completion":80,
                         "breakout_level":breakout,"measured_target":target,
                         "cup_bottom":round(cup_bottom,2),"cup_rim":round(cup_start,2),
                         "handle_low":round(handle_low,2),"invalidation":round(min(handle_low,cup_bottom)*0.99,2),
-                        "probability":60,"reliability":"medium"}
+                        "probability":60,"reliability":"medium",
+                        "detection_reason":"Kubok formalaşması (yuvarlaqlı dib) + sap (konsolidasiya) — qalxma patterni",
+                        "invalidation_condition":f"Qiymət ${round(min(handle_low,cup_bottom)*0.99,2)} altında bağlanarsa",
+                        "completion_pct":cup_completion,
+                        "neckline":round(breakout,2),
+                        "retest_zone_low":round(handle_low,2),"retest_zone_high":round(breakout,2)}
         return None
 
     def _check_head_shoulders(self, data, tf):
@@ -414,13 +512,63 @@ class SkhyAnalysisEngine:
         rs = max(highs[mid+mid//2:]) if highs[mid+mid//2:] else 0
         if hd > ls and hd > rs and abs(ls-rs)/hd < 0.05:
             neckline = min(d["low"] for d in data[-20:])
+            hs_completion = 70 if rs > hd * 0.8 else 50
             return {"name":"Head and Shoulders","timeframe":tf,"status":"DETECTED","breakdown_level":neckline,
-                    "measured_target":round(neckline-(hd-neckline),2),"invalidation":hd*1.01,"probability":55,"reliability":"medium"}
+                    "measured_target":round(neckline-(hd-neckline),2),"invalidation":hd*1.01,"probability":55,"reliability":"medium",
+                    "detection_reason":"Üç zirvə: sol çiyin, baş, sağ çiyin — trend dönüşü",
+                    "invalidation_condition":f"Qiymət ${hd*1.01} üzərində bağlanarsa",
+                    "completion_pct":hs_completion,
+                    "neckline":round(neckline,2),
+                    "retest_zone_low":round(neckline,2),"retest_zone_high":round(neckline+(hd-neckline)*0.3,2)}
         if ls > 0 and hd > 0 and rs > 0 and ls < hd and rs < hd and abs(ls-rs)/hd < 0.05:
             neckline = max(d["high"] for d in data[-20:])
+            ihs_completion = 70 if rs > hd * 0.8 else 50
             return {"name":"Inverse Head and Shoulders","timeframe":tf,"status":"DETECTED","breakout_level":neckline,
-                    "measured_target":round(neckline+(neckline-min(d["low"] for d in data[-20:])),2),"invalidation":min(highs)*0.99,"probability":55,"reliability":"medium"}
+                    "measured_target":round(neckline+(neckline-min(d["low"] for d in data[-20:])),2),"invalidation":min(highs)*0.99,"probability":55,"reliability":"medium",
+                    "detection_reason":"Ters çevrilmiş baş-çiyin — eniş trendinin sonu",
+                    "invalidation_condition":f"Qiymət ${min(highs)*0.99} altında bağlanarsa",
+                    "completion_pct":ihs_completion,
+                    "neckline":round(neckline,2),
+                    "retest_zone_low":round(neckline-(neckline-min(highs))*0.3,2),"retest_zone_high":round(neckline,2)}
         return None
+
+    def _compute_pattern_conflicts(self, patterns):
+        if not patterns or len(patterns) < 2:
+            return {"conflicts": [], "dominant_pattern": None, "has_conflict": False}
+
+        conflicts = []
+        directions = []
+        for p in patterns:
+            name = p.get("name", "")
+            if any(x in name for x in ["Bull", "Ascending", "Cup", "Bottom", "Inverse", "Bullish"]):
+                directions.append("bullish")
+            elif any(x in name for x in ["Bear", "Descending", "Top", "Head", "Rising"]):
+                directions.append("bearish")
+            else:
+                directions.append("neutral")
+
+        bullish_count = sum(1 for d in directions if d == "bullish")
+        bearish_count = sum(1 for d in directions if d == "bearish")
+
+        if bullish_count > 0 and bearish_count > 0:
+            conflicts.append({
+                "type": "direction_conflict",
+                "description_az": "Patternlər ziddiyyət təşkil edir: həm yüksəliş, həm eniş patternləri aşkarlandı",
+                "bullish_patterns": [p["name"] for i, p in enumerate(patterns) if directions[i] == "bullish"],
+                "bearish_patterns": [p["name"] for i, p in enumerate(patterns) if directions[i] == "bearish"],
+            })
+
+        dominant = max(patterns, key=lambda p: p.get("probability", 0)) if patterns else None
+
+        return {
+            "has_conflict": len(conflicts) > 0,
+            "conflicts": conflicts,
+            "dominant_pattern": dominant.get("name") if dominant else None,
+            "dominant_direction": max(set(directions), key=directions.count) if directions else "neutral",
+            "bullish_count": bullish_count,
+            "bearish_count": bearish_count,
+            "conflict_level": "high" if len(conflicts) > 0 and abs(bullish_count - bearish_count) <= 1 else "low",
+        }
 
     # ─── SUPPORT / RESISTANCE ───
     def _compute_support_resistance(self, ohlcv_data, snapshot):
@@ -693,6 +841,106 @@ class SkhyAnalysisEngine:
             "description_az":f"Breakout zonası ${zone_bottom}-${zone_top}. {test_count} dəfə test edilib. {'Bullish breakout hazırdır.' if is_bullish_breakout_ready else ''} {'Bearish breakout hazırdır.' if is_bearish_breakout_ready else ''}",
         }
 
+    def _compute_trade_plan(self, scores, triggers, snapshot, tf_analysis, fibonacci, target_hierarchy, patterns):
+        confidence = scores.get("signal_confidence", 0)
+        price = snapshot.get("ticker", {}).get("price", 0) or 155
+        long_prob = scores.get("long_probability", 50)
+        short_prob = scores.get("short_probability", 50)
+        direction = "LONG" if long_prob >= short_prob else "SHORT"
+
+        if confidence < 70:
+            return {
+                "status": "gözləmə",
+                "status_az": "Təsdiq gözlənilir — inam yetərsiz",
+                "direction": direction,
+                "confidence": confidence,
+                "trade_ready": False,
+                "message_az": f"İnam səviyyəsi {confidence}% — trade plan üçün minimum 70% tələb olunur. Hazırda yalnız trigger səviyyələrini izləyin.",
+                "long_trigger": triggers.get("long_trigger_price", 0),
+                "short_trigger": triggers.get("short_trigger_price", 0),
+                "bullish_invalidation": triggers.get("bullish_invalidation", 0),
+                "bearish_invalidation": triggers.get("bearish_invalidation", 0),
+            }
+
+        entry_price = price
+        fib_up = fibonacci.get("extension_up", {}) if isinstance(fibonacci.get("extension_up"), dict) else {}
+        fib_down = fibonacci.get("extension_down", {}) if isinstance(fibonacci.get("extension_down"), dict) else {}
+        atr = tf_analysis.get("1h", {}).get("volatility", 0.02) or 0.02
+
+        if direction == "LONG":
+            sl_raw = triggers.get("bullish_invalidation", price * 0.97)
+            sl = round(sl_raw, 2)
+            tp1 = round(price * (1 + atr * 1.5), 2)
+            tp2 = round(price * (1 + atr * 3.0), 2)
+            tp3 = round(price * (1 + atr * 5.0), 2)
+            tp4 = round(price * (1 + atr * 7.5), 2)
+            tp5 = round(price * (1 + atr * 10.0), 2)
+            if fib_up.get("1.272"): tp1 = round(fib_up["1.272"], 2)
+            if fib_up.get("1.618"): tp2 = round(fib_up["1.618"], 2)
+            if fib_up.get("2.618"): tp3 = round(fib_up["2.618"], 2)
+            if fib_up.get("3.618"): tp4 = round(fib_up["3.618"], 2)
+            risk = abs(entry_price - sl)
+            entry_zone_min = round(price * 0.995, 2)
+            entry_zone_max = round(price * 1.005, 2)
+        else:
+            sl_raw = triggers.get("bearish_invalidation", price * 1.03)
+            sl = round(sl_raw, 2)
+            tp1 = round(price * (1 - atr * 1.5), 2)
+            tp2 = round(price * (1 - atr * 3.0), 2)
+            tp3 = round(price * (1 - atr * 5.0), 2)
+            tp4 = round(price * (1 - atr * 7.5), 2)
+            tp5 = round(price * (1 - atr * 10.0), 2)
+            if fib_down.get("1.272"): tp1 = round(fib_down["1.272"], 2)
+            if fib_down.get("1.618"): tp2 = round(fib_down["1.618"], 2)
+            if fib_down.get("2.618"): tp3 = round(fib_down["2.618"], 2)
+            if fib_down.get("3.618"): tp4 = round(fib_down["3.618"], 2)
+            risk = abs(entry_price - sl)
+            entry_zone_min = round(price * 0.995, 2)
+            entry_zone_max = round(price * 1.005, 2)
+
+        rr1 = round(abs(tp1 - entry_price) / risk, 2) if risk > 0 else 0
+        rr2 = round(abs(tp2 - entry_price) / risk, 2) if risk > 0 else 0
+        rr3 = round(abs(tp3 - entry_price) / risk, 2) if risk > 0 else 0
+        rr4 = round(abs(tp4 - entry_price) / risk, 2) if risk > 0 else 0
+        rr5 = round(abs(tp5 - entry_price) / risk, 2) if risk > 0 else 0
+
+        hold_time = "4-8 saat"
+        if tf_analysis.get("4h", {}).get("signal", "") in ("STRONG_LONG", "STRONG_SHORT"):
+            hold_time = "8-24 saat"
+        elif tf_analysis.get("1d", {}).get("signal", "") in ("STRONG_LONG", "STRONG_SHORT"):
+            hold_time = "24-72 saat"
+
+        targets = [
+            {"level": "TP1", "price": tp1, "risk_reward": rr1, "probability": 75, "source": "Fibonacci 1.272" if fib_up.get("1.272") and direction == "LONG" else "ATR based"},
+            {"level": "TP2", "price": tp2, "risk_reward": rr2, "probability": 60, "source": "Fibonacci 1.618" if fib_up.get("1.618") and direction == "LONG" else "ATR based"},
+            {"level": "TP3", "price": tp3, "risk_reward": rr3, "probability": 40, "source": "Fibonacci 2.618" if fib_up.get("2.618") and direction == "LONG" else "ATR based"},
+            {"level": "TP4", "price": tp4, "risk_reward": rr4, "probability": 25, "source": "Extension"},
+            {"level": "TP5", "price": tp5, "risk_reward": rr5, "probability": 15, "source": "Maximum extension"},
+        ]
+
+        return {
+            "status": "hazırdır",
+            "status_az": "Trade plan hazırdır",
+            "trade_ready": True,
+            "direction": direction,
+            "direction_az": "ALIŞ" if direction == "LONG" else "SATIŞ",
+            "confidence": confidence,
+            "entry_zone": {
+                "min": entry_zone_min,
+                "max": entry_zone_max,
+                "mid": round(price, 2),
+            },
+            "stop_loss": sl,
+            "take_profits": targets,
+            "risk_reward": rr3,
+            "max_acceptable_entry": entry_zone_max,
+            "invalidation": sl,
+            "expected_holding_time": hold_time,
+            "position_sizing_hint": f"Risk {round(risk/entry_price*100, 1)}%, 1% capital riski üçün {round(0.01/risk*entry_price, 2)} vahid",
+            "message_az": f"{direction} istiqamətində trade plan hazırdır. Giriş zonası: ${entry_zone_min}-${entry_zone_max}, SL: ${sl}, TP1: ${tp1} (R:{rr1})",
+            "pattern_based": any(p.get("probability", 0) >= 60 for p in (patterns or [])),
+        }
+
     # ─── SCENARIO PATHS ───
     def _compute_scenario_paths(self, tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci, detected_structure):
         price = snapshot.get("ticker",{}).get("price",0) or 155
@@ -717,35 +965,39 @@ class SkhyAnalysisEngine:
         fib_2_618_dn = fib_down.get("2.618", price*0.92) if (isinstance(fib_down, dict) and "2.618" in fib_down) else price*0.92
 
         def path_points(start_price, direction):
-            pts = [{"time_offset":0,"price":start_price,"label":"Başlanğıc","phase":"start"}]
+            pts = [{"time_offset": 0, "price": start_price, "label": "Başlanğıc", "phase": "start", "probability": 100, "reason": "Cari qiymət"}]
             if direction == "up":
                 b = round(lt_price or start_price*1.01, 2)
                 r = round(start_price*0.99, 2)
                 i1 = round(fib_1_272_up, 2)
+                pb = round((i1 + fib_1_272_up * 0.5) / 2, 2)
                 t1 = round(fib_1_618_up, 2)
                 t2 = round(fib_2_618_up, 2)
-                t3 = round(fib_2_618_up*1.05, 2)
-                pts.append({"time_offset":1,"price":b,"label":"Breakout","phase":"breakout"})
-                pts.append({"time_offset":2,"price":round((b+r)/2,2),"label":"Retest","phase":"retest"})
-                pts.append({"time_offset":3,"price":i1,"label":"İlk impuls","phase":"impulse1"})
-                pts.append({"time_offset":4,"price":round((i1+t1)/2,2),"label":"TP1","phase":"tp1"})
-                pts.append({"time_offset":6,"price":t1,"label":"TP2","phase":"tp2"})
-                pts.append({"time_offset":9,"price":t2,"label":"TP3","phase":"tp3"})
-                pts.append({"time_offset":14,"price":t3,"label":"Final","phase":"final"})
+                ext = round(fib_2_618_up*1.05, 2)
+                pts.append({"time_offset": 1, "price": b, "label": "Trigger/Breakout", "phase": "trigger", "probability": 75, "reason": f"Qiymət ${b} üzərində bağlanarsa"})
+                pts.append({"time_offset": 2, "price": round((b+r)/2, 2), "label": "Retest", "phase": "retest", "probability": 68, "reason": "Breakout sonrası geri dönüş testi"})
+                pts.append({"time_offset": 3, "price": i1, "label": "İlk impuls", "phase": "impulse", "probability": 60, "reason": "Yüksələn impuls 1.272 Fib"})
+                pts.append({"time_offset": 4, "price": pb, "label": "Geri çəkilmə", "phase": "pullback", "probability": 50, "reason": "TP1 öncəsi korreksiya"})
+                pts.append({"time_offset": 5, "price": t1, "label": "Davam", "phase": "continuation", "probability": 45, "reason": "Əsas hədəfə doğru davam"})
+                pts.append({"time_offset": 6, "price": round((t1+t2)/2, 2), "label": "TP1", "phase": "tp1", "probability": 40, "reason": "İlk mənfəət hədəfi Fib 1.618"})
+                pts.append({"time_offset": 9, "price": t2, "label": "TP2", "phase": "tp2", "probability": 30, "reason": "İkinci mənfəət hədəfi Fib 2.618"})
+                pts.append({"time_offset": 14, "price": ext, "label": "Uzadılma", "phase": "extension", "probability": 20, "reason": "Maksimum uzadılma hədəfi"})
             else:
                 b = round(st_price or start_price*0.99, 2)
                 r = round(start_price*1.01, 2)
                 i1 = round(fib_1_272_dn, 2)
+                pb = round((i1 + fib_1_272_dn * 0.5) / 2, 2)
                 t1 = round(fib_1_618_dn, 2)
                 t2 = round(fib_2_618_dn, 2)
-                t3 = round(fib_2_618_dn*0.95, 2)
-                pts.append({"time_offset":1,"price":b,"label":"Breakdown","phase":"breakout"})
-                pts.append({"time_offset":2,"price":round((b+r)/2,2),"label":"Retest","phase":"retest"})
-                pts.append({"time_offset":3,"price":i1,"label":"İlk impuls","phase":"impulse1"})
-                pts.append({"time_offset":4,"price":round((i1+t1)/2,2),"label":"TP1","phase":"tp1"})
-                pts.append({"time_offset":6,"price":t1,"label":"TP2","phase":"tp2"})
-                pts.append({"time_offset":9,"price":t2,"label":"TP3","phase":"tp3"})
-                pts.append({"time_offset":14,"price":t3,"label":"Final","phase":"final"})
+                ext = round(fib_2_618_dn*0.95, 2)
+                pts.append({"time_offset": 1, "price": b, "label": "Trigger/Breakdown", "phase": "trigger", "probability": 75, "reason": f"Qiymət ${b} altında bağlanarsa"})
+                pts.append({"time_offset": 2, "price": round((b+r)/2, 2), "label": "Retest", "phase": "retest", "probability": 68, "reason": "Breakdown sonrası geri dönüş testi"})
+                pts.append({"time_offset": 3, "price": i1, "label": "İlk impuls", "phase": "impulse", "probability": 60, "reason": "Enən impuls 1.272 Fib"})
+                pts.append({"time_offset": 4, "price": pb, "label": "Geri çəkilmə", "phase": "pullback", "probability": 50, "reason": "TP1 öncəsi korreksiya"})
+                pts.append({"time_offset": 5, "price": t1, "label": "Davam", "phase": "continuation", "probability": 45, "reason": "Əsas hədəfə doğru davam"})
+                pts.append({"time_offset": 6, "price": round((t1+t2)/2, 2), "label": "TP1", "phase": "tp1", "probability": 40, "reason": "İlk mənfəət hədəfi"})
+                pts.append({"time_offset": 9, "price": t2, "label": "TP2", "phase": "tp2", "probability": 30, "reason": "İkinci mənfəət hədəfi"})
+                pts.append({"time_offset": 14, "price": ext, "label": "Uzadılma", "phase": "extension", "probability": 20, "reason": "Maksimum uzadılma"})
             return pts
 
         def fakeout_path(start_price, direction):
@@ -777,8 +1029,8 @@ class SkhyAnalysisEngine:
         alt_path = path_points(price, alt_dir)
         fake_path = fakeout_path(price, main_dir)
 
-        main_targets = [p for p in main_path if p["phase"] in ("tp1","tp2","tp3","final")]
-        alt_targets = [p for p in alt_path if p["phase"] in ("tp1","tp2","tp3","final")]
+        main_targets = [p for p in main_path if p["phase"] in ("tp1","tp2","extension")]
+        alt_targets = [p for p in alt_path if p["phase"] in ("tp1","tp2","extension")]
 
         h4_sig = tf_analysis.get("4h",{}).get("signal","WAIT")
         h1_sig = tf_analysis.get("1h",{}).get("signal","WAIT")
@@ -843,7 +1095,7 @@ class SkhyAnalysisEngine:
         }
 
     # ─── TARGET HIERARCHY ───
-    def _compute_target_hierarchy(self, ohlcv_data, snapshot, scenario_paths, fibonacci, sr, detected_structure):
+    def _compute_target_hierarchy(self, ohlcv_data, snapshot, scenario_paths, fibonacci, sr, detected_structure, patterns=None):
         price = snapshot.get("ticker",{}).get("price",0) or 155
         fib_ret = fibonacci.get("retracement_levels",{}) if isinstance(fibonacci.get("retracement_levels"), dict) else {}
         fib_up = fibonacci.get("extension_up",{}) if isinstance(fibonacci.get("extension_up"), dict) else {}
@@ -909,6 +1161,21 @@ class SkhyAnalysisEngine:
         if ch_top and ch_bottom:
             targets.append({"level":"Kanal Top","price":round(ch_top,2),"type":"Kanal yuxarı","distance_pct":round((ch_top-price)/price*100,1) if price else 0,"probability":45,"source":"Channel","time_estimate":"1-4 saat","invalidation":round(price*0.96,2)})
             targets.append({"level":"Kanal Bottom","price":round(ch_bottom,2),"type":"Kanal aşağı","distance_pct":round((price-ch_bottom)/price*100,1) if price else 0,"probability":45,"source":"Channel","time_estimate":"1-4 saat","invalidation":round(price*1.04,2)})
+
+        if patterns:
+            for p in patterns[:3]:
+                mm = p.get("measured_target", 0)
+                if mm and ((main_dir == "up" and mm > price) or (main_dir == "down" and mm < price)):
+                    targets.append({
+                        "level": f"Pattern-{p.get('name','')[:10]}",
+                        "price": round(mm, 2),
+                        "type": f"Pattern measured move ({p.get('name','')})",
+                        "distance_pct": round(abs(mm-price)/price*100, 1) if price else 0,
+                        "probability": min(p.get("probability", 50) + 10, 90),
+                        "source": "pattern measured move",
+                        "time_estimate": "2-6 saat",
+                        "invalidation": round(price * (0.97 if main_dir == "up" else 1.03), 2),
+                    })
 
         targets.sort(key=lambda t: t["distance_pct"] if t["distance_pct"] else 0)
 
@@ -1021,6 +1288,7 @@ class SkhyAnalysisEngine:
         ls = snapshot.get("long_short_ratio", {}) or {}
         ob = snapshot.get("orderbook", {}) or {}
         funding = snapshot.get("funding", {}) or {}
+        oi = snapshot.get("open_interest", {}) or {}
         bid = ob.get("bids", [])
         ask = ob.get("asks", [])
         bid_vol = sum(b[1] for b in bid[:5]) if bid else 0
@@ -1028,44 +1296,62 @@ class SkhyAnalysisEngine:
         taker_ratio = taker.get("buy_sell_ratio", 1.0) or 1.0
         ls_ratio = ls.get("long_short_ratio", 1.0) or 1.0
         fr = funding.get("funding_rate", 0) or 0
-        whale_bias = "neytrals"
-        whale_desc = "Böyük oyunçular neytral mövqedədir."
+        oi_change = oi.get("change_24h", 0) or 0
+        oi_value = oi.get("open_interest", 0) or 0
+
+        whale_bias = "neutral"
         whale_direction = "neutral"
+        whale_desc = "Böyük oyunçular neytral mövqedədir."
         signals = []
+
         if taker_ratio > 1.2:
-            signals.append("Taker alışları dominantdır (alış təzyiqi)")
+            signals.append(f"Taker alışları dominantdır (nisbət: {taker_ratio:.2f}) — alış təzyiqi")
             whale_bias = "bullish"; whale_direction = "bullish"
-            whale_desc = "Böyük oyunçlar alış tərəfdədir. Taker alış nisbəti yüksəkdir."
+            whale_desc = "Böyük oyunçular alış tərəfdədir"
         elif taker_ratio < 0.8:
-            signals.append("Taker satışları dominantdır (satış təzyiqi)")
+            signals.append(f"Taker satışları dominantdır (nisbət: {taker_ratio:.2f}) — satış təzyiqi")
             whale_bias = "bearish"; whale_direction = "bearish"
-            whale_desc = "Böyük oyunçular satış tərəfdədir. Taker satış nisbəti yüksəkdir."
+            whale_desc = "Böyük oyunçular satış tərəfdədir"
         else:
-            signals.append("Taker alış/satış balanslıdır")
+            signals.append(f"Taker alış/satış balanslıdır ({taker_ratio:.2f})")
+
         if bid_vol > ask_vol * 2 and bid_vol > 0 and ask_vol > 0:
-            signals.append("Order book-da alış tərəfi güclüdür (böyük alış əmrləri)")
-            if whale_bias == "neutral":
-                whale_bias = "bullish"; whale_direction = "bullish"
-                whale_desc = "Order book-da böyük alış əmrləri var."
+            signals.append(f"Order book-da alış tərəfi güclüdür (bid:{bid_vol:.0f} > ask:{ask_vol:.0f})")
+            if whale_bias == "neutral": whale_bias = "bullish"; whale_direction = "bullish"
         elif ask_vol > bid_vol * 2 and bid_vol > 0 and ask_vol > 0:
-            signals.append("Order book-da satış tərəfi güclüdür (böyük satış əmrləri)")
-            if whale_bias == "neutral":
-                whale_bias = "bearish"; whale_direction = "bearish"
-                whale_desc = "Order book-da böyük satış əmrləri var."
+            signals.append(f"Order book-da satış tərəfi güclüdür (ask:{ask_vol:.0f} > bid:{bid_vol:.0f})")
+            if whale_bias == "neutral": whale_bias = "bearish"; whale_direction = "bearish"
+        else:
+            signals.append("Order book balanslıdır")
+
         if ls_ratio > 1.5:
-            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} - bazarda alış üstünlüyü")
-            if whale_bias == "neutral":
-                whale_bias = "bullish"; whale_direction = "bullish"
+            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} — bazarda alış üstünlüyü (retail long)")
+            if whale_bias == "neutral": whale_bias = "bearish"
         elif ls_ratio < 0.7:
-            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} - bazarda satış üstünlüyü")
-            if whale_bias == "neutral":
-                whale_bias = "bearish"; whale_direction = "bearish"
+            signals.append(f"Long/Short nisbəti {ls_ratio:.1f} — bazarda satış üstünlüyü (retail short)")
+            if whale_bias == "neutral": whale_bias = "bullish"
+
         if fr > 0.001:
-            signals.append("Funding rate yüksəkdir - long tərəf bahalıdır (potensial sıxışdırma)")
+            signals.append(f"Funding rate yüksək ({fr*100:.4f}%) — long tərəf bahalıdır, sıxışdırma riski")
         elif fr < -0.001:
-            signals.append("Funding rate mənfidir - short tərəf bahalıdır (potensial sıxışdırma)")
+            signals.append(f"Funding rate mənfi ({fr*100:.4f}%) — short tərəf bahalıdır, sıxışdırma riski")
+        else:
+            signals.append(f"Funding rate neytraldır ({fr*100:.4f}%)")
+
+        if oi_value:
+            if oi_change > 10:
+                signals.append(f"OI {oi_change:.0f}% artıb — yeni pul bazara daxil olur")
+            elif oi_change < -10:
+                signals.append(f"OI {oi_change:.0f}% azalıb — pul bazardan çıxır")
+            else:
+                signals.append(f"OI dəyişməyib ({oi_change:.0f}%)")
+
+        accum = whale_direction == "bullish" and ls_ratio > 1.3
+        distrib = whale_direction == "bearish" and ls_ratio < 0.7
+
         return {
-            "whale_bias": whale_bias, "whale_direction": whale_direction,
+            "whale_bias": whale_bias,
+            "whale_direction": whale_direction,
             "whale_description_az": whale_desc,
             "signals": signals,
             "taker_buy_sell_ratio": round(taker_ratio, 2),
@@ -1075,6 +1361,11 @@ class SkhyAnalysisEngine:
             "funding_rate": round(fr, 6),
             "bid_ask_imbalance": round((bid_vol - ask_vol) / max(bid_vol + ask_vol, 1), 4),
             "retail_sentiment": "həddindən artıq long" if ls_ratio > 2 else "long üstünlük" if ls_ratio > 1.2 else "balanslı" if ls_ratio > 0.8 else "short üstünlük" if ls_ratio > 0.5 else "həddindən artıq short",
+            "oi_change_24h_pct": round(oi_change, 1),
+            "oi_value": round(oi_value, 2),
+            "accumulation_zone": accum,
+            "distribution_zone": distrib,
+            "whale_verdict_az": "Böyük oyunçular alır (accumulation)" if accum else "Böyük oyunçular satır (distribution)" if distrib else "Böyük oyunçular neytraldır",
         }
 
     # ─── TIME-BASED FORECAST ───
@@ -1087,41 +1378,43 @@ class SkhyAnalysisEngine:
         long_prob = scores.get("long_probability", 50)
         short_prob = scores.get("short_probability", 50)
         signal_conf = scores.get("signal_confidence", 0)
-        h4_signal = h4.get("signal", "WAIT")
-        h1_signal = h1.get("signal", "WAIT")
-        h4_conf = 60 if h4_signal in ("LONG", "STRONG_LONG") else 60 if h4_signal in ("SHORT", "STRONG_SHORT") else 40
-        h1_conf = 60 if h1_signal in ("LONG", "STRONG_LONG") else 60 if h1_signal in ("SHORT", "STRONG_SHORT") else 40
-        base_bull = long_prob
-        base_bear = short_prob
-        def trend_decay(conf, hours):
-            return max(conf * (1 - hours * 0.05), 15)
-        bull_1h = int(trend_decay(base_bull, 1))
-        bear_1h = 100 - bull_1h
-        bull_2h = int(trend_decay(base_bull, 2))
-        bear_2h = 100 - bull_2h
-        bull_4h = int(trend_decay(base_bull, 4))
-        bear_4h = 100 - bull_4h
-        bull_12h = int(trend_decay(base_bull, 12))
-        bear_12h = 100 - bull_12h
-        best_hour = "1h" if signal_conf >= 70 else "2h" if signal_conf >= 50 else "4h"
+        vol = h1.get("volatility", 0.02) or 0.02
+        h1_range = price * vol
+
+        def period_forecast(hours, base_prob, volatility_decay):
+            bull = max(min(int(base_prob * (1 - hours * 0.05)), 95), 5)
+            bear = 100 - bull
+            expected_range = round(price * volatility_decay * np.sqrt(hours) * 0.01, 2)
+            lower = round(price - expected_range, 2)
+            upper = round(price + expected_range, 2)
+            direction = "LONG" if bull >= bear else "SHORT"
+            trig = lt if direction == "LONG" else st
+            inv = triggers.get("bullish_invalidation" if direction == "LONG" else "bearish_invalidation", 0)
+            risk_desc = "Triggerə yaxınlaşma" if trig and abs(price - trig) / trig < 0.03 else "Gözlənilən breakout" if signal_conf >= 60 else "Qeyri-müəyyən hərəkət"
+            return {
+                "period": f"{hours} saat",
+                "direction": direction,
+                "direction_az": "ALIŞ" if direction == "LONG" else "SATIŞ",
+                "bullish_prob": bull,
+                "bearish_prob": bear,
+                "expected_range_low": lower,
+                "expected_range_high": upper,
+                "expected_range_pct": round(expected_range / price * 100, 1),
+                "volatility": round(vol * 100, 2),
+                "trigger": trig,
+                "invalidation": inv,
+                "main_risk": risk_desc,
+                "confidence": max(min(signal_conf - hours * 5, 90), 5),
+            }
+
+        forecasts = [period_forecast(h, long_prob if long_prob >= short_prob else short_prob, vol * 100) for h in [1, 2, 4, 12]]
+
         return {
-            "forecasts": [
-                {"period":"1 saat","bullish_prob":bull_1h,"bearish_prob":bear_1h,
-                 "action":"ALIŞ aktivləşə bilər" if lt and price < lt and abs(price-lt)/lt < 0.02 else
-                          "SATIŞ aktivləşə bilər" if st and price > st and abs(price-st)/st < 0.02 else
-                          "Gözləmə - trigger yaxın deyil","confidence":min(signal_conf, 85)},
-                {"period":"2 saat","bullish_prob":bull_2h,"bearish_prob":bear_2h,
-                 "action":"ALIŞ gözlənilir" if long_prob > 60 else "SATIŞ gözlənilir" if short_prob > 60 else "Qeyri-müəyyən",
-                 "confidence":min(signal_conf-5, 75)},
-                {"period":"4 saat","bullish_prob":bull_4h,"bearish_prob":bear_4h,
-                 "action":f"4H {h4_signal}" if h4_signal != "WAIT" else "Neytral 4H",
-                 "confidence":min(signal_conf-10, 65)},
-                {"period":"12 saat","bullish_prob":bull_12h,"bearish_prob":bear_12h,
-                 "action":f"Trend:{h4.get('trend','neytral')}" if h4.get('trend') else "Neytral",
-                 "confidence":min(signal_conf-20, 50)},
-            ],
-            "best_period":best_hour,
-            "description_az":f"Ən güclü ehtimal {best_hour} vaxtında. {max(bull_1h,bear_1h)}% ehtimal.",
+            "forecasts": forecasts,
+            "best_period": "1h" if signal_conf >= 70 else "2h" if signal_conf >= 50 else "4h",
+            "description_az": f"Ən güclü ehtimal {forecasts[0]['period']} vaxtında. {max(forecasts[0]['bullish_prob'], forecasts[0]['bearish_prob'])}% ehtimal.",
+            "overall_bias": "bullish" if long_prob > 55 else "bearish" if short_prob > 55 else "neutral",
+            "average_volatility": round(vol * 100, 2),
         }
 
     # ─── EXPLANATION ───

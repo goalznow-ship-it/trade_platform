@@ -68,6 +68,9 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
   const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
   const dataFreshness = hasAnalysis ? safeVal(analysis?.data_freshness, "bilinmir") : "gözlənilir"
   const lastUpdated = parseLastUpdated(analysis?.last_updated || analysis?.timestamp)
+  const activePatterns = analysis?.active_patterns as Record<string, unknown>[] | undefined
+  const tradePlan = analysis?.trade_plan as Record<string, unknown> | undefined
+  const patternCompletion = analysis?.pattern_completion as Record<string, number> | undefined
 
   const showStructure = hasAnalysis && safeVal(ds.status) === "detected"
   const showBreakout = hasAnalysis && safeVal(bz.status) === "calculated"
@@ -150,6 +153,12 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
                 <span>{safeVal(mainSc.activation_trigger)}</span>
               </div>
             )}
+            {tradePlan?.trade_ready ? (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/30 text-[9px]">
+                <Target className="w-2.5 h-2.5 text-green-400" />
+                <span className="text-green-400">Trade plan hazırdır: {safeVal(tradePlan.direction_az)} · TP1 ${numVal(((tradePlan.take_profits as unknown[])?.[0] as Record<string, unknown> | undefined)?.price || 0).toFixed(2)}</span>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="text-[10px] text-gray-500 italic">Ssenari məlumatı gözlənilir...</div>
@@ -215,6 +224,46 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
           )}
         </div>
       </div>
+
+      {/* Trade Plan (confidence >= 70) */}
+      {tradePlan?.trade_ready ? (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-green-400 font-semibold uppercase tracking-wider mb-2">
+            <Zap className="w-3 h-3" /> Trade Plan — {safeVal(tradePlan.direction_az)}
+          </div>
+          <div className="space-y-1 text-[10px]">
+            <div className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Giriş zonası</span>
+              <span className="font-mono text-green-400">
+                ${numVal((tradePlan.entry_zone as Record<string, unknown>)?.min || 0).toFixed(2)}–${numVal((tradePlan.entry_zone as Record<string, unknown>)?.max || 0).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Stop Loss</span>
+              <span className="font-mono text-red-400">${numVal(tradePlan.stop_loss).toFixed(2)}</span>
+            </div>
+            {(tradePlan.take_profits as { level: string; price: number; risk_reward: number; probability: number }[] || []).slice(0, 5).map((tp, i) => (
+              <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20">
+                <span className="text-gray-400">{tp.level}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-yellow-400">${tp.price.toFixed(2)}</span>
+                  <span className="text-[8px] text-gray-500">R:{tp.risk_reward.toFixed(1)}</span>
+                  <span className={cn("text-[8px] px-1 rounded", tp.probability >= 70 ? "bg-green-500/20 text-green-400" : tp.probability >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-gray-500/20 text-gray-400")}>{tp.probability}%</span>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Risk/Mükafat</span>
+              <span className="font-mono text-green-400">1:{numVal(tradePlan.risk_reward).toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between px-2 py-1 rounded bg-gray-800/20">
+              <span className="text-gray-400">Gözlənilən müddət</span>
+              <span className="font-mono text-gray-300">{safeVal(tradePlan.expected_holding_time)}</span>
+            </div>
+            <div className="text-[9px] text-gray-500 px-2 mt-1">{safeVal(tradePlan.message_az)}</div>
+          </div>
+        </div>
+      ) : null}
 
       {/* 5. Növbəti 1-2-4-12 saat üçün ehtimal */}
       {hasAnalysis && tf && (tf.forecasts as unknown[])?.length > 0 && (
@@ -364,6 +413,54 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis 
               <span className={cn("w-2 h-2 rounded-full", dsAccum ? "bg-green-400" : dsDistrib ? "bg-red-400" : "bg-gray-600")} />
               <span className="text-gray-500">{dsAccum ? "Yığım zonası - ağıllı pul yığır" : dsDistrib ? "Paylanma zonası - ağıllı pul paylayır" : "Neytral zona"}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pattern Completion */}
+      {activePatterns && activePatterns.length > 0 && (
+        <div className="p-3 border-b border-gray-800/40">
+          <div className="flex items-center gap-1.5 text-[11px] text-cyan-400 font-semibold uppercase tracking-wider mb-2">
+            <Activity className="w-3 h-3" /> Aşkarlanan Patternlər
+          </div>
+          <div className="space-y-1">
+            {activePatterns.slice(0, 4).map((p, i) => {
+              const pConf = numVal(p.probability)
+              const pComp = numVal(p.completion_pct || p.completion)
+              const pName = safeVal(p.name)
+              const pTf = safeVal(p.timeframe)
+              const pReason = safeVal(p.detection_reason)
+              const pStatus = safeVal(p.status)
+              const pInv = safeVal(p.invalidation_condition)
+              return (
+                <div key={i} className="px-2 py-1 rounded bg-gray-800/20 text-[9px]">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <div className="flex items-center gap-1">
+                      <span className={cn("font-semibold", pConf >= 70 ? "text-green-400" : pConf >= 50 ? "text-yellow-400" : "text-gray-500")}>{pName}</span>
+                      <span className="text-gray-600">{pTf}</span>
+                    </div>
+                    <span className={cn("text-[8px] px-1 rounded", pConf >= 70 ? "bg-green-500/20 text-green-400" : pConf >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-gray-500/20 text-gray-400")}>{pConf}%</span>
+                  </div>
+                  {pComp > 0 && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <div className="flex-1 h-1 rounded-full bg-gray-800 overflow-hidden">
+                        <div className={cn("h-full rounded-full", pComp >= 80 ? "bg-green-500" : pComp >= 50 ? "bg-yellow-500" : "bg-blue-500")} style={{ width: `${pComp}%` }} />
+                      </div>
+                      <span className="text-[7px] text-gray-500 w-8 text-right">{pComp}%</span>
+                    </div>
+                  )}
+                  {pReason && <div className="text-[8px] text-gray-500 mt-0.5">{pReason}</div>}
+                  {pInv && <div className="text-[8px] text-red-400/60 mt-0.5">Ləğv: {pInv}</div>}
+                  {pStatus && (
+                    <span className={cn("text-[7px] px-1 rounded mt-0.5 inline-block",
+                      pStatus === "CONFIRMED" ? "bg-green-500/15 text-green-400" :
+                      pStatus === "DETECTED" ? "bg-yellow-500/15 text-yellow-400" :
+                      pStatus === "FORMING" ? "bg-blue-500/15 text-blue-400" : "bg-gray-500/15 text-gray-400"
+                    )}>{pStatus}</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

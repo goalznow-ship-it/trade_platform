@@ -43,6 +43,9 @@ Transform TradeAnalyst Pro into an institutional-grade AI crypto trading platfor
 - **Phase 20 — Execution Engine** (`execution_engine.py`): 10 pre-trade validation checks (trend alignment, liquidity, spread, funding, correlation, risk, margin, leverage, exchange filters, liquidation distance), trade approval/rejection with risk score, rejection reasons, slippage estimation, execution plan with iceberg suggestion
 - **Frontend WebSocket Integration**: `WSProvider` context wrapping dashboard, `ConnectionQualityIndicator` with per-channel staleness tracking, all components updated to use real-time WS data (MarketSummary, MarketOverview, SentimentWidget, AIConfidencePanel, EngineStatus, TopSignals)
 - **Frontend Build Verification**: 0 TypeScript errors, 0 ESLint warnings (dashboard dir), full `next build` passes with all 14 routes
+- **Execution Engine → Paper Trading**: Pre-trade validation gate wired into paper trading — every market/limit order validated through 10-check execution engine before fill, rejected orders include validation_failures + risk_score, Redis counters track approval/rejection rates
+- **Bybit Exchange Connector**: Full BybitFuturesExchange class with all 17 abstract methods implemented using ccxt.bybit (linear USDT perpetual), registered in ExchangeManager alongside Binance
+- **Admin Execution Stats**: New /api/v1/admin/execution/stats endpoint + frontend card showing validations/approved/rejected/approval_rate/max_leverage/checks_available
 
 ### Active
 - (none)
@@ -51,11 +54,11 @@ Transform TradeAnalyst Pro into an institutional-grade AI crypto trading platfor
 - (none)
 
 ## Next Move
-1. Commit and push all 10 phases to GitHub
-2. Test backtest engine with real historical data
-3. Build paper trading execution using the new execution engine
-4. Add exchange connector for live trading (Binance, Bybit)
-5. Build admin dashboard for monitoring AI brain performance
+1. Test backtest engine with real historical data (already using real Binance data — tests use synthetic candles for isolated unit tests)
+2. Add OKX exchange connector
+3. Build paper trading frontend page with position management UI
+4. Add frontend exchange credentials management page
+5. Monitor SKHY Chart Intelligence performance in production
 
 ## Relevant Files
 - `backend/app/services/market_coverage.py` — Top 30 symbol management
