@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Navbar } from "@/components/Navbar"
 import { api } from "@/lib/api"
 import { SKHYChart } from "@/components/skhy/SKHYChart"
 import { SKHYAnalysisPanel } from "@/components/skhy/SKHYAnalysisPanel"
+import { normalizeSkhyAnalysis as clientNormalize, type NormalizedAnalysis } from "@/lib/skhyChartNormalizer"
 import { SKHYScenarioPanel } from "@/components/skhy/SKHYScenarioPanel"
 import { SKHYTriggerPanel } from "@/components/skhy/SKHYTriggerPanel"
 import { SKHYHistoryPanel } from "@/components/skhy/SKHYHistoryPanel"
@@ -258,6 +259,13 @@ export default function SkhyTerminalPage() {
 
   const displayError = analysisError || schemaError || (analysis !== null && scores.overall === 0 && String(scores.status || "").startsWith("NO_DATA") ? "Timeframe məlumatı yoxdur" : null)
 
+  const normalizedAnalysis = useMemo(() => clientNormalize(analysis), [analysis])
+  const normIdentityRef = useRef(normalizedAnalysis)
+  useEffect(() => {
+    if (normIdentityRef.current !== normalizedAnalysis) normIdentityRef.current = normalizedAnalysis
+    console.log("[SKHY] SAME_NORMALIZED_OBJECT", normIdentityRef.current === normalizedAnalysis)
+  }, [normalizedAnalysis])
+
   const runBacktest = async () => {
     setBacktestRunning(true)
     try {
@@ -329,7 +337,8 @@ export default function SkhyTerminalPage() {
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex-1 min-h-0">
               <SKHYChart symbol="SKHYUSDT" snapshot={snapshot} analysis={analysis} triggers={triggers} sr={sr}
-                activeTimeframe={timeframe} onTimeframeChange={setTimeframe} />
+                activeTimeframe={timeframe} onTimeframeChange={setTimeframe}
+                normalizedAnalysis={normalizedAnalysis} />
             </div>
             {scores && (
               <div className="h-16 border-t border-gray-800/40 px-3 flex items-center gap-3 text-xs bg-gray-950/30">
@@ -374,7 +383,8 @@ export default function SkhyTerminalPage() {
           <div className="w-96 border-l border-gray-800/60 flex flex-col overflow-hidden bg-gray-950/30">
             <div className="flex-1 overflow-y-auto">
               <SKHYTriggerPanel triggers={triggers} scores={scores} />
-              <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis} />
+              <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis}
+                normalizedAnalysis={normalizedAnalysis} />
               <SKHYScenarioPanel scenarios={hasValidAnalysis ? scenarios : null} />
               <SKHYHistoryPanel history={history} />
               {backtestResult && (

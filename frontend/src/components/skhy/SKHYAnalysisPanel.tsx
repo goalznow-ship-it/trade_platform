@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { TrendingUp, TrendingDown, Minus, Activity, BarChart3, Volume2, Zap, Shield, Brain, AlertTriangle, Target, Clock, RefreshCw, DollarSign, Users, Eye } from "lucide-react"
+import { type NormalizedAnalysis } from "@/lib/skhyChartNormalizer"
 
 interface Props {
   timeframes: Record<string, unknown>
@@ -9,6 +10,7 @@ interface Props {
   alignment: Record<string, unknown>
   sr: Record<string, unknown>
   analysis: Record<string, unknown> | null
+  normalizedAnalysis: NormalizedAnalysis | null
 }
 
 function numVal(v: unknown): number {
@@ -33,7 +35,7 @@ function parseLastUpdated(v: unknown): Date | null {
   return null
 }
 
-export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis }: Props) {
+export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis, normalizedAnalysis }: Props) {
   const tfList = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
   const hasAnalysis = analysis !== null && Object.keys(scores).length > 0
 
