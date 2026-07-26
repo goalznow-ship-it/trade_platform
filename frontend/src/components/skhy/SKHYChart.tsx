@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import {
-  createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries,
-  type IChartApi, type ISeriesApi, type Time,
+  createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, LineStyle,
+  type IChartApi, type ISeriesApi, type Logical, type Time,
 } from "lightweight-charts"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,7 @@ interface Props {
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number }
 interface PathPoint { time_offset: number; price: number; label: string; phase: string; probability?: number; reason?: string }
 interface Target { level: string; price: number; type: string; probability: number; time_estimate: string }
+interface PrimitiveCount { dataCount: number; visibleCount: number; edgeCount: number }
 
 type OverlayKey = "aiOverlay"|"structure"|"channel"|"breakout"|"retest"|"fibonacci"|"targets"|"mainScenario"|"altScenario"|"fakeout"|"smc"|"liquidity"|"ema"|"atrStop"|"volumeProfile"|"elliott"|"triggers"|"patterns"|"cone"
 
@@ -84,6 +85,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const ema50Ref = useRef<ISeriesApi<"Line"> | null>(null)
   const ema100Ref = useRef<ISeriesApi<"Line"> | null>(null)
   const atrStopRef = useRef<ISeriesApi<"Line"> | null>(null)
+  const mainForecastRef = useRef<ISeriesApi<"Line"> | null>(null)
+  const altForecastRef = useRef<ISeriesApi<"Line"> | null>(null)
+  const fakeoutForecastRef = useRef<ISeriesApi<"Line"> | null>(null)
   const rafRef = useRef<number>(0)
   const dirtyRef = useRef(true)
   const lastValidOhlcvRef = useRef<Candle[]>([])
@@ -96,8 +100,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const [dbg, setDbg] = useState<string>("")
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
     aiOverlay: true, structure: true, channel: true, breakout: true, retest: true,
-    fibonacci: true, targets: true, mainScenario: true, altScenario: false,
-    fakeout: false, smc: true, liquidity: false, ema: false, atrStop: false,
+    fibonacci: false, targets: true, mainScenario: true, altScenario: true,
+    fakeout: false, smc: false, liquidity: false, ema: false, atrStop: false,
     volumeProfile: false, elliott: false, triggers: true,
     patterns: true, cone: true,
   })
@@ -110,22 +114,6 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
 
   // ── Normalized analysis (from parent prop — single source of truth) ──
   const norm = normalizedAnalysis || normalizeSkhyAnalysis(activeAnalysis)
-  useEffect(() => {
-    console.log("[SKHY] NORMALIZED_RUNTIME", {
-      longTrigger: norm.longTrigger,
-      shortTrigger: norm.shortTrigger,
-      breakout: norm.breakout,
-      channel: norm.channel,
-      supports: norm.supports,
-      resistances: norm.resistances,
-      fibonacci: norm.fibonacci,
-      scenarios: norm.scenarios,
-      strongestPattern: norm.strongestPattern,
-      confidence: norm.confidence,
-      status: norm.status,
-    })
-    console.log("[SKHY] NORMALIZED_CHANNEL", norm.channel)
-  }, [norm])
   const hasAnalysis = !!(activeAnalysis?.scores)
   const scores = (activeAnalysis?.scores || {}) as Record<string, unknown>
   const tfs = (activeAnalysis?.timeframes || {}) as Record<string, unknown>
@@ -155,12 +143,18 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
   const mainDir = s(mainSc?.direction_az || mainSc?.direction || "")
   const mainProb = n(mainSc?.probability)
+  const altSc = norm.scenarios.alt
+  const altDir = s(altSc?.direction || "")
+  const altProb = n(altSc?.probability)
+  const mainActivation = s(mainSc?.activation_trigger)
+  const altActivation = s(altSc?.activation_trigger)
   const invalLevel = n(activeAnalysis?.invalidation_level)
   const tradePlan = activeAnalysis?.trade_plan as Record<string, unknown> | undefined
   const analysisTriggers = (activeAnalysis?.triggers || {}) as Record<string, unknown>
   const sr = srProp
 
   const canvasSizeRef = useRef({ w: 0, h: 0 })
+  const dbgRef = useRef("")
   const markDirty = useCallback(() => { dirtyRef.current = true }, [])
 
   const fitToAnalysis = useCallback(() => {
@@ -182,7 +176,6 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       })
       markDirty()
     }
-    console.log("[SKHY] FIT_TO_ANALYSIS", { minPrice: minP, maxPrice: maxP, levels: prices.length })
   }, [ohlcv, norm, markDirty])
 
   // Auto-fit on first load
@@ -203,49 +196,37 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
 
     const ts = chart.timeScale()
     const safeC = (v: number) => Number.isFinite(v) ? v : 0
-    const toX = (t: number) => safeC(ts.timeToCoordinate(t as Time) ?? 0)
+    const timeIndex = new Map(data.map((c, index) => [c.time, index]))
+    const toX = (t: number) => {
+      const timeCoordinate = ts.timeToCoordinate(t as Time)
+      if (timeCoordinate != null && Number.isFinite(timeCoordinate)) return timeCoordinate
+      const logicalIndex = timeIndex.get(t)
+      return logicalIndex == null ? 0 : safeC(ts.logicalToCoordinate(logicalIndex as Logical) ?? 0)
+    }
     const toY = (p: number) => safeC(cs.priceToCoordinate(p) ?? 0)
-    const candleW = data.length >= 2 ? Math.max(1, toX(data[data.length - 1].time) - toX(data[data.length - 2].time)) : 8
+    const lastLogicalX = safeC(ts.logicalToCoordinate((data.length - 1) as Logical) ?? 0)
+    const prevLogicalX = safeC(ts.logicalToCoordinate(Math.max(0, data.length - 2) as Logical) ?? 0)
+    const candleW = data.length >= 2 ? Math.max(1, Math.abs(lastLogicalX - prevLogicalX)) : 8
     const lx = toX(data[data.length - 1].time)
     const lp = data[data.length - 1].close
     const fX = (off: number) => { const v = lx + candleW * off; return Number.isFinite(v) ? v : 0 }
     if (w <= 0 || h <= 0 || lx <= 0 || lp <= 0) return false
 
-    // ── PLOT RECT LOG ──
-    const plotRect = chart.timeScale().getVisibleLogicalRange()
-    const containerRect = containerRef.current?.getBoundingClientRect()
-    console.log("[SKHY] PLOT_RECT", {
-      w, h, lx, lp,
-      logicalRange: plotRect ? { from: plotRect.from, to: plotRect.to } : null,
-      containerRect: containerRect ? { left: containerRect.left, top: containerRect.top, width: containerRect.width, height: containerRect.height } : null,
-    })
-
-    // ── DIAGNOSTIC RED RECT (if visible, canvas overlay works) ──
-    ctx.save()
-    ctx.fillStyle = "rgba(255,0,0,0.3)"
-    ctx.fillRect(10, 10, 50, 50)
-    ctx.fillStyle = "#fff"
-    ctx.font = "8px monospace"
-    ctx.fillText("DIAG", 12, 50)
-    ctx.restore()
-
     // ── LAYER TRACKING ──
-    // Each draw function returns { dataCount, drawnCount }
-    const counter: Record<string, { dataCount: number; drawnCount: number }> = {}
-    const track = (name: string, fn: () => { dataCount: number; drawnCount: number }) => {
+    const counter: Record<string, PrimitiveCount> = {}
+    const track = (name: string, fn: () => PrimitiveCount) => {
       try {
         const res = fn()
-        counter[name] = { dataCount: (counter[name]?.dataCount || 0) + res.dataCount, drawnCount: (counter[name]?.drawnCount || 0) + res.drawnCount }
+        counter[name] = {
+          dataCount: (counter[name]?.dataCount || 0) + res.dataCount,
+          visibleCount: (counter[name]?.visibleCount || 0) + res.visibleCount,
+          edgeCount: (counter[name]?.edgeCount || 0) + res.edgeCount,
+        }
       } catch (e) {
         console.error(`[SKHY] ${name}:`, e)
-        counter[name] = { dataCount: 0, drawnCount: 0 }
+        counter[name] = { dataCount: 0, visibleCount: 0, edgeCount: 0 }
       }
     }
-
-    // ── VISIBLE PRICE RANGE ──
-    const vMin = n(cs.coordinateToPrice(h))
-    const vMax = n(cs.coordinateToPrice(0))
-    console.log("[SKHY] VISIBLE_PRICE_RANGE", { min: vMin, max: vMax, longTrigger: norm.longTrigger, shortTrigger: norm.shortTrigger })
 
     // ── Z-ORDER: draw layers back to front, triggers LAST ──
     const pw = w // plot width = full canvas width
@@ -259,7 +240,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     // 4. Fibonacci
     if (overlays.fibonacci) track("fib", () => drawFibPrimitive(ctx, pw, h, norm, cs, confidence))
     // 5. SMC
-    if (overlays.smc) track("smc", () => drawSMCPrimitive(ctx, pw, norm, cs, confidence))
+    if (overlays.smc) track("smc", () => drawSMCPrimitive(ctx, pw, h, norm, cs, confidence))
     // 6. Pattern
     if (overlays.patterns) track("pattern", () => drawPatternPrimitive(ctx, toX, toY, norm, data, w, confidence, lx, candleW))
     // 7. Future projection
@@ -267,39 +248,39 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       track("future", () => drawFPPrimitive(ctx, pw, h, toX, toY, sp || fpv2, cb, confidence, data, lx, lp, candleW, fX, overlays))
 
     // 8. TRIGGERS (drawn on top of everything)
-    const trigRes = drawTriggersPrimitive(ctx, pw, h, norm, cs)
-    counter["triggers"] = trigRes
+    if (overlays.triggers) track("triggers", () => drawTriggersPrimitive(ctx, pw, h, norm, cs))
 
-    // 9. Legend / status (always on top)
-    drawLegend(ctx, w, h, overlays, norm, confidence)
+    // 9. Entry, stop and targets are actionable only after the execution threshold.
+    if (showEntrySLTP) {
+      if (overlays.targets) {
+        drawEntrySL(ctx, toX, toY, norm, pw, lx, candleW)
+        drawTPLevels(ctx, toX, toY, norm, pw, data, candleW)
+      }
+    }
 
     // ── STATUS BUILD ──
-    const maxConfig: Record<string, number> = { triggers: 2, breakout: 1, channel: 3, pattern: 1, fib: 4, sr_zones: 4, future: 1, smc: 8 }
-    const dataParts: string[] = []; const visParts: string[] = []
-    for (const [key, denom] of Object.entries(maxConfig)) {
+    const dataParts: string[] = []; const visParts: string[] = []; const edgeParts: string[] = []
+    for (const key of ["triggers", "breakout", "channel", "pattern", "fib", "sr_zones", "future", "smc"]) {
       const c = counter[key]
       if (!c) continue
-      const dc = c.dataCount || denom
-      dataParts.push(`${key.toUpperCase().slice(0, 3)} D${dc}`)
-      if (c.drawnCount > 0) visParts.push(`${key.toUpperCase().slice(0, 3)} V${c.drawnCount}`)
+      const tag = key.toUpperCase().slice(0, 3)
+      dataParts.push(`${tag} D${c.dataCount}`)
+      if (c.visibleCount > 0) visParts.push(`${tag} V${c.visibleCount}`)
+      if (c.edgeCount > 0) edgeParts.push(`${tag} E${c.edgeCount}`)
     }
-    setDbg(dataParts.join(" ") + (visParts.length > 0 ? "  │  " + visParts.join(" ") : ""))
+    const nextDbg = [dataParts.join(" "), visParts.join(" "), edgeParts.join(" ")].filter(Boolean).join(" │ ")
+    if (dbgRef.current !== nextDbg) {
+      dbgRef.current = nextDbg
+      setDbg(nextDbg)
+    }
     return true
-
-    // ── Confidence-based visibility ──
-    
-    return true
-  }, [ohlcv, overlays, activeAnalysis, triggersProp, sr, confidence, norm, ew, fib, ds, cl, bz, sp, th, cb, price, activePatterns, tradePlan, mainSc, ltPrice, stPrice, longProb, shortProb, hasAnalysis, analysisTriggers, fpv2, invalLevel, markDirty])
+  }, [ohlcv, overlays, activeAnalysis, triggersProp, sr, confidence, norm, ew, fib, ds, cl, bz, sp, th, cb, price, activePatterns, tradePlan, mainSc, ltPrice, stPrice, longProb, shortProb, hasAnalysis, analysisTriggers, fpv2, invalLevel, showEntrySLTP])
 
   // ── DIRECT VISIBLE CANVAS RENDER ──
   useEffect(() => {
     const loop = () => {
       const canvas = overlayRef.current; const parent = parentRef.current
       if (!canvas || !parent) { rafRef.current = requestAnimationFrame(loop); return }
-
-      if (parent.lastChild !== canvas) {
-        parent.appendChild(canvas)
-      }
 
       if (!dirtyRef.current) { rafRef.current = requestAnimationFrame(loop); return }
 
@@ -367,8 +348,28 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     ema50Ref.current = chart.addSeries(LineSeries, { color: COL_BLUE, lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
     ema100Ref.current = chart.addSeries(LineSeries, { color: COL_PURPLE, lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
     atrStopRef.current = chart.addSeries(LineSeries, { color: "#f97316", lineWidth: 1, lineStyle: 3, priceLineVisible: false, lastValueVisible: false })
-    return () => chart.remove()
-  }, [])
+    mainForecastRef.current = chart.addSeries(LineSeries, {
+      color: "#22d3ee", lineWidth: 3, lineStyle: LineStyle.Dashed,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: true,
+    })
+    altForecastRef.current = chart.addSeries(LineSeries, {
+      color: "rgba(245,158,11,0.85)", lineWidth: 2, lineStyle: LineStyle.Dashed,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: true,
+    })
+    fakeoutForecastRef.current = chart.addSeries(LineSeries, {
+      color: "rgba(168,85,247,0.8)", lineWidth: 1, lineStyle: LineStyle.Dotted,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    })
+    const handleViewportChange = () => markDirty()
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleViewportChange)
+    const resizeObserver = new ResizeObserver(handleViewportChange)
+    resizeObserver.observe(containerRef.current)
+    return () => {
+      resizeObserver.disconnect()
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleViewportChange)
+      chart.remove()
+    }
+  }, [markDirty])
 
   useEffect(() => {
     if (!candleSeriesRef.current || !volSeriesRef.current || !ohlcv.length) return
@@ -396,6 +397,35 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     }
     markDirty()
   }, [ohlcv, overlays, markDirty])
+
+  useEffect(() => {
+    const data = ohlcv.length > 0 ? ohlcv : lastValidOhlcvRef.current
+    if (data.length === 0) return
+    const lastTime = data[data.length - 1].time
+    const tfSeconds: Record<string, number> = {
+      "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+      "1h": 3600, "4h": 14400, "1d": 86400,
+    }
+    const step = tfSeconds[activeTimeframe] || 3600
+    const toSeriesData = (scenario: Record<string, unknown> | null) => {
+      const points = scenario && Array.isArray(scenario.path_points)
+        ? scenario.path_points as PathPoint[]
+        : []
+      return points
+        .filter(point => n(point.price) > 0 && n(point.time_offset) >= 0)
+        .map(point => ({
+          time: (lastTime + n(point.time_offset) * step) as Time,
+          value: n(point.price),
+        }))
+    }
+    mainForecastRef.current?.applyOptions({
+      lineStyle: confidence >= 50 ? LineStyle.Solid : LineStyle.Dashed,
+    })
+    mainForecastRef.current?.setData(overlays.mainScenario ? toSeriesData(norm.scenarios.main) : [])
+    altForecastRef.current?.setData(overlays.altScenario ? toSeriesData(norm.scenarios.alt) : [])
+    fakeoutForecastRef.current?.setData(overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
+    markDirty()
+  }, [activeTimeframe, confidence, norm.scenarios, ohlcv, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
 
   useEffect(() => { markDirty() }, [markDirty, analysis, triggersProp, sr, confidence, price])
 
@@ -465,7 +495,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             {confTier >= 4 ? "GÜCLÜ HAZIR" : confTier >= 3 ? "HAZIRDIR" : confTier >= 2 ? "İZLƏMƏ" : "GÖZLƏYİN"}</span>
           {tradePlan?.trade_ready ? <span className="text-[8px] px-1 py-0.5 rounded font-semibold bg-green-500/20 text-green-400 border border-green-500/30">TP HAZIR</span> : null}
         </div>
-        <span className="text-[8px] text-gray-700 font-mono mr-1">{dbg || symbol}</span>
+        <span className="text-[8px] text-gray-600 font-mono mr-1" title={dbg}>{symbol}</span>
       </div>
       <div ref={parentRef} className="relative flex-1 overflow-hidden" style={{ isolation: "isolate" }} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
         <div ref={containerRef} className="absolute inset-0" />
@@ -496,18 +526,45 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             )}
           </>
         )}
-        <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none z-[999]" />
+        <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none z-[5]" />
         {tooltip && (
-          <div className="absolute z-10 pointer-events-none bg-gray-900/95 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-200 shadow-xl max-w-[320px] whitespace-pre-line" style={{ left: tooltip.x, top: tooltip.y }}>
+          <div className="absolute z-20 pointer-events-none bg-gray-900/95 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-200 shadow-xl max-w-[320px] whitespace-pre-line" style={{ left: tooltip.x, top: tooltip.y }}>
             {tooltip.text.map((line, i) => <div key={i}>{line}</div>)}
           </div>
         )}
         {status === "WAIT" && confidence < 70 && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[6] text-center pointer-events-none">
-            <div className="text-[11px] font-bold text-yellow-500 mb-0.5">⏳ GÖZLƏYİN</div>
-            <div className="text-[8px] text-gray-500">{confidence > 0 ? `İnam ${confidence}% · Siqnal etibarı aşağı` : "Məlumat hazırlanır..."}</div>
-            {ltPrice > 0 && <div className="text-[8px] text-green-400/70">LONG üçün bu səviyyəni gözlə: ${ltPrice.toFixed(2)}</div>}
-            {stPrice > 0 && <div className="text-[8px] text-red-400/70">SHORT üçün bu səviyyəni gözlə: ${stPrice.toFixed(2)}</div>}
+          <div className="absolute top-14 right-20 z-[8] text-right pointer-events-none rounded border border-yellow-500/20 bg-gray-950/80 px-2 py-1 shadow-lg">
+            <div className="text-[10px] font-bold text-yellow-500">⏳ GÖZLƏYİN · {confidence}%</div>
+            <div className="text-[8px] text-gray-500">Təsdiq üçün trigger bağlanışı gözlənilir</div>
+          </div>
+        )}
+        {(norm.scenarios.main || norm.scenarios.alt) && (
+          <div className="absolute bottom-3 right-14 z-[8] w-[265px] pointer-events-none rounded-md border border-gray-700/60 bg-gray-950/90 px-2.5 py-2 shadow-xl backdrop-blur-sm">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-300">AI gələcək ssenariləri</span>
+              <span className={cn("rounded px-1.5 py-0.5 text-[8px] font-bold", confidence >= 50 ? "bg-cyan-500/15 text-cyan-300" : "bg-yellow-500/15 text-yellow-400")}>
+                {confidence >= 50 ? "AKTİV PROQNOZ" : "ŞƏRTİ PROQNOZ"}
+              </span>
+            </div>
+            {norm.scenarios.main && (
+              <div className="mb-1 rounded border border-cyan-500/20 bg-cyan-500/5 px-2 py-1">
+                <div className="flex items-center justify-between text-[9px]">
+                  <span className="flex items-center gap-1.5 font-semibold text-cyan-300"><span className="h-0.5 w-5 bg-cyan-400" />Əsas: {s(norm.scenarios.main.direction)}</span>
+                  <span className="font-mono text-cyan-200">{n(norm.scenarios.main.probability)}%</span>
+                </div>
+                {mainActivation && <div className="mt-0.5 truncate text-[7px] text-gray-500">Aktivasiya: {mainActivation}</div>}
+              </div>
+            )}
+            {altSc && (
+              <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1">
+                <div className="flex items-center justify-between text-[9px]">
+                  <span className="flex items-center gap-1.5 font-semibold text-amber-300"><span className="h-0.5 w-5 border-t border-dashed border-amber-400" />Alternativ: {altDir}</span>
+                  <span className="font-mono text-amber-200">{altProb}%</span>
+                </div>
+                {altActivation && <div className="mt-0.5 truncate text-[7px] text-gray-500">Aktivasiya: {altActivation}</div>}
+              </div>
+            )}
+            <div className="mt-1 text-[7px] text-gray-600">Mavi nazik xətlər kanal sərhədləridir; cyan/narıncı yollar şərti qiymət ssenariləridir.</div>
           </div>
         )}
       </div>
@@ -525,10 +582,8 @@ function drawSRZones(
 ) {
   const alpha = Math.max(0.08, 0.08 + confidence / 300)
   const zoneH = Math.max(8, (data[data.length - 1]?.high || 160) * 0.005)
-  const srLog: { label: string; price: number; y: number; inView: boolean }[] = []
   for (const res of norm.resistances.slice(0, 2)) {
     const y = toY(res.price); const inView = y > 0 && y < 1e6 && y < 10000
-    srLog.push({ label: "MÜQ", price: res.price, y, inView })
     if (!inView) continue
     ctx.save()
     ctx.fillStyle = `rgba(242,54,69,${alpha * 0.5})`; ctx.fillRect(0, y - zoneH / 2, w, zoneH)
@@ -540,7 +595,6 @@ function drawSRZones(
   }
   for (const sup of norm.supports.slice(0, 2)) {
     const y = toY(sup.price); const inView = y > 0 && y < 1e6 && y < 10000
-    srLog.push({ label: "DƏS", price: sup.price, y, inView })
     if (!inView) continue
     ctx.save()
     ctx.fillStyle = `rgba(8,153,129,${alpha * 0.5})`; ctx.fillRect(0, y - zoneH / 2, w, zoneH)
@@ -550,7 +604,6 @@ function drawSRZones(
     ctx.fillText(`DƏSTƏK $${sup.price.toFixed(2)}`, w - 100, Math.max(10, y - 3))
     ctx.restore()
   }
-  console.log("[SKHY] SR_ZONES", srLog)
 }
 
 function drawChannelEnhanced(
@@ -580,10 +633,9 @@ function drawChannelEnhanced(
     if (pts.length < 2) return
     const extPts = extendPts(pts)
     ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.setLineDash(dash)
-    ctx.beginPath(); let started = false; const coordLog: { t: number; v: number; x: number; y: number }[] = []
+    ctx.beginPath(); let started = false
     for (const p of extPts) {
       const x = toX(p.time); const y = toY(p.value)
-      coordLog.push({ t: p.time, v: p.value, x, y })
       if (x <= 0 || y <= 0 || !Number.isFinite(x) || !Number.isFinite(y)) continue
       if (!started) { ctx.moveTo(x, y); started = true } else ctx.lineTo(x, y)
     }
@@ -604,12 +656,6 @@ function drawChannelEnhanced(
       ctx.beginPath(); ctx.moveTo(0, ym); ctx.lineTo(w, ym); ctx.stroke(); ctx.setLineDash([]); ctx.restore()
     }
   }
-  // Log channel points
-  console.log("[SKHY] CHANNEL_POINTS", {
-    upper: ch.upper.map(p => ({ t: p.time, v: p.value, x: toX(p.time), y: toY(p.value) })),
-    lower: ch.lower.map(p => ({ t: p.time, v: p.value, x: toX(p.time), y: toY(p.value) })),
-    mid: ch.mid.map(p => ({ t: p.time, v: p.value, x: toX(p.time), y: toY(p.value) })),
-  })
 }
 
 function drawFibEnhanced(
@@ -657,8 +703,6 @@ function drawFibEnhanced(
     ctx.fillText(`${dir === "up" ? "↑" : "↓"} Fib ${(Number(f.ratio) * 100).toFixed(0)}%`, w - 4, dir === "up" ? 14 : h - 6)
     ctx.textAlign = "left"; ctx.restore()
   }
-
-  console.log("[SKHY] FIB_LEVELS", fibLog)
 
   // Extensions at any confidence
   const allExt = { ...norm.fibonacci.extensions_up, ...norm.fibonacci.extensions_down }
@@ -1068,7 +1112,6 @@ function drawScenarioBlocks(
   // Alternative scenario block (right)
   if (alt) {
     const bx = pad + bw + gap
-    const isLong = altDir.includes("ALIŞ") || altDir.includes("LONG") || altDir.includes("UP")
     ctx.save()
     ctx.fillStyle = "rgba(11,17,23,0.85)"; ctx.strokeStyle = "rgba(107,114,128,0.4)"; ctx.lineWidth = 0.5
     ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3); ctx.fill(); ctx.stroke()
@@ -1079,47 +1122,6 @@ function drawScenarioBlocks(
     if (altTrigger) ctx.fillText(`Trigger: ${altTrigger.slice(0, 18)}`, bx + 4, by + 24)
     ctx.restore()
   }
-}
-
-function drawLegend(
-  ctx: CanvasRenderingContext2D, w: number, h: number,
-  ov: Record<string, boolean>, norm: NormalizedAnalysis, confidence: number,
-) {
-  const items: { label: string; color: string; active: boolean }[] = [
-    { label: "SR", color: confidence >= 70 ? TV_GREEN : TV_RED, active: ov.structure },
-    { label: "CH", color: COL_PURPLE, active: ov.channel },
-    { label: "BO", color: COL_PURPLE, active: ov.breakout },
-    { label: "FB", color: COL_ORANGE, active: ov.fibonacci },
-    { label: "PT", color: COL_ORANGE, active: ov.patterns },
-    { label: "TR", color: TV_GREEN, active: ov.triggers },
-    { label: "SC", color: TV_GREEN, active: ov.mainScenario },
-    { label: "MC", color: COL_PURPLE, active: ov.smc },
-    { label: "EW", color: COL_PURPLE, active: ov.elliott },
-  ]
-  const active = items.filter(i => i.active)
-  if (active.length === 0) return
-
-  const lh = 9; const pd = 3; const cols = 3
-  const rows = Math.ceil(active.length / cols)
-  const boxW = 116; const boxH = rows * lh + pd * 2 + 10
-  const bx = Math.max(2, w - boxW - 4); const by = Math.max(2, h - boxH - 4)
-
-  ctx.save(); ctx.globalAlpha = 0.75
-  ctx.fillStyle = "rgba(11,17,23,0.85)"; ctx.strokeStyle = "rgba(55,65,81,0.4)"; ctx.lineWidth = 0.5
-  ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 3); ctx.fill(); ctx.stroke()
-
-  for (let i = 0; i < active.length; i++) {
-    const col = i % cols; const row = Math.floor(i / cols)
-    const ix = bx + pd + col * (boxW / cols); const iy = by + pd + row * lh + 7
-    ctx.fillStyle = active[i].color; ctx.fillRect(ix, iy - 3, 4, 4)
-    ctx.fillStyle = "rgba(156,163,175,0.8)"; ctx.font = "6px monospace"
-    ctx.fillText(active[i].label, ix + 6, iy)
-  }
-
-  const extra = `İnam:${confidence}% ${norm.status}${norm.strongestPattern ? ` ${s(norm.strongestPattern.name)}` : ""}`
-  ctx.fillStyle = "rgba(156,163,175,0.5)"; ctx.font = "6px monospace"
-  ctx.fillText(extra, bx + pd, by + boxH - 6)
-  ctx.restore()
 }
 
 function drawInv(ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number, invalLevel: number, w: number, lx: number, cw: number) {
@@ -1230,17 +1232,15 @@ function buildHover(
 function drawTriggersPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">,
-): { dataCount: number; drawnCount: number } {
-  let dc = 0; let vc = 0
-  const log: { label: string; price: number; y: unknown; finite: boolean; inCanvas: boolean; stroked: boolean }[] = []
-
+): PrimitiveCount {
+  let dc = 0; let vc = 0; let ec = 0
   const drawOne = (label: string, price: number, color: string, badgeColor: string) => {
     if (price <= 0) return
     dc++
     const y = cs.priceToCoordinate(price)
     const finite = y != null && Number.isFinite(y)
     const inCanvas = finite && (y as number) > 0 && (y as number) < h
-    let stroked = false
+    if (finite && !inCanvas) ec++
     if (finite && inCanvas) {
       ctx.save()
       ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash([8, 5])
@@ -1253,59 +1253,51 @@ function drawTriggersPrimitive(
       ctx.fillText(`${label} $${price.toFixed(2)}`, w - 4, (y as number) - 5)
       ctx.textAlign = "left"
       ctx.restore()
-      stroked = true; vc++
+      vc++
     }
-    log.push({ label, price, y, finite, inCanvas, stroked })
   }
 
   drawOne("LONG", norm.longTrigger, "rgba(34,197,94,1)", "rgba(34,197,94,1)")
   drawOne("SHORT", norm.shortTrigger, "rgba(239,68,68,1)", "rgba(239,68,68,1)")
-  console.log("[SKHY] TRIGGER_DRAW", log)
-  return { dataCount: dc, drawnCount: vc }
+  return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
 function drawBreakoutPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">, confidence: number,
-): { dataCount: number; drawnCount: number } {
+): PrimitiveCount {
   const top = norm.breakout.top; const bot = norm.breakout.bottom
-  if (top <= 0 || bot <= 0) return { dataCount: 0, drawnCount: 0 }
+  if (top <= 0 || bot <= 0) return { dataCount: 0, visibleCount: 0, edgeCount: 0 }
   const topY = cs.priceToCoordinate(top); const botY = cs.priceToCoordinate(bot)
-  const log = { top, bot, topY, botY, topFinite: false, botFinite: false, filled: false, bordersStroked: false }
   if (topY == null || botY == null || !Number.isFinite(topY) || !Number.isFinite(botY)) {
-    console.log("[SKHY] BREAKOUT_SKIP", log); return { dataCount: 1, drawnCount: 0 }
+    return { dataCount: 1, visibleCount: 0, edgeCount: 1 }
   }
-  log.topFinite = true; log.botFinite = true
   const yMin = Math.min(topY, botY); const yMax = Math.max(topY, botY)
   const clipTop = Math.max(0, yMin); const clipBot = Math.min(h, yMax)
-  if (clipBot <= clipTop) { console.log("[SKHY] BREAKOUT_SKIP_CLIP", log); return { dataCount: 1, drawnCount: 0 } }
+  if (clipBot <= clipTop) return { dataCount: 1, visibleCount: 0, edgeCount: 1 }
 
   ctx.save()
   // High-alpha diagnostic fill
   ctx.fillStyle = "rgba(168,85,247,0.18)"
   ctx.fillRect(0, clipTop, w, clipBot - clipTop)
-  log.filled = true
 
   // High-visibility borders
   ctx.strokeStyle = "rgba(168,85,247,1)"; ctx.lineWidth = 2
   ctx.beginPath(); ctx.moveTo(0, yMin); ctx.lineTo(w, yMin); ctx.stroke()
   ctx.beginPath(); ctx.moveTo(0, yMax); ctx.lineTo(w, yMax); ctx.stroke()
-  log.bordersStroked = true
 
   // Label
   ctx.font = "bold 8px monospace"; ctx.fillStyle = "rgba(168,85,247,1)"
   ctx.fillText(`BREAKOUT $${bot.toFixed(2)}–$${top.toFixed(2)}`, Math.max(4, w - 180), Math.max(14, clipTop - 6))
   ctx.restore()
-  console.log("[SKHY] BREAKOUT_DRAW", log)
-  return { dataCount: 1, drawnCount: 1 }
+  return { dataCount: 1, visibleCount: 1, edgeCount: yMin < 0 || yMax > h ? 1 : 0 }
 }
 
 function drawSRPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">, confidence: number,
-): { dataCount: number; drawnCount: number } {
-  let dc = 0; let vc = 0
-  const log: { type: string; price: number; y: unknown; finite: boolean; inCanvas: boolean; stroked: boolean }[] = []
+): PrimitiveCount {
+  let dc = 0; let vc = 0; let ec = 0
   const items = [
     ...norm.resistances.slice(0, 2).map(r => ({ type: "RES" as const, price: r.price, color: "rgba(239,68,68,0.8)" as const })),
     ...norm.supports.slice(0, 2).map(s => ({ type: "SUP" as const, price: s.price, color: "rgba(34,197,94,0.8)" as const })),
@@ -1316,7 +1308,7 @@ function drawSRPrimitive(
     const y = cs.priceToCoordinate(item.price)
     const finite = y != null && Number.isFinite(y)
     const inCanvas = finite && (y as number) > 0 && (y as number) < h
-    let stroked = false
+    if (finite && !inCanvas) ec++
     if (finite && inCanvas) {
       ctx.save()
       ctx.strokeStyle = item.color; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4])
@@ -1326,45 +1318,42 @@ function drawSRPrimitive(
       ctx.font = "bold 7px monospace"; ctx.fillStyle = item.color
       ctx.fillText(`${item.type === "RES" ? "MÜQAVİMƏT" : "DƏSTƏK"} $${item.price.toFixed(2)}`, w - 120, (y as number) - 4)
       ctx.restore()
-      stroked = true; vc++
+      vc++
     }
-    log.push({ type: item.type, price: item.price, y, finite, inCanvas, stroked })
   }
-  console.log("[SKHY] SR_DRAW", log)
-  return { dataCount: dc, drawnCount: vc }
+  return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
 function drawChannelPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   toX: (t: number) => number, toY: (p: number) => number,
   norm: NormalizedAnalysis, confidence: number, data: Candle[], lx: number,
-): { dataCount: number; drawnCount: number } {
+): PrimitiveCount {
   const ch = norm.channel
   const lines: { key: string; pts: { time: number; value: number }[] }[] = [
     { key: "upper", pts: ch.upper }, { key: "lower", pts: ch.lower }, { key: "mid", pts: ch.mid },
   ]
-  let dc = 0; let vc = 0
-  const log: { key: string; pts: { t: number; v: number; x: unknown; y: unknown; finX: boolean; finY: boolean; inCanvas: boolean }[] }[] = []
-
+  let dc = 0; let vc = 0; let ec = 0
   for (const line of lines) {
     if (line.pts.length < 2) continue
     dc++
-    const ptsLog: { t: number; v: number; x: unknown; y: unknown; finX: boolean; finY: boolean; inCanvas: boolean }[] = []
     ctx.save()
     const isMid = line.key === "mid"
-    ctx.strokeStyle = isMid ? "rgba(255,255,255,0.7)" : "rgba(34,211,238,0.8)"
-    ctx.lineWidth = isMid ? 2 : 3
+    ctx.strokeStyle = isMid ? "rgba(148,163,184,0.35)" : "rgba(96,165,250,0.45)"
+    ctx.lineWidth = isMid ? 1 : 1.4
     if (isMid) ctx.setLineDash([6, 4])
     ctx.beginPath()
     let started = false; let hasAny = false
     for (const p of line.pts) {
       const x = toX(p.time); const y = toY(p.value)
-      const finX = Number.isFinite(x) && x > 0
+      const finX = Number.isFinite(x)
       const finY = Number.isFinite(y) && y > 0
-      const inCanvas = finX && finY && y < h
-      ptsLog.push({ t: p.time, v: p.value, x, y, finX, finY, inCanvas })
-      if (!inCanvas) continue
-      if (!started) { ctx.moveTo(x, y); started = true } else ctx.lineTo(x, y)
+      const inCanvas = finX && finY && x >= 0 && x <= w && y < h
+      if (!finX || !finY) continue
+      const clippedX = Math.max(0, Math.min(w, x))
+      const clippedY = Math.max(0, Math.min(h, y))
+      if (!inCanvas) ec++
+      if (!started) { ctx.moveTo(clippedX, clippedY); started = true } else ctx.lineTo(clippedX, clippedY)
       hasAny = true
     }
     // Extend to right edge via last valid point
@@ -1380,22 +1369,18 @@ function drawChannelPrimitive(
     }
     if (hasAny) { ctx.stroke(); vc++ }
     ctx.setLineDash([]); ctx.restore()
-    log.push({ key: line.key, pts: ptsLog })
   }
-  console.log("[SKHY] CHANNEL_DRAW", log)
-  return { dataCount: dc, drawnCount: vc }
+  return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
 function drawFibPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">, confidence: number,
-): { dataCount: number; drawnCount: number } {
+): PrimitiveCount {
   const levels = norm.fibonacci.levels
   const keys = Object.keys(levels).sort((a, b) => Number(a) - Number(b))
-  if (keys.length === 0) return { dataCount: 0, drawnCount: 0 }
-  let dc = 0; let vc = 0
-  const log: { ratio: string; price: number; y: unknown; finite: boolean; inCanvas: boolean; stroked: boolean }[] = []
-
+  if (keys.length === 0) return { dataCount: 0, visibleCount: 0, edgeCount: 0 }
+  let dc = 0; let vc = 0; let ec = 0
   // Golden zone
   const g618 = levels["0.618"]; const g786 = levels["0.786"]
   if (g618 > 0 && g786 > 0) {
@@ -1417,7 +1402,7 @@ function drawFibPrimitive(
     const pct = (Number(key) * 100).toFixed(1)
     const finite = y != null && Number.isFinite(y)
     const inCanvas = finite && (y as number) > 0 && (y as number) < h
-    let stroked = false
+    if (finite && !inCanvas) ec++
     if (finite && inCanvas) {
       ctx.save()
       ctx.strokeStyle = "rgba(245,158,11,0.65)"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 4])
@@ -1426,18 +1411,16 @@ function drawFibPrimitive(
       ctx.font = "bold 7px monospace"; ctx.fillStyle = "rgba(245,158,11,0.9)"
       ctx.fillText(`Fib ${pct}% $${price.toFixed(2)}`, w - 120, Math.max(12, (y as number) - 3))
       ctx.restore()
-      stroked = true; vc++
+      vc++
     }
-    log.push({ ratio: key, price, y, finite, inCanvas, stroked })
   }
-  console.log("[SKHY] FIB_DRAW", log)
-  return { dataCount: dc, drawnCount: vc }
+  return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
 function drawSMCPrimitive(
-  ctx: CanvasRenderingContext2D, w: number,
+  ctx: CanvasRenderingContext2D, w: number, h: number,
   norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">, confidence: number,
-): { dataCount: number; drawnCount: number } {
+): PrimitiveCount {
   // Count all available SMC structures regardless of drawing
   const allItems = [
     ...norm.smc.near_ob.map(s2 => ({ cat: "OB", price: n(s2.price) })),
@@ -1448,11 +1431,12 @@ function drawSMCPrimitive(
     ...norm.smc.near_eq.map(s2 => ({ cat: "EQ", price: n(s2.price) })),
   ]
   let dc = allItems.length
-  let vc = 0
+  let vc = 0; let ec = 0
   for (const item of allItems) {
     if (item.price <= 0) continue
     const y = cs.priceToCoordinate(item.price)
-    if (y == null || !Number.isFinite(y) || y <= 0 || y >= 10000) continue
+    if (y == null || !Number.isFinite(y)) continue
+    if (y <= 0 || y >= h) { ec++; continue }
     ctx.save()
     ctx.strokeStyle = "rgba(168,85,247,0.6)"; ctx.lineWidth = 0.8; ctx.setLineDash([3, 3])
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.setLineDash([])
@@ -1461,16 +1445,16 @@ function drawSMCPrimitive(
     ctx.restore()
     vc++
   }
-  return { dataCount: Math.max(dc, 1), drawnCount: vc }
+  return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
 function drawPatternPrimitive(
   ctx: CanvasRenderingContext2D, toX: (t: number) => number, toY: (p: number) => number,
   norm: NormalizedAnalysis, data: Candle[], w: number, confidence: number, lx: number, candleW: number,
-): { dataCount: number; drawnCount: number } {
+): PrimitiveCount {
   const pat = norm.strongestPattern
-  if (!pat) return { dataCount: 0, drawnCount: 0 }
-  const prob = n(pat.probability); if (prob < 50) return { dataCount: 1, drawnCount: 0 }
+  if (!pat) return { dataCount: 0, visibleCount: 0, edgeCount: 0 }
+  const prob = n(pat.probability); if (prob < 50) return { dataCount: 1, visibleCount: 0, edgeCount: 0 }
   const name = s(pat.name); const bLv = n(pat.breakout_level) || n(pat.breakdown_level)
   const mTgt = n(pat.measured_target); const confirmed = s(pat.status) === "CONFIRMED"
   const lclr = confirmed ? "rgba(34,197,94,0.9)" : "rgba(245,158,11,0.8)"
@@ -1478,7 +1462,7 @@ function drawPatternPrimitive(
   ctx.save(); ctx.font = "bold 7px monospace"; ctx.fillStyle = lclr; ctx.textAlign = "right"
   ctx.fillText(`${confirmed ? "✓" : "?"} ${name} ${prob}%`, w - 4, 12)
   ctx.textAlign = "left"; ctx.restore()
-  return { dataCount: 1, drawnCount: 1 }
+  return { dataCount: 1, visibleCount: 1, edgeCount: 0 }
 }
 
 function drawFPPrimitive(
@@ -1487,27 +1471,118 @@ function drawFPPrimitive(
   sp: Record<string, unknown> | undefined, cb: Record<string, unknown> | undefined,
   confidence: number, data: Candle[], lx: number, lp: number, candleW: number,
   fX: (off: number) => number, ov: Record<string, boolean>,
-): { dataCount: number; drawnCount: number } {
-  if (!sp || data.length === 0) return { dataCount: 0, drawnCount: 0 }
-  // Draw a simple arrow if scenario has direction
-  const main = (sp.main_scenario || sp.main || {}) as Record<string, unknown>
-  const dir = s(main.direction_az || main.direction || "")
-  const prob = n(main.probability) || 50
-  if (!dir && !sp.path_points) return { dataCount: 1, drawnCount: 0 }
-  const isLong = dir.includes("ALIŞ") || dir.includes("LONG") || dir.includes("UP")
-  const fAlpha = Math.max(0.35, 0.5 * (confidence / 50))
-  ctx.save(); ctx.globalAlpha = fAlpha
-  if (lx > 0) {
-    const futureX = lx + candleW * 5; const futureY = toY(isLong ? lp * 1.02 : lp * 0.98)
-    if (Number.isFinite(futureX) && futureX > 0 && Number.isFinite(futureY) && futureY > 0) {
-      ctx.strokeStyle = isLong ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4])
-      ctx.beginPath(); ctx.moveTo(lx + candleW * 2, toY(lp)); ctx.lineTo(futureX, futureY); ctx.stroke(); ctx.setLineDash([])
-      ctx.font = "7px monospace"; ctx.fillStyle = isLong ? "rgba(34,197,94,0.8)" : "rgba(239,68,68,0.8)"
-      ctx.fillText(`${dir} ${prob}%`, lx + candleW * 2, Math.min(toY(lp), futureY) - 6)
+): PrimitiveCount {
+  if (!sp || data.length === 0) return { dataCount: 0, visibleCount: 0, edgeCount: 0 }
+  type ScenarioStyle = { key: string; enabled: boolean; color: string; dash: number[]; width: number }
+  const styles: ScenarioStyle[] = [
+    { key: "main_scenario", enabled: ov.mainScenario !== false, color: "rgba(34,211,238,0.95)", dash: confidence >= 50 ? [] : [8, 5], width: 2.4 },
+    { key: "alternative_scenario", enabled: !!ov.altScenario, color: "rgba(245,158,11,0.85)", dash: [6, 4], width: 1.5 },
+    { key: "fakeout_scenario", enabled: !!ov.fakeout, color: "rgba(168,85,247,0.8)", dash: [2, 5], width: 1.2 },
+  ]
+  const getScenario = (key: string): Record<string, unknown> => {
+    if (key === "main_scenario") return (sp.main_scenario || sp.main || sp) as Record<string, unknown>
+    if (key === "alternative_scenario") return (sp.alternative_scenario || sp.alternative || {}) as Record<string, unknown>
+    return (sp.fakeout_scenario || sp.fakeout || sp.risk_fakeout_scenario || {}) as Record<string, unknown>
+  }
+
+  const main = getScenario("main_scenario")
+  const mainPoints = Array.isArray(main.path_points) ? main.path_points as PathPoint[] : []
+  const allOffsets = styles.flatMap(style => {
+    const scenario = getScenario(style.key)
+    return Array.isArray(scenario.path_points)
+      ? (scenario.path_points as PathPoint[]).map(point => point.time_offset)
+      : []
+  })
+  const maxOffset = Math.max(1, ...allOffsets)
+  const futureStartX = Math.min(w - 20, lx + Math.max(8, candleW * 1.5))
+  const futureEndX = Math.min(w - 12, Math.max(futureStartX + 180, lx + candleW * Math.min(42, maxOffset * 2)))
+  const projectX = (offset: number) => futureStartX + (futureEndX - futureStartX) * (offset / maxOffset)
+  let dataCount = 0
+  let visibleCount = 0
+  let edgeCount = 0
+
+  if (ov.cone && mainPoints.length >= 2) {
+    const upper: { x: number; y: number }[] = []
+    const lower: { x: number; y: number }[] = []
+    for (const point of mainPoints) {
+      const probability = Math.max(5, Math.min(100, n(point.probability) || 50))
+      const uncertaintyPct = (1 - probability / 100) * 0.025 * Math.sqrt(Math.max(1, point.time_offset))
+      const x = projectX(point.time_offset)
+      const upperY = toY(point.price * (1 + uncertaintyPct))
+      const lowerY = toY(point.price * (1 - uncertaintyPct))
+      if ([x, upperY, lowerY].every(Number.isFinite)) {
+        upper.push({ x: Math.max(lx, Math.min(w, x)), y: Math.max(0, Math.min(h, upperY)) })
+        lower.push({ x: Math.max(lx, Math.min(w, x)), y: Math.max(0, Math.min(h, lowerY)) })
+      }
+    }
+    if (upper.length >= 2 && lower.length >= 2) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.moveTo(upper[0].x, upper[0].y)
+      for (let i = 1; i < upper.length; i++) ctx.lineTo(upper[i].x, upper[i].y)
+      for (let i = lower.length - 1; i >= 0; i--) ctx.lineTo(lower[i].x, lower[i].y)
+      ctx.closePath()
+      const gradient = ctx.createLinearGradient(futureStartX, 0, futureEndX, 0)
+      gradient.addColorStop(0, "rgba(34,211,238,0.03)")
+      gradient.addColorStop(1, "rgba(34,211,238,0.16)")
+      ctx.fillStyle = gradient
+      ctx.fill()
+      ctx.restore()
     }
   }
-  ctx.restore()
-  return { dataCount: 1, drawnCount: 1 }
+
+  for (const style of styles) {
+    if (!style.enabled) continue
+    const scenario = getScenario(style.key)
+    const points = Array.isArray(scenario.path_points) ? scenario.path_points as PathPoint[] : []
+    if (points.length < 2) continue
+    dataCount += points.length - 1
+    const coordinates = points.map(point => ({ ...point, x: projectX(point.time_offset), y: toY(point.price) }))
+      .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+    if (coordinates.length < 2) continue
+
+    ctx.save()
+    ctx.strokeStyle = style.color
+    ctx.fillStyle = style.color
+    ctx.lineWidth = style.width
+    ctx.setLineDash(style.dash)
+    ctx.beginPath()
+    ctx.moveTo(Math.max(lx, coordinates[0].x), Math.max(0, Math.min(h, coordinates[0].y)))
+    for (let i = 1; i < coordinates.length; i++) {
+      const point = coordinates[i]
+      const inCanvas = point.x >= lx && point.x <= w && point.y >= 0 && point.y <= h
+      if (inCanvas) visibleCount++
+      else edgeCount++
+      ctx.lineTo(Math.max(lx, Math.min(w, point.x)), Math.max(0, Math.min(h, point.y)))
+    }
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    for (let i = 1; i < coordinates.length; i++) {
+      const point = coordinates[i]
+      if (point.x < lx || point.x > w || point.y < 0 || point.y > h) continue
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, point.phase.startsWith("tp") ? 3.5 : 2.5, 0, Math.PI * 2)
+      ctx.fill()
+      if (style.key === "main_scenario" && ["trigger", "retest", "tp1", "tp2", "extension"].includes(point.phase)) {
+        ctx.font = "bold 7px monospace"
+        ctx.textAlign = "center"
+        ctx.fillText(`${point.label} $${point.price.toFixed(2)}`, point.x, Math.max(12, point.y - 7))
+      }
+    }
+
+    const last = coordinates[coordinates.length - 1]
+    if (last.x >= lx && last.x <= w && last.y >= 0 && last.y <= h) {
+      ctx.font = "bold 8px monospace"
+      ctx.textAlign = "right"
+      const conditional = confidence < 50 && style.key === "main_scenario" ? "ŞƏRTİ " : ""
+      ctx.fillText(`${conditional}${s(scenario.direction)} ${n(scenario.probability)}% · İnam ${confidence}%`, Math.min(w - 4, last.x), Math.max(12, last.y - 10))
+    }
+    ctx.textAlign = "left"
+    ctx.restore()
+  }
+
+  return { dataCount, visibleCount, edgeCount }
 }
 
 function drawVolProf(ctx: CanvasRenderingContext2D, _toX: (t: number) => number, toY: (p: number) => number, ohlcv: Candle[], w: number, h: number, ov: Record<string, boolean>) {

@@ -51,9 +51,10 @@ class SkhyMarketData:
         cached = await cache_get(cache_key)
         if cached:
             return cached
-        ticker, funding, oi, ls_ratio, trades, ob = await asyncio.gather(
+        ticker, funding, oi, ls_ratio, taker_ratio, trades, ob = await asyncio.gather(
             self.get_ticker(), self.get_funding(), self.get_open_interest(),
-            self.get_long_short_ratio(), self.get_recent_trades(), self.get_orderbook(),
+            self.get_long_short_ratio(), self.get_taker_buy_sell_ratio(),
+            self.get_recent_trades(), self.get_orderbook(),
             return_exceptions=True,
         )
         result = {
@@ -61,10 +62,11 @@ class SkhyMarketData:
             "funding": funding if not isinstance(funding, Exception) else {},
             "open_interest": oi if not isinstance(oi, Exception) else {},
             "long_short_ratio": ls_ratio if not isinstance(ls_ratio, Exception) else {},
+            "taker_buy_sell_ratio": taker_ratio if not isinstance(taker_ratio, Exception) else {},
             "trades": (trades if not isinstance(trades, Exception) else [])[:50],
             "orderbook": ob if not isinstance(ob, Exception) else {},
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "data_freshness": "live" if not any(isinstance(e, Exception) for e in [ticker, funding, oi, ls_ratio, trades, ob]) else "partial",
+            "data_freshness": "live" if not any(isinstance(e, Exception) for e in [ticker, funding, oi, ls_ratio, taker_ratio, trades, ob]) else "partial",
         }
         await cache_set(cache_key, result, ttl=3)
         return result

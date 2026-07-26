@@ -956,6 +956,17 @@ class SkhyAnalysisEngine:
         st_price = triggers.get("short_trigger_price",0)
         inval_bull = triggers.get("bullish_invalidation",0)
         inval_bear = triggers.get("bearish_invalidation",0)
+        active_tf_analysis = next(iter(tf_analysis.values()), {})
+        volatility = float(active_tf_analysis.get("volatility", 0.015) or 0.015)
+        volatility = min(max(volatility, 0.008), 0.035)
+        projected_move = price * volatility
+        max_projection_distance = price * 0.15
+
+        def bounded_projection(value):
+            return round(
+                min(max(value, price - max_projection_distance), price + max_projection_distance),
+                2,
+            )
 
         fib_1_272_up = fib_up.get("1.272", price*1.02) if (isinstance(fib_up, dict) and "1.272" in fib_up) else price*1.02
         fib_1_618_up = fib_up.get("1.618", price*1.04) if (isinstance(fib_up, dict) and "1.618" in fib_up) else price*1.04
@@ -967,13 +978,13 @@ class SkhyAnalysisEngine:
         def path_points(start_price, direction):
             pts = [{"time_offset": 0, "price": start_price, "label": "Başlanğıc", "phase": "start", "probability": 100, "reason": "Cari qiymət"}]
             if direction == "up":
-                b = round(lt_price or start_price*1.01, 2)
-                r = round(start_price*0.99, 2)
-                i1 = round(fib_1_272_up, 2)
-                pb = round((i1 + fib_1_272_up * 0.5) / 2, 2)
-                t1 = round(fib_1_618_up, 2)
-                t2 = round(fib_2_618_up, 2)
-                ext = round(fib_2_618_up*1.05, 2)
+                b = bounded_projection(max(lt_price or start_price * 1.01, start_price + projected_move * 0.35))
+                r = bounded_projection(max(start_price, b - projected_move * 0.45))
+                i1 = bounded_projection(b + projected_move * 1.25)
+                pb = bounded_projection(i1 - projected_move * 0.55)
+                t1 = bounded_projection(b + projected_move * 2.0)
+                t2 = bounded_projection(b + projected_move * 3.25)
+                ext = bounded_projection(b + projected_move * 4.5)
                 pts.append({"time_offset": 1, "price": b, "label": "Trigger/Breakout", "phase": "trigger", "probability": 75, "reason": f"Qiymət ${b} üzərində bağlanarsa"})
                 pts.append({"time_offset": 2, "price": round((b+r)/2, 2), "label": "Retest", "phase": "retest", "probability": 68, "reason": "Breakout sonrası geri dönüş testi"})
                 pts.append({"time_offset": 3, "price": i1, "label": "İlk impuls", "phase": "impulse", "probability": 60, "reason": "Yüksələn impuls 1.272 Fib"})
@@ -983,13 +994,13 @@ class SkhyAnalysisEngine:
                 pts.append({"time_offset": 9, "price": t2, "label": "TP2", "phase": "tp2", "probability": 30, "reason": "İkinci mənfəət hədəfi Fib 2.618"})
                 pts.append({"time_offset": 14, "price": ext, "label": "Uzadılma", "phase": "extension", "probability": 20, "reason": "Maksimum uzadılma hədəfi"})
             else:
-                b = round(st_price or start_price*0.99, 2)
-                r = round(start_price*1.01, 2)
-                i1 = round(fib_1_272_dn, 2)
-                pb = round((i1 + fib_1_272_dn * 0.5) / 2, 2)
-                t1 = round(fib_1_618_dn, 2)
-                t2 = round(fib_2_618_dn, 2)
-                ext = round(fib_2_618_dn*0.95, 2)
+                b = bounded_projection(min(st_price or start_price * 0.99, start_price - projected_move * 0.35))
+                r = bounded_projection(min(start_price, b + projected_move * 0.45))
+                i1 = bounded_projection(b - projected_move * 1.25)
+                pb = bounded_projection(i1 + projected_move * 0.55)
+                t1 = bounded_projection(b - projected_move * 2.0)
+                t2 = bounded_projection(b - projected_move * 3.25)
+                ext = bounded_projection(b - projected_move * 4.5)
                 pts.append({"time_offset": 1, "price": b, "label": "Trigger/Breakdown", "phase": "trigger", "probability": 75, "reason": f"Qiymət ${b} altında bağlanarsa"})
                 pts.append({"time_offset": 2, "price": round((b+r)/2, 2), "label": "Retest", "phase": "retest", "probability": 68, "reason": "Breakdown sonrası geri dönüş testi"})
                 pts.append({"time_offset": 3, "price": i1, "label": "İlk impuls", "phase": "impulse", "probability": 60, "reason": "Enən impuls 1.272 Fib"})

@@ -45,6 +45,3 @@ nginx/letsencrypt/
 coverage.xml
 .pytest_cache/
 htmlcov/
-
-# Config
-backend/alembic.ini

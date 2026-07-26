@@ -118,9 +118,12 @@ export default function SkhyTerminalPage() {
   }
 
   function safeSetScenarios(payload: Record<string, unknown> | null, tf: string) {
-    if (payload && payload.scenarios) {
-      lastValidScenariosRef.current = payload
-      setScenarios(payload)
+    const scenarioPayload = payload?.scenarios && typeof payload.scenarios === "object"
+      ? payload.scenarios as Record<string, unknown>
+      : payload
+    if (scenarioPayload?.main_scenario) {
+      lastValidScenariosRef.current = scenarioPayload
+      setScenarios(scenarioPayload)
       setScenarioError(null)
       logDebug("SCENARIOS_ACCEPTED", { tf })
     } else if (lastValidScenariosRef.current) {
@@ -169,7 +172,8 @@ export default function SkhyTerminalPage() {
   useEffect(() => {
     wsCleanupRef.current?.()
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/skhy/stream?timeframe=${timeframe}`
+    const wsBase = (process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${window.location.hostname}:8000`).replace(/\/$/, "")
+    const wsUrl = `${wsBase}/api/v1/skhy/stream?timeframe=${timeframe}`
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
     let pingInterval: ReturnType<typeof setInterval>

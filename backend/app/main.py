@@ -28,6 +28,7 @@ from app.services.market_coverage import market_coverage
 from app.services.streaming import streaming_service
 from app.services.exchange.manager import exchange_manager
 from app.services.paper_trading import paper_trading_service
+from app.services.skhy_market_data import skhy_market_data
 
 
 @asynccontextmanager
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
         await paper_trading_service.stop_monitoring()
         await binance_ws.stop()
     await exchange_manager.shutdown()
+    await skhy_market_data.close()
     await ws_manager.stop()
     logger.info("Server shutting down")
 
