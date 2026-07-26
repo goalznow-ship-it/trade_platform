@@ -1046,8 +1046,15 @@ class SkhyAnalysisEngine:
         h4_sig = tf_analysis.get("4h",{}).get("signal","WAIT")
         h1_sig = tf_analysis.get("1h",{}).get("signal","WAIT")
 
-        main_activation = f"{main_label} trigger: ${lt_price if main_dir=='up' else st_price} üzərində/qırılır + həcm təsdiqi"
-        alt_activation = f"{alt_label} trigger: ${st_price if alt_dir=='down' else lt_price} altında/qırılır + həcm təsdiqi"
+        def activation_text(label, direction, path):
+            trigger_price = lt_price if direction == "up" else st_price
+            if trigger_price <= 0 and len(path) > 1:
+                trigger_price = float(path[1].get("price", 0) or 0)
+            relation = "üzərində bağlanış" if direction == "up" else "altında bağlanış"
+            return f"{label} trigger: ${trigger_price:.2f} {relation} + həcm təsdiqi"
+
+        main_activation = activation_text(main_label, main_dir, main_path)
+        alt_activation = activation_text(alt_label, alt_dir, alt_path)
 
         main_reasons = [
             f"{'4H' if h4_sig else 'H4'} siqnalı {main_label} istiqamətində" if h4_sig in ("LONG","STRONG_LONG","SHORT","STRONG_SHORT") else "Neytral 4H bazası",

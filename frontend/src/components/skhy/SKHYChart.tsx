@@ -95,15 +95,16 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const fitDoneRef = useRef(false)
 
   const [ohlcv, setOhlcv] = useState<Candle[]>([])
+  const [chartReady, setChartReady] = useState(false)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string[] } | null>(null)
   const [emaValues, setEmaValues] = useState({ ema20: 0, ema50: 0, ema100: 0 })
   const [dbg, setDbg] = useState<string>("")
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
-    aiOverlay: true, structure: true, channel: true, breakout: true, retest: true,
-    fibonacci: false, targets: true, mainScenario: true, altScenario: true,
+    aiOverlay: true, structure: false, channel: false, breakout: false, retest: false,
+    fibonacci: false, targets: false, mainScenario: true, altScenario: true,
     fakeout: false, smc: false, liquidity: false, ema: false, atrStop: false,
     volumeProfile: false, elliott: false, triggers: true,
-    patterns: true, cone: true,
+    patterns: false, cone: false,
   })
   const timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
@@ -243,10 +244,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     if (overlays.smc) track("smc", () => drawSMCPrimitive(ctx, pw, h, norm, cs, confidence))
     // 6. Pattern
     if (overlays.patterns) track("pattern", () => drawPatternPrimitive(ctx, toX, toY, norm, data, w, confidence, lx, candleW))
-    // 7. Future projection
-    if (overlays.mainScenario || overlays.altScenario || overlays.fakeout || overlays.cone)
-      track("future", () => drawFPPrimitive(ctx, pw, h, toX, toY, sp || fpv2, cb, confidence, data, lx, lp, candleW, fX, overlays))
-
+    // 7. Scenario paths are native chart series so zoom and pan remain exact.
     // 8. TRIGGERS (drawn on top of everything)
     if (overlays.triggers) track("triggers", () => drawTriggersPrimitive(ctx, pw, h, norm, cs))
 
@@ -360,11 +358,13 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       color: "rgba(168,85,247,0.8)", lineWidth: 1, lineStyle: LineStyle.Dotted,
       priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     })
+    setChartReady(true)
     const handleViewportChange = () => markDirty()
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleViewportChange)
     const resizeObserver = new ResizeObserver(handleViewportChange)
     resizeObserver.observe(containerRef.current)
     return () => {
+      setChartReady(false)
       resizeObserver.disconnect()
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleViewportChange)
       chart.remove()
@@ -372,7 +372,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   }, [markDirty])
 
   useEffect(() => {
-    if (!candleSeriesRef.current || !volSeriesRef.current || !ohlcv.length) return
+    if (!chartReady || !candleSeriesRef.current || !volSeriesRef.current || !ohlcv.length) return
     const candleData = ohlcv.map((d: Candle) => ({ time: d.time as Time, open: d.open, high: d.high, low: d.low, close: d.close }))
     const volData = ohlcv.map((d: Candle) => ({ time: d.time as Time, value: d.volume, color: d.close >= d.open ? "rgba(8,153,129,0.3)" : "rgba(242,54,69,0.3)" }))
     candleSeriesRef.current.setData(candleData)
@@ -396,9 +396,10 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       if (vr) chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, ohlcv.length - 60), to: ohlcv.length + 55 })
     }
     markDirty()
-  }, [ohlcv, overlays, markDirty])
+  }, [chartReady, ohlcv, overlays, markDirty])
 
   useEffect(() => {
+    if (!chartReady) return
     const data = ohlcv.length > 0 ? ohlcv : lastValidOhlcvRef.current
     if (data.length === 0) return
     const lastTime = data[data.length - 1].time
@@ -425,7 +426,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     altForecastRef.current?.setData(overlays.altScenario ? toSeriesData(norm.scenarios.alt) : [])
     fakeoutForecastRef.current?.setData(overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
     markDirty()
-  }, [activeTimeframe, confidence, norm.scenarios, ohlcv, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
+  }, [activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
 
   useEffect(() => { markDirty() }, [markDirty, analysis, triggersProp, sr, confidence, price])
 
@@ -526,7 +527,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             )}
           </>
         )}
-        <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none z-[5]" />
+        <canvas ref={overlayRef} className="absolute inset-0 h-full w-full pointer-events-none z-[5]" />
         {tooltip && (
           <div className="absolute z-20 pointer-events-none bg-gray-900/95 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-200 shadow-xl max-w-[320px] whitespace-pre-line" style={{ left: tooltip.x, top: tooltip.y }}>
             {tooltip.text.map((line, i) => <div key={i}>{line}</div>)}
