@@ -145,6 +145,9 @@ export const api = {
   createOrder: (data: any) =>
     request<any>("/api/v1/trade/order", { method: "POST", body: JSON.stringify(data) }),
 
+  previewOrder: (data: any) =>
+    request<any>("/api/v1/trade/order/preview", { method: "POST", body: JSON.stringify(data) }),
+
   getPositions: () => request<any[]>("/api/v1/trade/positions"),
   reconcileOrders: (exchange = "binance") =>
     request<any>(`/api/v1/trade/orders/reconcile?exchange=${encodeURIComponent(exchange)}`, {

@@ -654,7 +654,8 @@ class ExecutionEngine:
         price = trade_request.get("price", entry)
         slippage_tolerance = trade_request.get("slippage_tolerance", 0.001)
 
-        slippage = await self.estimate_slippage(symbol, quantity, direction)
+        order_side = "buy" if direction == "long" else "sell"
+        slippage = await self.estimate_slippage(symbol, quantity, order_side)
 
         is_large_order = quantity > 10000
 

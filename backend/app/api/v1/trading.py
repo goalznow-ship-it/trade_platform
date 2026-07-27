@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.trade import TradeHistory, Order
 from app.services.exchange.manager import exchange_manager
 from app.services.exchange.base import OrderRequest as ExchangeOrderRequest
+from datetime import datetime, timezone
 import csv
 import io
 
@@ -219,6 +220,101 @@ async def create_order(
         "filled_quantity": result.filled_quantity,
         "avg_price": result.avg_price,
         "error": result.error,
+    }
+
+
+@router.post("/order/preview")
+async def preview_order(
+    req: OrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate and price an order without creating or persisting it."""
+    from app.services.execution_engine import execution_engine
+
+    exchange = await exchange_manager.get_user_exchange(user.id, req.exchange, db)
+    if not exchange or not exchange.is_connected:
+        raise HTTPException(400, "Exchange not connected")
+
+    ticker = await exchange.get_ticker(req.symbol)
+    entry_price = req.price or (ticker or {}).get("price")
+    if not entry_price:
+        raise HTTPException(503, "Current market price unavailable")
+
+    balance = await exchange.get_balance()
+    open_positions = await exchange.get_positions()
+    portfolio = {
+        "symbols": [position.symbol for position in open_positions],
+        "exposures": {
+            position.symbol: abs(position.size * position.mark_price)
+            for position in open_positions
+        },
+    }
+    trade_request = {
+        "symbol": req.symbol,
+        "direction": "long" if req.side == "buy" else "short",
+        "entry_price": entry_price,
+        "price": entry_price,
+        "stop_loss": req.stop_loss,
+        "take_profit": req.take_profit,
+        "leverage": req.leverage,
+        "balance": balance.free,
+        "quantity": req.amount,
+        "portfolio": portfolio,
+    }
+    approval = (
+        {"approved": True, "risk_score": 0, "risk_label": "reduce_only", "rejection_reasons": []}
+        if req.reduce_only
+        else await execution_engine.get_trade_approval(trade_request)
+    )
+
+    notional = req.amount * entry_price
+    margin = notional / req.leverage
+    fee_rate = 0.0004
+    estimated_fees = notional * fee_rate * 2
+    stop_distance = abs(entry_price - req.stop_loss) if req.stop_loss else 0
+    target_distance = abs(req.take_profit - entry_price) if req.take_profit else 0
+    max_loss = stop_distance * req.amount + estimated_fees
+    potential_profit = max(target_distance * req.amount - estimated_fees, 0)
+    risk_reward = potential_profit / max_loss if max_loss > 0 else None
+    execution_plan = approval.get("execution_plan") or {}
+    slippage = execution_plan.get("estimated_slippage")
+    if not slippage:
+        slippage = await execution_engine.estimate_slippage(req.symbol, req.amount, req.side)
+    liquidation_check = (approval.get("validation") or {}).get("checks", {}).get("liquidation_distance", {})
+
+    kill_switch_active = False
+    try:
+        kill_switch_active = await redis_client.get("trading:kill_switch") == "1"
+    except Exception:
+        pass
+
+    return {
+        "preview_only": True,
+        "exchange": req.exchange,
+        "symbol": req.symbol,
+        "side": req.side,
+        "order_type": req.order_type,
+        "quantity": req.amount,
+        "entry_price": entry_price,
+        "notional": round(notional, 8),
+        "required_margin": round(margin, 8),
+        "estimated_fees": round(estimated_fees, 8),
+        "fee_rate": fee_rate,
+        "estimated_slippage": slippage,
+        "liquidation_price": liquidation_check.get("liquidation_price"),
+        "max_loss_at_stop": round(max_loss, 8),
+        "potential_profit_at_target": round(potential_profit, 8),
+        "risk_reward": round(risk_reward, 3) if risk_reward is not None else None,
+        "approval": approval,
+        "can_submit_live": (
+            settings.TRADING_ENABLED
+            and not kill_switch_active
+            and approval.get("approved", False)
+        ),
+        "live_trading_enabled": settings.TRADING_ENABLED,
+        "kill_switch_active": kill_switch_active,
+        "market_data_timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
