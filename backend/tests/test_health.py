@@ -8,6 +8,9 @@ async def test_health_endpoint(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
+    assert data["readiness"] in {"ready", "degraded", "not_started"}
+    assert "streaming" in data["checks"]
+    assert "providers" in data["checks"]
     assert "timestamp" in data
 
 

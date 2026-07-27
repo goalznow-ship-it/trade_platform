@@ -12,6 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.core.logging import logger
+from app.core.provider_health import provider_health
 from app.services.data_contract import data_meta, utc_now
 
 
@@ -33,6 +34,24 @@ class NewsService:
                 if "=" in pair
                 for name, url in [pair.split("=", 1)]
             }
+        for name in self.providers:
+            provider_health.configure(self._health_key(name), True)
+
+    @staticmethod
+    def _health_key(source: str) -> str:
+        return f"news_rss_{source.lower().replace(' ', '_')}"
+
+    async def _fetch_provider(self, source: str, url: str) -> list[dict]:
+        key = self._health_key(source)
+        if not provider_health.allow_request(key):
+            raise RuntimeError("Provider circuit breaker is open")
+        try:
+            rows = await self._fetch_feed(source, url)
+            provider_health.success(key)
+            return rows
+        except Exception as exc:
+            provider_health.failure(key, exc)
+            raise
 
     async def _fetch_feed(self, source: str, url: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
@@ -63,7 +82,7 @@ class NewsService:
         return rows
 
     async def fetch_with_status(self, limit: int = 50) -> dict:
-        tasks = [self._fetch_feed(name, url) for name, url in self.providers.items()]
+        tasks = [self._fetch_provider(name, url) for name, url in self.providers.items()]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         provider_errors = {}
         available = []

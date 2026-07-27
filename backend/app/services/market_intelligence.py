@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from app.core.logging import logger
+from app.core.provider_health import provider_health
 from app.services.data_contract import data_meta, unavailable, utc_now
 
 
@@ -16,6 +17,7 @@ class MarketIntelligenceService:
     SPOT_URL = "https://api.binance.com"
     FUTURES_URL = "https://fapi.binance.com"
     COINGECKO_URL = "https://api.coingecko.com/api/v3"
+    COINPAPRIKA_URL = "https://api.coinpaprika.com/v1"
     SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "SUIUSDT")
 
     def __init__(self) -> None:
@@ -38,15 +40,36 @@ class MarketIntelligenceService:
             return unavailable(source, reason)
 
     async def _dominance(self) -> dict:
-        payload = await self._json(f"{self.COINGECKO_URL}/global")
-        value = payload.get("data", {}).get("market_cap_percentage", {}).get("btc")
-        if not isinstance(value, (int, float)):
-            raise ValueError("CoinGecko response did not contain BTC dominance")
-        updated = datetime.fromtimestamp(
-            payload.get("data", {}).get("updated_at", datetime.now().timestamp()),
-            tz=timezone.utc,
-        ).isoformat()
-        return {"value": round(float(value), 2), **data_meta("CoinGecko Global", last_updated=updated, max_age_seconds=300)}
+        try:
+            if not provider_health.allow_request("coingecko_global"):
+                raise RuntimeError("CoinGecko circuit breaker is open")
+            payload = await self._json(f"{self.COINGECKO_URL}/global")
+            value = payload.get("data", {}).get("market_cap_percentage", {}).get("btc")
+            if not isinstance(value, (int, float)):
+                raise ValueError("CoinGecko response did not contain BTC dominance")
+            updated = datetime.fromtimestamp(
+                payload.get("data", {}).get("updated_at", datetime.now().timestamp()),
+                tz=timezone.utc,
+            ).isoformat()
+            source = "CoinGecko Global"
+            provider_health.success("coingecko_global")
+        except Exception as primary_error:
+            provider_health.failure("coingecko_global", primary_error)
+            if not provider_health.allow_request("coinpaprika_global"):
+                raise RuntimeError("CoinPaprika circuit breaker is open") from primary_error
+            payload = await self._json(f"{self.COINPAPRIKA_URL}/global")
+            value = payload.get("bitcoin_dominance_percentage")
+            if not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Dominance providers unavailable; CoinGecko: {type(primary_error).__name__}"
+                )
+            updated = utc_now()
+            source = "CoinPaprika Global"
+            provider_health.success("coinpaprika_global")
+        return {
+            "value": round(float(value), 2),
+            **data_meta(source, last_updated=updated, max_age_seconds=300),
+        }
 
     async def _prices(self) -> dict:
         payload = await self._json(
@@ -163,6 +186,42 @@ class MarketIntelligenceService:
         result = sorted(clusters.values(), key=lambda item: item["notional"], reverse=True)[:20]
         return {"items": result, **data_meta("Binance Futures force orders", last_updated=now, max_age_seconds=60)}
 
+    async def _liquidations_ws(self) -> dict:
+        from app.services.binance_ws import binance_ws
+
+        rows = binance_ws.get_recent_liquidations(max_age_seconds=300)
+        clusters: dict[tuple[str, int], dict] = {}
+        for row in rows:
+            symbol = row.get("symbol")
+            price = float(row.get("price") or 0)
+            quantity = float(row.get("quantity") or 0)
+            if not symbol or price <= 0 or quantity <= 0:
+                continue
+            bucket = round(price, max(0, 2 - len(str(int(price)))))
+            key = (symbol, int(bucket * 100))
+            cluster = clusters.setdefault(key, {
+                "symbol": symbol,
+                "price": price,
+                "notional": 0.0,
+                "count": 0,
+                "side": row.get("side", "unknown"),
+            })
+            cluster["notional"] += price * quantity
+            cluster["count"] += 1
+        items = sorted(
+            clusters.values(),
+            key=lambda item: item["notional"],
+            reverse=True,
+        )[:20]
+        return {
+            "items": items,
+            **data_meta(
+                "Binance Futures liquidation WebSocket",
+                last_updated=utc_now(),
+                max_age_seconds=60,
+            ),
+        }
+
     def _alerts(self, futures: dict, prices: dict, liquidations: dict, whales: dict) -> list[dict]:
         now = utc_now()
         alerts = []
@@ -189,7 +248,12 @@ class MarketIntelligenceService:
             self._module("btc_dominance", "CoinGecko Global", self._dominance, errors),
             self._module("prices", "Binance Spot", self._prices, errors),
             self._module("futures", "Binance Futures REST", self._futures, errors),
-            self._module("liquidations", "Binance Futures force orders", self._liquidations, errors),
+            self._module(
+                "liquidations",
+                "Binance Futures liquidation WebSocket",
+                self._liquidations_ws,
+                errors,
+            ),
         )
         whales = {
             "items": [],
@@ -213,3 +277,5 @@ class MarketIntelligenceService:
 
 
 market_intelligence = MarketIntelligenceService()
+provider_health.configure("coingecko_global", True)
+provider_health.configure("coinpaprika_global", True)

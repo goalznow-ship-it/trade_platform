@@ -9,6 +9,7 @@ Connects to Binance WebSocket and broadcasts through our ws_manager
 
 import asyncio
 import json
+from collections import deque
 from typing import Dict, Set, Optional
 from datetime import datetime, timezone
 import aiohttp
@@ -24,6 +25,7 @@ class BinanceWebSocketService:
         self._session: Optional[aiohttp.ClientSession] = None
         self._prices: Dict[str, float] = {}
         self._subscriptions: Set[str] = set()
+        self._liquidations: deque[dict] = deque(maxlen=500)
 
     async def start(self):
         self.running = True
@@ -49,6 +51,9 @@ class BinanceWebSocketService:
     async def subscribe_depth(self, symbols: list, level: int = 20):
         streams = [f"{s.lower().replace('/', '')}@depth{level}" for s in symbols]
         await self._connect_stream(f"depth_{level}", streams, self._handle_depth)
+
+    async def subscribe_liquidations(self):
+        await self._connect_stream("liquidations", ["!forceOrder@arr"], self._handle_liquidation)
 
     async def _connect_stream(self, name: str, streams: list, handler):
         if name in self.tasks:
@@ -130,10 +135,41 @@ class BinanceWebSocketService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
+    async def _handle_liquidation(self, data: dict):
+        order = data.get("o", {})
+        symbol = order.get("s")
+        price = float(order.get("ap") or order.get("p") or 0)
+        quantity = float(order.get("z") or order.get("q") or 0)
+        if not symbol or price <= 0 or quantity <= 0:
+            return
+        event_time = int(data.get("E") or order.get("T") or 0)
+        item = {
+            "symbol": symbol,
+            "price": price,
+            "quantity": quantity,
+            "notional": price * quantity,
+            "side": "long" if order.get("S") == "SELL" else "short",
+            "event_time": event_time,
+            "timestamp": (
+                datetime.fromtimestamp(event_time / 1000, tz=timezone.utc).isoformat()
+                if event_time else datetime.now(timezone.utc).isoformat()
+            ),
+        }
+        self._liquidations.append(item)
+        await ws_manager.broadcast("derivatives", "liquidation_update", item)
+
     def get_price(self, symbol: str) -> Optional[float]:
         return self._prices.get(symbol)
 
     async def get_all_prices(self) -> dict:
         return dict(self._prices)
+
+    def get_recent_liquidations(self, max_age_seconds: int = 300) -> list[dict]:
+        cutoff = int(datetime.now(timezone.utc).timestamp() * 1000) - max_age_seconds * 1000
+        return [
+            dict(item)
+            for item in self._liquidations
+            if not item.get("event_time") or item["event_time"] >= cutoff
+        ]
 
 binance_ws = BinanceWebSocketService()

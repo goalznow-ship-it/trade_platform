@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         await binance_ws.subscribe_price(top_symbols)
         await binance_ws.subscribe_klines(top_symbols[:10], "1m")
         await binance_ws.subscribe_depth(top_symbols[:5])
+        await binance_ws.subscribe_liquidations()
         await alert_service.start()
         await streaming_service.start()
         await exchange_manager.start_reconnect_loop("binance")
@@ -122,7 +123,41 @@ async def root():
 @app.get("/health")
 async def health():
     from datetime import datetime, timezone
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    from app.core.provider_health import provider_health
+
+    stream_stats = streaming_service.get_stats()
+    workers = stream_stats.get("workers", {})
+    unhealthy_workers = [
+        name for name, state in workers.items()
+        if not state.get("alive", False)
+    ]
+    providers = provider_health.snapshot()
+    degraded_providers = [
+        name for name, state in providers.items()
+        if state.get("status") in {"degraded", "circuit_open"}
+    ]
+    readiness = (
+        "degraded"
+        if unhealthy_workers or degraded_providers
+        else "ready" if stream_stats.get("running")
+        else "not_started"
+    )
+    return {
+        "status": "ok",
+        "readiness": readiness,
+        "checks": {
+            "streaming": {
+                "running": stream_stats.get("running", False),
+                "worker_count": stream_stats.get("worker_count", 0),
+                "unhealthy_workers": unhealthy_workers,
+            },
+            "providers": {
+                "registered": len(providers),
+                "degraded": degraded_providers,
+            },
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 if __name__ == "__main__":
