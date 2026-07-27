@@ -211,6 +211,7 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
     "AAVE/USDT", "UNI/USDT", "OP/USDT", "ARB/USDT", "HYPE/USDT",
     "WLD/USDT", "ZEC/USDT", "INJ/USDT", "1000SHIB/USDT", "1000PEPE/USDT",
   ])
+  const [signalRanks, setSignalRanks] = useState<Record<string, { direction: string; confidence: number; quality: number }>>({})
 
   const ai = aiAnalysis as Record<string, unknown> | null
   const components = ai?.components as Record<string, unknown> | undefined
@@ -255,10 +256,12 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
     api.getMultiTimeframe(selectedSymbol).then((d) => setMtfData(d as Record<string, unknown>)).catch(() => {})
   }, [selectedSymbol])
   useEffect(() => {
-    api.getSymbols().then((items) => {
-      if (!Array.isArray(items)) return
+    Promise.all([
+      api.getSymbols().catch(() => []),
+      api.institutionalScan(0, 30).catch(() => ({ signals: [] })),
+    ]).then(([items, scan]) => {
       const nonCryptoBases = new Set(["CL", "XAU", "XAG", "BZ", "SKHYNIX", "AKE", "SNDK", "ESP", "MU", "SOXL"])
-      const realSymbols = items
+      const realSymbols = (Array.isArray(items) ? items : [])
         .map((item) => typeof item === "string" ? item : String((item as Record<string, unknown>).symbol || ""))
         .filter((item) => {
           const base = item.split("/")[0]
@@ -266,9 +269,34 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
             && !["SKH/USDT", "SKHY/USDT"].includes(item)
             && !nonCryptoBases.has(base)
         })
-      if (realSymbols.length > 0) {
-        setSymbols((current) => [...new Set([...current, ...realSymbols])].slice(0, 30))
+      const rawSignals = Array.isArray((scan as { signals?: Record<string, unknown>[] })?.signals)
+        ? (scan as { signals: Record<string, unknown>[] }).signals
+        : []
+      const ranks: Record<string, { direction: string; confidence: number; quality: number }> = {}
+      for (const item of rawSignals) {
+        const symbol = String(item.symbol || "")
+        const confidence = Number(item.confidence || 0)
+        const opportunity = Number(item.opportunity_score || 0)
+        const execution = item.execution as Record<string, unknown> | undefined
+        const alignment = item.alignment as Record<string, unknown> | undefined
+        const quality = Math.min(
+          100,
+          confidence * 0.65
+            + opportunity * 0.2
+            + (execution?.approved ? 8 : 0)
+            + (alignment?.major_aligned ? 7 : 0),
+        )
+        if (symbol) ranks[symbol] = {
+          direction: String(item.direction || "neutral"),
+          confidence,
+          quality,
+        }
       }
+      setSignalRanks(ranks)
+      setSymbols((current) => {
+        const combined = [...new Set([...realSymbols, ...current])]
+        return combined.sort((a, b) => (ranks[b]?.quality || 0) - (ranks[a]?.quality || 0)).slice(0, 30)
+      })
     }).catch(() => {})
   }, [])
 
@@ -653,8 +681,19 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
         <div className="flex items-center gap-2">
           <select value={selectedSymbol} onChange={(e) => setSymbol(e.target.value)}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500">
-            {symbols.map((s) => (<option key={s} value={s}>{s}</option>))}
+            {symbols.map((symbol) => {
+              const rank = signalRanks[symbol]
+              const direction = rank?.direction === "long" ? "LONG" : rank?.direction === "short" ? "SHORT" : "WAIT"
+              return <option key={symbol} value={symbol}>
+                {rank ? `${symbol} · ${direction} · ${rank.confidence.toFixed(0)}% · Q${rank.quality.toFixed(0)}` : symbol}
+              </option>
+            })}
           </select>
+          {symbols[0] && signalRanks[symbols[0]] && (
+            <button onClick={() => setSymbol(symbols[0])} className="rounded border border-blue-800/50 bg-blue-950/30 px-2 py-1 text-[9px] text-blue-300">
+              Ən yaxşı: {symbols[0]} · {signalRanks[symbols[0]].direction.toUpperCase()} · Q{signalRanks[symbols[0]].quality.toFixed(0)}
+            </button>
+          )}
           <div className="text-sm font-bold text-white font-mono">${typeof price === "number" ? price.toFixed(2) : "0.00"}</div>
           <span className="text-[9px] text-gray-600">{nowStr}</span>
         </div>

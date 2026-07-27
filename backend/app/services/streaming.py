@@ -288,19 +288,27 @@ class StreamingService:
 
     async def _stream_signals(self, symbols: List[str]):
         from app.services.institutional_signals import institutional_signal_engine
+        from app.services.early_signal_monitor import early_signal_monitor
         while self._running:
-            results = []
-            for sym in symbols[:10]:
-                try:
-                    signal = await institutional_signal_engine.generate_signal(sym, "1h")
-                    if signal and signal.get("confidence", 0) >= 70:
-                        results.append(signal)
-                except Exception:
-                    pass
-            results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
-            if results:
+            try:
+                results = await institutional_signal_engine.scan_all(min_score=0, limit=30)
+            except Exception:
+                logger.exception("Institutional signal stream scan failed")
+                results = []
+            results.sort(
+                key=lambda signal: early_signal_monitor.quality_score(signal),
+                reverse=True,
+            )
+            transitions = await early_signal_monitor.process(results)
+            visible = [
+                signal for signal in results
+                if signal.get("direction") in {"long", "short"}
+                and signal.get("confidence", 0) >= 50
+            ]
+            if visible:
                 await ws_manager.broadcast(Channel.SIGNALS, "signal_update", {
-                    "data": results[:5],
+                    "data": visible[:10],
+                    "transitions": transitions,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
             await asyncio.sleep(60)

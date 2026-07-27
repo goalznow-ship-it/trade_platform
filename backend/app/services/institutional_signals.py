@@ -227,6 +227,15 @@ class InstitutionalSignalEngine:
                 exchange_label = "Weighted Average (Binance+Bybit+OKX)"
 
         signal["opportunity_score"] = opportunity_score
+        execution = signal.get("execution") or {}
+        alignment = signal.get("alignment") or {}
+        signal["quality_score"] = round(min(
+            100,
+            confidence * 0.65
+            + opportunity_score * 0.2
+            + (8 if execution.get("approved") else 0)
+            + (7 if alignment.get("major_aligned") else 0),
+        ), 1)
         signal["live_price"] = signal.get("current_price")
         signal["reasons_breakdown"] = reasons_breakdown
         signal["exchange"] = exchange_label
@@ -242,6 +251,7 @@ class InstitutionalSignalEngine:
         cached = await cache_get(cache_key)
         if isinstance(cached, list):
             results = [self._enrich_signal(s) for s in cached]
+            results.sort(key=lambda signal: signal.get("quality_score", 0), reverse=True)
             return [
                 signal for signal in results
                 if signal.get("confidence", 0) >= min_score
@@ -251,6 +261,7 @@ class InstitutionalSignalEngine:
             cached = await cache_get(cache_key)
             if isinstance(cached, list):
                 results = [self._enrich_signal(s) for s in cached]
+                results.sort(key=lambda signal: signal.get("quality_score", 0), reverse=True)
                 return [
                     signal for signal in results
                     if signal.get("confidence", 0) >= min_score
@@ -289,8 +300,8 @@ class InstitutionalSignalEngine:
                 except Exception as exc:
                     logger.debug(f"Scan task error {tasks[task]}: {exc}")
             results = [signal for signal in scanned if signal is not None]
-            results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
             enriched = [self._enrich_signal(s) for s in results]
+            enriched.sort(key=lambda signal: signal.get("quality_score", 0), reverse=True)
             await cache_set(cache_key, results, ttl=30)
             return [
                 signal for signal in enriched

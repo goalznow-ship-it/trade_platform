@@ -16,6 +16,7 @@ export interface UnifiedSignal {
   confidence: number
   composite_score: number
   opportunity_score: number
+  quality_score: number
   classification: string
   exchange: string
   entry_zone: { min: number; max: number; mid: number }
@@ -138,6 +139,7 @@ export function normalizeSignal(raw: Record<string, unknown>): UnifiedSignal {
     confidence: (raw.confidence as number) || 0,
     composite_score: (raw.composite_score as number) || (raw.confidence as number) || 0,
     opportunity_score: (raw.opportunity_score as number) || Math.round(((raw.confidence as number) || 0) * 0.5),
+    quality_score: (raw.quality_score as number) || (raw.opportunity_score as number) || Math.round(((raw.confidence as number) || 0) * 0.5),
     classification: (raw.classification as string) || "reject",
     exchange: (raw.exchange as string) || "Binance",
     entry_zone: { min: ez.min || 0, max: ez.max || 0, mid: ez.mid || 0 },

@@ -59,9 +59,9 @@ export function MarketScanner() {
 
       setResults({
         long: directional.filter((signal) => signal.direction === "long")
-          .sort((a, b) => b.confidence - a.confidence).slice(0, 10),
+          .sort((a, b) => b.quality_score - a.quality_score).slice(0, 10),
         short: directional.filter((signal) => signal.direction === "short")
-          .sort((a, b) => b.confidence - a.confidence).slice(0, 10),
+          .sort((a, b) => b.quality_score - a.quality_score).slice(0, 10),
         volatility: signals.filter((signal) => {
           const rsi = signal.institutional_score?.details?.rsi
           return typeof rsi === "number" && (rsi > 70 || rsi < 30)
@@ -221,7 +221,7 @@ function ScannerRow({ signal }: { signal: UnifiedSignal }) {
       </div>
       <div className="text-right text-[10px] text-gray-500">
         <div>{displayPrice(signal.current_price)}</div>
-        <div className="text-[9px]">Bal: {signal.opportunity_score}</div>
+        <div className="text-[9px]">Keyfiyyət: {signal.quality_score}</div>
       </div>
     </div>
   )

@@ -251,26 +251,32 @@ export function Navbar() {
 
 function NotificationBell() {
   const [unread, setUnread] = useState(0)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    api.getNotifications().then((n) => {
+    const load = () => api.getNotifications().then((n) => {
       const arr = Array.isArray(n) ? n : []
       const unreadArr = arr as Notification[]
+      setNotifications(unreadArr.slice(0, 8))
       setUnread(unreadArr.filter((x) => !x.is_read).length)
     }).catch(() => {})
-    const interval = setInterval(() => {
-      api.getNotifications().then((n) => {
-        const arr = Array.isArray(n) ? n : []
-        const unreadArr = arr as Notification[]
-        setUnread(unreadArr.filter((x) => !x.is_read).length)
-      }).catch(() => {})
-    }, 30000)
+    load()
+    const interval = setInterval(load, 30000)
     return () => clearInterval(interval)
   }, [])
 
+  async function markRead(notification: Notification) {
+    if (!notification.is_read) {
+      await api.markNotificationRead(notification.id)
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, is_read: true } : item))
+      setUnread((current) => Math.max(0, current - 1))
+    }
+  }
+
   return (
     <div className="relative">
-      <Button variant="ghost" size="sm" className="hidden sm:flex !px-1.5">
+      <Button variant="ghost" size="sm" className="hidden sm:flex !px-1.5" onClick={() => setOpen((value) => !value)}>
         {unread > 0 ? <BellRing className="w-4 h-4 text-yellow-400" /> : <Bell className="w-4 h-4 text-gray-400" />}
         {unread > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] flex items-center justify-center text-white font-bold">
@@ -278,6 +284,30 @@ function NotificationBell() {
           </span>
         )}
       </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border border-gray-700 bg-gray-950 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-gray-800 px-3 py-2">
+            <span className="text-xs font-semibold text-white">Siqnal bildirişləri</span>
+            <span className="text-[9px] text-gray-500">{unread} oxunmamış</span>
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="px-3 py-8 text-center text-xs text-gray-600">Hələ bildiriş yoxdur</div>
+            ) : notifications.map((notification) => (
+              <button key={notification.id} onClick={() => markRead(notification)}
+                className={cn("block w-full border-b border-gray-800 px-3 py-2 text-left hover:bg-gray-900", !notification.is_read && "bg-blue-950/20")}>
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-[10px] font-medium", notification.type === "signal" ? "text-green-400" : notification.type === "signal_watch" ? "text-yellow-400" : "text-gray-300")}>
+                    {notification.title}
+                  </span>
+                  {!notification.is_read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
+                </div>
+                {notification.message && <div className="mt-1 line-clamp-2 text-[9px] text-gray-500">{notification.message}</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -16,6 +16,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   warning: AlertTriangle,
   alert: Bell,
   signal: TrendingUp,
+  signal_watch: TrendingUp,
   trade: DollarSign,
 }
 
@@ -85,7 +86,7 @@ export function NotificationsPanel() {
             >
               <Icon className={cn("w-4 h-4 mt-0.5", {
                 "text-blue-400": n.type === "info" || !n.type,
-                "text-yellow-400": n.type === "warning",
+                "text-yellow-400": n.type === "warning" || n.type === "signal_watch",
                 "text-red-400": n.type === "alert",
                 "text-green-400": n.type === "signal",
                 "text-purple-400": n.type === "trade",
