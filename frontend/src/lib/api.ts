@@ -90,7 +90,12 @@ export const api = {
 
   // Market
   getOHLCV: (symbol: string, timeframe = "1h", limit = 200) =>
-    request<any[]>(`/api/v1/market/ohlcv/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
+    request<any[]>(
+      `/api/v1/market/ohlcv/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`,
+      undefined,
+      false,
+      30000,
+    ),
 
   getTicker: (symbol: string) =>
     request<any>(`/api/v1/market/ticker/${encodeURIComponent(symbol)}`),

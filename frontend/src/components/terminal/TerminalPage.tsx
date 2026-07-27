@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import { useMarketStore } from "@/store/market"
 import { AIChart } from "@/components/terminal/AIChart"
@@ -64,9 +64,11 @@ export function TerminalPage() {
   const [signal, setSignal] = useState<InstitutionalSignal | null>(null)
   const [aiAnalysis, setAiAnalysis] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     async function load() {
+      const requestId = ++requestIdRef.current
       setLoading(true)
       try {
         const [institutional, ai, mtfResult] = await Promise.all([
@@ -74,6 +76,7 @@ export function TerminalPage() {
           api.getPatternAnalysis(selectedSymbol, selectedTimeframe).catch(() => null),
           api.getMultiTimeframe(selectedSymbol).catch(() => null),
         ])
+        if (requestId !== requestIdRef.current) return
         setSignal(institutional)
         if (ai && mtfResult && typeof ai === "object") {
           (ai as Record<string, unknown>).multi_timeframe_alignment = mtfResult?.alignment || mtfResult?.aggregated
@@ -104,7 +107,10 @@ export function TerminalPage() {
             }
           }
           const aiConf = ai?.confidence || institutional.confidence || score?.abs_score
-          const aiDir = ai?.combined_direction || direction
+          const probabilityDirection = (score?.long_probability ?? 50) >= (score?.short_probability ?? 50) ? "long" : "short"
+          const aiDir = typeof aiConf === "number" && aiConf < 70
+            ? probabilityDirection
+            : ai?.combined_direction || direction
 
           setAnalysis({
             prediction: institutional.error ? "neutral" : (aiDir as string),
@@ -164,7 +170,9 @@ export function TerminalPage() {
             }
           }
           setAnalysis({
-            prediction: aiDir,
+            prediction: aiConf < 70
+              ? ((score.long_probability as number ?? 50) >= (score.short_probability as number ?? 50) ? "long" : "short")
+              : aiDir,
             confidence: typeof aiConf === "number" ? aiConf : 50,
             current_price: ai.current_price as number || 0,
             long_probability: (score.long_probability as number) ?? 50,
@@ -178,13 +186,27 @@ export function TerminalPage() {
           setAnalysis(null)
           setExplain(null)
         }
-      } catch {} finally {
-        setLoading(false)
+      } catch {
+        if (requestId === requestIdRef.current) {
+          setAnalysis(null)
+          setExplain(null)
+          setSignal(null)
+          setAiAnalysis(null)
+        }
+      } finally {
+        if (requestId === requestIdRef.current) setLoading(false)
       }
     }
+    setAnalysis(null)
+    setExplain(null)
+    setSignal(null)
+    setAiAnalysis(null)
     load()
     const interval = setInterval(load, 60000)
-    return () => clearInterval(interval)
+    return () => {
+      requestIdRef.current += 1
+      clearInterval(interval)
+    }
   }, [selectedSymbol, selectedTimeframe])
 
   const ticker = tickers[selectedSymbol]

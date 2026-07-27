@@ -141,30 +141,36 @@ function OverlayToggles({ active, onChange }: { active: Record<string, boolean>;
 }
 
 // ─── Scenario Labels ────────────────────────────────────────────────
-function ScenarioLabels({ projection, lastCandle, overlays }: {
+function ScenarioLabels({ projection, lastCandle, overlays, direction, confidence, longProbability, shortProbability, tradeReady }: {
   projection?: Record<string, unknown>
   lastCandle?: OHLCVItem
   overlays: Record<string, boolean>
+  direction: string
+  confidence: number
+  longProbability: number
+  shortProbability: number
+  tradeReady: boolean
 }) {
   if (!overlays.projection || !projection || !lastCandle) return null
-  const pDir = (projection.direction as string) || "long"
-  const conf = (projection.pattern_confidence as number) || 50
-  const altDir = pDir === "long" ? "short" : "long"
-  const altConf = 100 - conf
+  const scenarioDirection = direction === "long" || direction === "short"
+    ? direction
+    : longProbability >= shortProbability ? "long" : "short"
+  const probability = scenarioDirection === "long" ? longProbability : shortProbability
+  const patternDirection = String(projection.direction || "").toLowerCase()
+  const patternAgrees = patternDirection === scenarioDirection
   return (
-    <div className="absolute bottom-2 left-2 right-2 flex gap-2 text-[9px] z-10 pointer-events-none">
-      <div className={cn("flex-1 p-1.5 rounded border pointer-events-auto", pDir === "long" ? "bg-green-950/70 border-green-700/50" : "bg-red-950/70 border-red-700/50")}>
-        <div className={cn("font-bold", pDir === "long" ? "text-green-400" : "text-red-400")}>
-          {pDir === "long" ? "↑ UZUN" : "↓ QISA"} {conf}%
+    <div className="absolute bottom-2 left-2 z-10 pointer-events-none text-[9px]">
+      <div className={cn("min-w-56 p-2 rounded border bg-gray-950/90", scenarioDirection === "long" ? "border-green-700/50" : "border-red-700/50")}>
+        <div className="flex items-center justify-between gap-3">
+          <span className={cn("font-bold", scenarioDirection === "long" ? "text-green-400" : "text-red-400")}>
+            {scenarioDirection === "long" ? "↑ LONG" : "↓ SHORT"} · {probability.toFixed(0)}%
+          </span>
+          <span className={tradeReady ? "text-green-400" : "text-amber-400"}>
+            {tradeReady ? "TƏSDİQLƏNİB" : `GÖZLƏ · ${confidence.toFixed(0)}%`}
+          </span>
         </div>
-        {projection.entry_trigger ? <div className="text-gray-400 mt-0.5">{String(projection.entry_trigger)}</div> : null}
-        {projection.invalidation ? <div className="text-gray-600 mt-0.5">✕ {String(projection.invalidation)}</div> : null}
-      </div>
-      <div className={cn("flex-1 p-1.5 rounded border opacity-60 pointer-events-auto", altDir === "long" ? "bg-green-950/70 border-green-700/50" : "bg-red-950/70 border-red-700/50")}>
-        <div className={cn("font-bold", altDir === "long" ? "text-green-400" : "text-red-400")}>
-          {altDir === "long" ? "↑ UZUN" : "↓ QISA"} {altConf}%
-        </div>
-        <div className="text-gray-500 mt-0.5">Alternativ</div>
+        {!tradeReady && <div className="mt-1 text-gray-500">İstiqamət ehtimalıdır — giriş üçün 70%+ siqnal etibarı lazımdır.</div>}
+        {patternAgrees && projection.entry_trigger ? <div className="text-gray-400 mt-1">{String(projection.entry_trigger)}</div> : null}
       </div>
     </div>
   )
@@ -193,18 +199,31 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
   const [hoverIndicators, setHoverIndicators] = useState<Record<string, unknown> | undefined>(undefined)
   const [overlays, setOverlays] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {}
-    OVERLAY_KEYS.forEach((k) => { init[k] = true })
+    OVERLAY_KEYS.forEach((k) => { init[k] = ["projection", "trade", "sr"].includes(k) })
     return init
   })
   const [nowStr, setNowStr] = useState("")
   const [mtfData, setMtfData] = useState<Record<string, unknown> | null>(null)
+  const [symbols, setSymbols] = useState<string[]>([
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+    "DOGE/USDT", "ADA/USDT", "SUI/USDT", "LINK/USDT", "AVAX/USDT",
+    "TRX/USDT", "DOT/USDT", "LTC/USDT", "BCH/USDT", "NEAR/USDT",
+    "AAVE/USDT", "UNI/USDT", "OP/USDT", "ARB/USDT", "HYPE/USDT",
+    "WLD/USDT", "ZEC/USDT", "INJ/USDT", "1000SHIB/USDT", "1000PEPE/USDT",
+  ])
 
   const ai = aiAnalysis as Record<string, unknown> | null
   const components = ai?.components as Record<string, unknown> | undefined
   const projection = ai?.projection as Record<string, unknown> | undefined
   const lastCandle = candleData[candleData.length - 1]
   const finalConf = (ai?.confidence as number) || (signal?.confidence as number) || 0
-  const finalDir = (ai?.combined_direction as string) || (signal?.direction as string) || "neutral"
+  const institutionalScore = (ai?.institutional_score || signal?.institutional_score || {}) as Record<string, unknown>
+  const longProbability = Number(institutionalScore.long_probability ?? 50)
+  const shortProbability = Number(institutionalScore.short_probability ?? 50)
+  const rawFinalDir = (ai?.combined_direction as string) || (signal?.direction as string) || "neutral"
+  const finalDir = finalConf < 70
+    ? (longProbability >= shortProbability ? "long" : "short")
+    : rawFinalDir
   const isTradeReady = finalConf >= 70 && finalDir !== "neutral"
   const price = livePrice || (candleData.length > 0 ? candleData[candleData.length - 1].close : 0)
 
@@ -226,9 +245,32 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
     setLoading(false)
   }, [selectedSymbol, selectedTimeframe])
 
-  useEffect(() => { queueMicrotask(() => loadChartData()) }, [loadChartData])
+  useEffect(() => {
+    setCandleData([])
+    queueMicrotask(() => loadChartData())
+  }, [loadChartData])
   useEffect(() => { const i = setInterval(() => setNowStr(new Date().toLocaleTimeString("az")), 1000); return () => clearInterval(i) }, [])
-  useEffect(() => { api.getMultiTimeframe(selectedSymbol).then((d) => setMtfData(d as Record<string, unknown>)).catch(() => {}) }, [selectedSymbol])
+  useEffect(() => {
+    setMtfData(null)
+    api.getMultiTimeframe(selectedSymbol).then((d) => setMtfData(d as Record<string, unknown>)).catch(() => {})
+  }, [selectedSymbol])
+  useEffect(() => {
+    api.getSymbols().then((items) => {
+      if (!Array.isArray(items)) return
+      const nonCryptoBases = new Set(["CL", "XAU", "XAG", "BZ", "SKHYNIX", "AKE", "SNDK", "ESP", "MU", "SOXL"])
+      const realSymbols = items
+        .map((item) => typeof item === "string" ? item : String((item as Record<string, unknown>).symbol || ""))
+        .filter((item) => {
+          const base = item.split("/")[0]
+          return item.endsWith("/USDT")
+            && !["SKH/USDT", "SKHY/USDT"].includes(item)
+            && !nonCryptoBases.has(base)
+        })
+      if (realSymbols.length > 0) {
+        setSymbols((current) => [...new Set([...current, ...realSymbols])].slice(0, 30))
+      }
+    }).catch(() => {})
+  }, [])
 
   // ── Chart render ──
   useEffect(() => {
@@ -345,25 +387,21 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
 
     // ── 4. Projection scenario markers ──
     if (overlays.projection && projection && lct) {
-      const pDir = (projection.direction as string) || "long"
-      const cScore = (projection.pattern_confidence as number) || finalConf
-      const altDir = pDir === "long" ? "short" : "long"
+      const pDir = finalDir === "long" || finalDir === "short" ? finalDir : longProbability >= shortProbability ? "long" : "short"
+      const cScore = pDir === "long" ? longProbability : shortProbability
       markers.push({
-        time: (Number(lct) + 7200) as Time, position: pDir === "long" ? "belowBar" : "aboveBar",
-        color: pDir === "long" ? "#22c55e" : "#ef4444", shape: pDir === "long" ? "arrowUp" : "arrowDown",
-        text: `ESAS ${pDir === "long" ? "↑" : "↓"} ${cScore}%`,
-      })
-      markers.push({
-        time: (Number(lct) + 14400) as Time, position: altDir === "long" ? "belowBar" : "aboveBar",
-        color: altDir === "long" ? "#22c55e60" : "#ef444460", shape: altDir === "long" ? "arrowUp" : "arrowDown",
-        text: `ALT ${altDir === "long" ? "↑" : "↓"} ${100 - cScore}%`,
+        time: (Number(lct) + 7200) as Time,
+        position: isTradeReady ? (pDir === "long" ? "belowBar" : "aboveBar") : "aboveBar",
+        color: isTradeReady ? (pDir === "long" ? "#22c55e" : "#ef4444") : "#f59e0b",
+        shape: isTradeReady ? (pDir === "long" ? "arrowUp" : "arrowDown") : "circle",
+        text: isTradeReady ? `${pDir === "long" ? "LONG ↑" : "SHORT ↓"} ${cScore.toFixed(0)}%` : `GÖZLƏ ${finalConf.toFixed(0)}%`,
       })
       if ((projection.pattern_status as string) === "confirmed" || (projection.breakout_confirmed as boolean)) {
         markers.push({ time: (Number(lct) + 800) as Time, position: "aboveBar", color: "#22c55e", shape: "circle", text: "✓ TƏSDİQLƏNDİ" })
       } else if ((projection.pattern_status as string) === "forming") {
         markers.push({ time: (Number(lct) + 800) as Time, position: "aboveBar", color: "#f59e0b", shape: "circle", text: "⏳ BREAKOUT GÖZLƏNİR" })
       }
-      if (projection.entry_trigger) {
+      if (projection.entry_trigger && String(projection.direction || "").toLowerCase() === pDir) {
         markers.push({ time: (Number(lct) + 7200) as Time, position: "aboveBar", color: "#3b82f690", shape: "circle", text: ((projection.entry_trigger as string) || "").slice(0, 28) })
       }
     }
@@ -394,12 +432,6 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
           const rr = Math.abs((tp1 - entryMid) / (entryMid - sl))
           cs.createPriceLine({ price: entryMid, color: "#3b82f6", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `RR ${rr.toFixed(2)}` })
         }
-      } else {
-        // WAIT: only trigger levels
-        const eMin = (signal.entry_zone as Record<string, unknown>)?.min as number
-        const tp1 = signal.take_profit_1 as number
-        if (eMin) cs.createPriceLine({ price: eMin, color: "#22c55e60", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "↑ trigger" })
-        if (tp1) cs.createPriceLine({ price: tp1, color: "#ef444460", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "↓ trigger" })
       }
     }
 
@@ -465,7 +497,7 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
     }
 
     // ── Projection expected path lines ──
-    if (overlays.projection && projection) {
+    if (overlays.projection && projection && isTradeReady) {
       const path = (projection.expected_path || []) as Array<{ level: string; price: number }>
       for (const item of path) {
         if (item.price > 0) {
@@ -621,8 +653,7 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
         <div className="flex items-center gap-2">
           <select value={selectedSymbol} onChange={(e) => setSymbol(e.target.value)}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500">
-            {["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "SUI/USDT", "ADA/USDT", "DOGE/USDT",
-              "INJ/USDT", "SKY/USDT", "SKH/USDT"].map((s) => (<option key={s} value={s}>{s}</option>))}
+            {symbols.map((s) => (<option key={s} value={s}>{s}</option>))}
           </select>
           <div className="text-sm font-bold text-white font-mono">${typeof price === "number" ? price.toFixed(2) : "0.00"}</div>
           <span className="text-[9px] text-gray-600">{nowStr}</span>
@@ -693,7 +724,16 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
         )}
 
         <HoverTooltip data={hoverPos} candle={hoverCandle as Record<string, unknown> | undefined} indicators={hoverIndicators} />
-        <ScenarioLabels projection={projection} lastCandle={lastCandle} overlays={overlays} />
+        <ScenarioLabels
+          projection={projection}
+          lastCandle={lastCandle}
+          overlays={overlays}
+          direction={finalDir}
+          confidence={finalConf}
+          longProbability={longProbability}
+          shortProbability={shortProbability}
+          tradeReady={isTradeReady}
+        />
       </div>
     </div>
   )

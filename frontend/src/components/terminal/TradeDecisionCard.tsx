@@ -71,8 +71,10 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
   }
 
   const conf = analysis.confidence || 0
-  const isBullish = analysis.prediction === "long" && conf >= 70
-  const isBearish = analysis.prediction === "short" && conf >= 70
+  const rawDirection = String(analysis.prediction || "").toLowerCase()
+  const directionalBias = rawDirection.includes("long") ? "long" : rawDirection.includes("short") ? "short" : "neutral"
+  const isBullish = directionalBias === "long" && conf >= 70
+  const isBearish = directionalBias === "short" && conf >= 70
   const isWait = !isBullish && !isBearish
   const reasons = explain?.reasons || []
   const warnings = explain?.warnings || []
@@ -121,27 +123,26 @@ export function TradeDecisionCard({ analysis, explain, livePrice, loading }: Tra
 
       {isWait && (
         <>
-          {/* WAIT state: Show trigger levels instead of trade plan */}
+          {/* WAIT state: show one coherent conditional scenario, not opposing trade levels. */}
           <div className="p-2.5 rounded-lg border border-amber-800/30 bg-amber-900/10">
-            <h4 className="text-[10px] text-amber-400 uppercase tracking-wider mb-1.5">Potensial Trigger Səviyyələri</h4>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-2 rounded bg-green-900/15 border border-green-900/30">
-                <div className="text-[9px] text-green-400">Bullish Trigger</div>
-                <div className="text-xs font-bold text-green-300">
-                  {explain?.suggestions?.take_profit && explain.suggestions.entry
-                    ? `$${explain.suggestions.entry.toFixed(2)} üzəri`
-                    : "Breakout təsdiqi"}
+            <h4 className="text-[10px] text-amber-400 uppercase tracking-wider mb-1.5">Təsdiqlənməmiş əsas ssenari</h4>
+            <div className="flex items-center justify-between rounded bg-gray-900/50 p-2">
+              <div>
+                <div className={cn("text-[10px] font-bold", directionalBias === "long" ? "text-green-400" : directionalBias === "short" ? "text-red-400" : "text-gray-400")}>
+                  {directionalBias === "long" ? "LONG ehtimalı" : directionalBias === "short" ? "SHORT ehtimalı" : "Neytral"}
                 </div>
+                <div className="text-[9px] text-gray-500">Giriş yalnız əlavə təsdiqdən sonra</div>
               </div>
-              <div className="p-2 rounded bg-red-900/15 border border-red-900/30">
-                <div className="text-[9px] text-red-400">Bearish Trigger</div>
-                <div className="text-xs font-bold text-red-300">
-                  {explain?.suggestions?.stop_loss
-                    ? `$${explain.suggestions.stop_loss.toFixed(2)} altı`
-                    : "Dəstəyin itirilməsi"}
-                </div>
+              <div className="text-right">
+                <div className="text-[9px] text-gray-500">Şərti giriş zonası</div>
+                <div className="text-xs font-bold text-white font-mono">{displayPrice(suggestions.entry)}</div>
               </div>
             </div>
+            {suggestions.stop_loss ? (
+              <div className="mt-1.5 text-[9px] text-red-400/80">
+                İnvalidasiya səviyyəsi: {displayPrice(suggestions.stop_loss)}
+              </div>
+            ) : null}
             {livePrice && (
               <div className="mt-1.5 text-[9px] text-gray-500">
                 Cari qiymət: ${livePrice.toFixed(2)} — təsdiq gözlənilir

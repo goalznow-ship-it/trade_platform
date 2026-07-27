@@ -154,11 +154,14 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
     )
   }
 
-  const combinedDir = aiAnalysis?.combined_direction || analysis?.prediction || "neutral"
   const conf = aiAnalysis?.confidence || analysis?.confidence || 0
   const risk = aiAnalysis?.institutional_score?.risk_level || analysis?.risk_level || "unknown"
   const longProb = aiAnalysis?.institutional_score?.long_probability ?? analysis?.long_probability ?? 50
   const shortProb = aiAnalysis?.institutional_score?.short_probability ?? analysis?.short_probability ?? 50
+  const modelDirection = aiAnalysis?.combined_direction || analysis?.prediction || "neutral"
+  const combinedDir = conf < 70
+    ? (longProb >= shortProb ? "long" : "short")
+    : modelDirection
 
   const isBullish = combinedDir === "long"
   const isBearish = combinedDir === "short"
@@ -168,6 +171,10 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
   const scores = aiAnalysis?.institutional_score?.scores || analysis?.scores || {}
   const factorScores = aiAnalysis?.institutional_score?.factor_scores || analysis?.factor_scores || {}
   const projection = aiAnalysis?.projection
+  const projectionDirection = String(projection?.direction || "").toLowerCase()
+  const projectionConflicts = (projectionDirection === "long" || projectionDirection === "short")
+    && (combinedDir === "long" || combinedDir === "short")
+    && projectionDirection !== combinedDir
   const allScores = { ...scores, ...factorScores }
   const mtf = aiAnalysis?.multi_timeframe_alignment
 
@@ -213,7 +220,13 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
               {isTradeReady ? (isBullish ? "UZUN ↑" : "QISA ↓") : "GÖZLƏ →"}
             </div>
             <div className="text-[10px] text-gray-500">
-              {isBullish ? "Yüksəliş gözlənilir" : isBearish ? "Eniş gözlənilir" : "Gözləmə rejimi"}
+              {isTradeReady
+                ? (isBullish ? "Təsdiqlənmiş yüksəliş siqnalı" : "Təsdiqlənmiş eniş siqnalı")
+                : isBullish
+                  ? "LONG üstünlüyü var, təsdiq yoxdur"
+                  : isBearish
+                    ? "SHORT üstünlüyü var, təsdiq yoxdur"
+                    : "İstiqamət üçün təsdiq yoxdur"}
             </div>
           </div>
         </div>
@@ -333,7 +346,7 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
             </div>
             {Boolean((bestForming as Record<string, unknown>).entry_trigger) && (
               <div className="flex justify-between text-xs">
-                <span className="text-gray-400">Giriş Trigger</span>
+                <span className="text-gray-400">Pattern triggeri</span>
                 <span className="text-white text-right max-w-[60%]">{String((bestForming as Record<string, unknown>).entry_trigger || "")}</span>
               </div>
             )}
@@ -397,6 +410,11 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
             {projection.pattern_status === "confirmed" && <span className="ml-1 text-green-400">(Təsdiqləndi)</span>}
           </h3>
           <div className="space-y-1.5 text-xs">
+            {projectionConflicts && (
+              <div className="rounded border border-amber-800/40 bg-amber-900/15 p-2 text-[9px] text-amber-300">
+                Pattern istiqaməti əsas AI nəticəsi ilə ziddir. Təsdiq gələnədək pattern ayrıca ticarət siqnalı sayılmır.
+              </div>
+            )}
             {conf >= 70 && (
               <>
                 <div className="flex justify-between">
@@ -458,18 +476,18 @@ export function AIPredictionPanel({ analysis, aiAnalysis, loading }: AIPredictio
               <>
                 {projection.entry_trigger && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Bullish Trigger</span>
-                    <span className="text-green-400 text-right max-w-[60%]">{projection.entry_trigger}</span>
+                    <span className="text-gray-500">Pattern triggeri</span>
+                    <span className="text-gray-300 text-right max-w-[60%]">{projection.entry_trigger}</span>
                   </div>
                 )}
                 {projection.invalidation && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Bearish Trigger</span>
+                    <span className="text-gray-500">Pattern invalidasiyası</span>
                     <span className="text-red-400 text-right max-w-[60%]">{projection.invalidation}</span>
                   </div>
                 )}
                 <div className="text-[9px] text-amber-400 mt-1">
-                  Bu triggerlər potensial ssenarilərdir. Təsdiq üçün 70%+ etibar lazımdır.
+                  Bu səviyyələr yalnız pattern ssenarisinə aiddir. Təsdiq üçün 70%+ ümumi siqnal etibarı lazımdır.
                 </div>
               </>
             )}
