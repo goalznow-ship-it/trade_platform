@@ -240,6 +240,11 @@ class InstitutionalSignalEngine:
         signal["reasons_breakdown"] = reasons_breakdown
         signal["exchange"] = exchange_label
         signal["last_updated"] = signal.get("generated_at", "")
+        signal["source"] = f"{exchange_label} real market data"
+        signal["provider_status"] = "available"
+        signal["data_freshness"] = "live"
+        signal["is_stale"] = False
+        signal["fallback_used"] = False
         signal["composite_score"] = max(0, min(100, confidence))
         return signal
 

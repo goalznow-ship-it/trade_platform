@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { api } from "@/lib/api"
 import { cn, formatPrice, formatPercent, getChangeColor } from "@/lib/utils"
 import { ArrowUpDown, Search, Eye, Clock, AlertCircle, RefreshCw } from "lucide-react"
+import { DataQualityIndicator } from "@/components/data/DataQualityIndicator"
 
 interface MatrixRow {
   symbol: string
@@ -299,6 +300,13 @@ export function MarketMatrix() {
       case "exchange_status":
         return (
           <td key={val} className={classes}>
+            <DataQualityIndicator compact meta={{
+              source: row.exchange,
+              data_freshness: row.data_freshness,
+              provider_status: row.data_freshness === "live" ? "available" : "degraded",
+              last_updated: row.last_updated,
+              is_stale: row.data_freshness === "stale",
+            }} />
             <span className="text-[9px] text-gray-500">
               {row.data_freshness === "live" ? "Canlı" : row.data_freshness || "--"}
             </span>

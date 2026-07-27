@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { cn, formatTime } from "@/lib/utils"
+import { DataQualityIndicator, type DataQualityMeta } from "@/components/data/DataQualityIndicator"
 import {
   Newspaper, TrendingUp, TrendingDown, Shield,
   ExternalLink, RefreshCw,
@@ -35,6 +36,7 @@ export function NewsIntelligence() {
   const [filter, setFilter] = useState<string>("all")
   const [error, setError] = useState<string | null>(null)
   const [providerErrors, setProviderErrors] = useState<Record<string, string>>({})
+  const [quality, setQuality] = useState<DataQualityMeta | null>(null)
 
   const load = useCallback(async () => {
       setLoading(true)
@@ -43,9 +45,19 @@ export function NewsIntelligence() {
         const data = await api.getNewsIntelligence()
         setNews(Array.isArray(data?.articles) ? data.articles : [])
         setProviderErrors(data?.provider_errors || {})
+        setQuality({
+          source: data?.source,
+          provider_status: data?.provider_status,
+          data_freshness: data?.data_freshness,
+          last_updated: data?.last_updated,
+          is_stale: data?.is_stale,
+          fallback_used: data?.fallback_used,
+          error_reason: data?.error_reason,
+        })
         if (!data?.articles?.length) setError(data?.error_reason || "Provider-lər xəbər qaytarmadı")
       } catch (exc) {
         setNews([])
+        setQuality(null)
         setError(exc instanceof Error ? exc.message : "Xəbərlər alınmadı")
       } finally {
         setLoading(false)
@@ -90,6 +102,7 @@ export function NewsIntelligence() {
             <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} /> Yenilə
           </button>
         </div>
+        <DataQualityIndicator meta={quality} />
         {(error || Object.keys(providerErrors).length > 0) && <div className="p-3 rounded border border-amber-900/40 bg-amber-950/20 text-xs text-amber-300">
           {error && <div>{error}</div>}
           {Object.keys(providerErrors).map((provider) => <div key={provider}>{provider}: provider müvəqqəti əlçatan deyil</div>)}

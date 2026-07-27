@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { Activity, AlertTriangle, BarChart3, Flame, Radar, RefreshCw, Wallet } from "lucide-react"
+import { DataQualityIndicator } from "@/components/data/DataQualityIndicator"
 
 type Meta = {
   source?: string; last_updated?: string | null; data_freshness?: string
@@ -71,6 +72,7 @@ export function MarketRadar() {
         <button onClick={load} disabled={loading} className="flex items-center gap-1 px-3 py-2 text-xs bg-gray-800 rounded text-gray-300 disabled:opacity-50"><RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`}/>Yenilə</button>
       </div>
       {error && <div className="p-3 border border-red-900 bg-red-950/30 text-red-300 text-xs">{error}</div>}
+      <DataQualityIndicator meta={intel} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{cards.map(([label, value, meta]) =>
         <div key={label} className="p-4 rounded-xl border border-gray-800 bg-gray-900/50"><div className="text-[10px] text-gray-500 uppercase">{label}</div><div className="text-lg font-bold font-mono text-white mt-2">{value}</div><MetaLine meta={meta}/></div>)}
       </div>

@@ -7,6 +7,7 @@ import { AIChart } from "@/components/terminal/AIChart"
 import { AIPredictionPanel } from "@/components/terminal/AIPredictionPanel"
 import { TradeDecisionCard } from "@/components/terminal/TradeDecisionCard"
 import { AIForecastPanel } from "@/components/terminal/AIForecastPanel"
+import { DataQualityIndicator } from "@/components/data/DataQualityIndicator"
 
 interface AnalysisData {
   prediction?: string
@@ -55,6 +56,12 @@ interface InstitutionalSignal {
   }
   execution?: { rejection_reasons?: string[]; approved?: boolean }
   position_sizing?: { leverage?: number; position_size?: number }
+  source?: string
+  provider_status?: string
+  data_freshness?: string
+  last_updated?: string
+  is_stale?: boolean
+  fallback_used?: boolean
 }
 
 export function TerminalPage() {
@@ -224,6 +231,9 @@ export function TerminalPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Chart Area */}
         <div className="flex-1 flex flex-col min-w-0">
+          <div className="border-b border-gray-800 bg-gray-950/70 px-3 py-1.5">
+            <DataQualityIndicator compact meta={signal} />
+          </div>
           <AIChart
             analysis={displayedAnalysis}
             explain={explain}
