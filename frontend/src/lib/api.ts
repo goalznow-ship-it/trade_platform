@@ -343,7 +343,12 @@ export const api = {
     request<any>(`/api/v1/institutional/signal/${encodeURIComponent(symbol.replace("/", "-"))}?timeframe=${encodeURIComponent(timeframe)}&capital=${capital}&risk_percent=${riskPercent}`),
 
   institutionalScan: (minScore = 70, limit = 10) =>
-    request<any>(`/api/v1/institutional/scan?min_score=${minScore}&limit=${limit}`),
+    request<any>(
+      `/api/v1/institutional/scan?min_score=${minScore}&limit=${Math.min(30, Math.max(1, limit))}`,
+      undefined,
+      false,
+      120000,
+    ),
 
   getMultiTimeframe: (symbol: string) =>
     request<any>(`/api/v1/institutional/multi-timeframe/${symbol}`),

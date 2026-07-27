@@ -8,7 +8,7 @@ import {
   Shield, AlertTriangle, Zap, Clock,
 } from "lucide-react"
 import {
-  type UnifiedSignal, displayPrice, displayDate, isStale, gradeSignal,
+  type UnifiedSignal, displayPrice, displayDate, isStale, isTradeReady, isWatchlist,
 } from "@/lib/unified-signal"
 
 interface SignalCardProps {
@@ -31,11 +31,20 @@ function getConfidenceBg(score: number): string {
   return "bg-gray-600"
 }
 
+function localizeReason(reason: string): string {
+  const belowThreshold = reason.match(/^Score\s+([\d.]+)\/100\s+below\s+70\s+threshold$/i)
+  if (belowThreshold) return `Bal ${belowThreshold[1]}/100 — 70 təsdiq həddindən aşağıdır`
+  return reason
+    .replace(/^Insufficient timeframe alignment$/i, "Zaman çərçivələri kifayət qədər uyğunlaşmır")
+    .replace(/^Execution rejected$/i, "Execution gate ticarəti təsdiqləmədi")
+}
+
 export function SignalCard({ signal }: SignalCardProps) {
   const [expanded, setExpanded] = useState(false)
   const isLong = signal.direction === "long"
   const isShort = signal.direction === "short"
-  const grade = gradeSignal(signal.confidence)
+  const tradeReady = isTradeReady(signal)
+  const watchlist = isWatchlist(signal)
   const reasons = signal.reasons || []
   const rb = signal.reasons_breakdown || {}
   const score = signal.institutional_score
@@ -47,7 +56,7 @@ export function SignalCard({ signal }: SignalCardProps) {
       isLong ? "border-green-900/40 bg-gradient-to-r from-green-900/5 to-transparent" :
       isShort ? "border-red-900/40 bg-gradient-to-r from-red-900/5 to-transparent" :
       "border-gray-800 bg-gray-900/30",
-      grade === "reject" && "opacity-50",
+      !tradeReady && !watchlist && "opacity-50",
     )}>
       <div className="p-3.5">
         {/* Header */}
@@ -72,19 +81,19 @@ export function SignalCard({ signal }: SignalCardProps) {
                 )}>
                   {isLong ? "LONG" : isShort ? "SHORT" : "WAIT"}
                 </span>
-                {grade === "trade_ready" && (
+                {tradeReady && (
                   <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-700/30">
                     Trade Ready
                   </span>
                 )}
-                {grade === "watchlist" && (
+                {watchlist && (
                   <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-yellow-900/40 text-yellow-300 border border-yellow-700/30">
-                    Watchlist
+                    İzləmə
                   </span>
                 )}
               </div>
               {reasons.length > 0 && (
-                <div className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{reasons[0]}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{localizeReason(reasons[0])}</div>
               )}
             </div>
           </div>
@@ -93,19 +102,28 @@ export function SignalCard({ signal }: SignalCardProps) {
               {signal.confidence}%
             </div>
             <div className="text-[10px] text-gray-500">
-              Opp: {signal.opportunity_score}
+              Fürsət: {signal.opportunity_score}
             </div>
           </div>
         </div>
 
-        {/* Price Levels */}
-        <div className="grid grid-cols-5 gap-1.5 mb-2">
-          <PriceBox label="Entry" value={signal.entry_zone.mid} color="text-blue-400" bg="bg-blue-900/15 border-blue-900/20" />
-          <PriceBox label="Stop Loss" value={signal.stop_loss} color="text-red-400" bg="bg-red-900/15 border-red-900/20" />
-          <PriceBox label="TP1" value={signal.take_profit_1} color="text-green-400" bg="bg-green-900/15 border-green-900/20" />
-          <PriceBox label="TP2" value={signal.take_profit_2} color="text-green-400/80" bg="bg-green-900/10 border-green-900/15" />
-          <PriceBox label="TP3" value={signal.take_profit_3} color="text-green-400/60" bg="bg-green-900/5 border-green-900/10" />
-        </div>
+        {/* Executable levels are shown only after confidence and execution gates pass. */}
+        {tradeReady ? (
+          <div className="grid grid-cols-5 gap-1.5 mb-2">
+            <PriceBox label="Giriş" value={signal.entry_zone.mid} color="text-blue-400" bg="bg-blue-900/15 border-blue-900/20" />
+            <PriceBox label="Stop Loss" value={signal.stop_loss} color="text-red-400" bg="bg-red-900/15 border-red-900/20" />
+            <PriceBox label="TP1" value={signal.take_profit_1} color="text-green-400" bg="bg-green-900/15 border-green-900/20" />
+            <PriceBox label="TP2" value={signal.take_profit_2} color="text-green-400/80" bg="bg-green-900/10 border-green-900/15" />
+            <PriceBox label="TP3" value={signal.take_profit_3} color="text-green-400/60" bg="bg-green-900/5 border-green-900/10" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-1.5 mb-2">
+            <InfoBox label="Cari qiymət" value={displayPrice(signal.live_price)} color="text-white" />
+            <InfoBox label="LONG ehtimalı" value={`${signal.institutional_score.long_probability.toFixed(0)}%`} color="text-green-400" />
+            <InfoBox label="SHORT ehtimalı" value={`${signal.institutional_score.short_probability.toFixed(0)}%`} color="text-red-400" />
+            <InfoBox label="Status" value="Təsdiq gözlənilir" color="text-amber-400" />
+          </div>
+        )}
 
         {/* Meta */}
         <div className="flex items-center gap-2.5 text-[10px] text-gray-500">
@@ -131,7 +149,7 @@ export function SignalCard({ signal }: SignalCardProps) {
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors"
           >
-            <span className="text-[10px]">Details</span>
+            <span className="text-[10px]">Detallar</span>
             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
         </div>
@@ -240,6 +258,15 @@ function PriceBox({ label, value, color, bg }: { label: string; value: number; c
       <div className={`text-[11px] font-bold font-mono leading-tight ${color}`}>
         {value > 0 ? formatPrice(value) : "N/A"}
       </div>
+    </div>
+  )
+}
+
+function InfoBox({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="p-2 rounded bg-gray-800/30 border border-gray-700/20">
+      <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">{label}</div>
+      <div className={`text-[11px] font-bold font-mono leading-tight ${color}`}>{value}</div>
     </div>
   )
 }

@@ -69,11 +69,12 @@ export function gradeSignal(confidence: number): SignalGrade {
 }
 
 export function isTradeReady(signal: UnifiedSignal): boolean {
-  return signal.direction !== "neutral" && signal.confidence >= 70
+  const executionApproved = signal.execution === null || signal.execution.approved
+  return signal.direction !== "neutral" && signal.confidence >= 70 && executionApproved
 }
 
 export function isWatchlist(signal: UnifiedSignal): boolean {
-  return signal.direction !== "neutral" && signal.confidence >= 50 && signal.confidence < 70
+  return signal.direction !== "neutral" && signal.confidence >= 50 && !isTradeReady(signal)
 }
 
 export function isReject(signal: UnifiedSignal): boolean {
