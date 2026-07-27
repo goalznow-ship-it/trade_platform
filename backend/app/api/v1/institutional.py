@@ -19,6 +19,13 @@ from app.services.canonical_signal import canonical_signal
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
 
+@router.get("/signal-monitor")
+async def get_signal_monitor(user: dict = Depends(get_current_user)):
+    """Current state of the real-data proactive LONG/SHORT monitor."""
+    from app.services.early_signal_monitor import early_signal_monitor
+    return early_signal_monitor.snapshot()
+
+
 @router.get("/signal/{symbol}")
 async def get_institutional_signal(
     symbol: str,

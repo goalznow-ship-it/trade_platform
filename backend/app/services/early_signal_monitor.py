@@ -15,6 +15,8 @@ class EarlySignalMonitor:
     def __init__(self) -> None:
         self._previous: dict[str, dict] = {}
         self._initialized = False
+        self._last_updated: str | None = None
+        self._last_transitions: list[dict] = []
 
     @staticmethod
     def quality_score(signal: dict) -> float:
@@ -59,6 +61,7 @@ class EarlySignalMonitor:
         if not self._initialized:
             self._previous = current
             self._initialized = True
+            self._last_updated = datetime.now(timezone.utc).isoformat()
             return []
 
         transitions = []
@@ -81,9 +84,33 @@ class EarlySignalMonitor:
                 transitions.append({**state, "symbol": symbol, "type": "signal_watch"})
 
         self._previous = current
+        self._last_updated = datetime.now(timezone.utc).isoformat()
+        self._last_transitions = transitions
         if transitions:
             await self._notify_active_users(transitions)
         return transitions
+
+    def snapshot(self) -> dict:
+        ranked = sorted(
+            (
+                {"symbol": symbol, **state}
+                for symbol, state in self._previous.items()
+            ),
+            key=lambda item: item["quality_score"],
+            reverse=True,
+        )
+        return {
+            "status": "active" if self._initialized else "starting",
+            "scan_interval_seconds": 60,
+            "watch_threshold": 50,
+            "confirmation_threshold": 70,
+            "last_updated": self._last_updated,
+            "signals": ranked,
+            "watching": [item for item in ranked if item["stage"] == "watch"],
+            "confirmed": [item for item in ranked if item["stage"] == "confirmed"],
+            "last_transitions": self._last_transitions,
+            "count": len(ranked),
+        }
 
     async def _notify_active_users(self, transitions: list[dict]) -> None:
         async with async_session_factory() as db:

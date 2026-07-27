@@ -350,6 +350,9 @@ export const api = {
       120000,
     ),
 
+  getSignalMonitor: () =>
+    request<any>("/api/v1/institutional/signal-monitor"),
+
   getMultiTimeframe: (symbol: string) =>
     request<any>(`/api/v1/institutional/multi-timeframe/${symbol}`),
 

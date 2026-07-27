@@ -19,6 +19,7 @@ import type { Overview, Notification } from "@/lib/types"
 const MODULES = [
   { href: "/terminal", label: "AI Terminal", icon: Brain, color: "text-blue-400" },
   { href: "/signals", label: "AI Signals", icon: Radio, color: "text-green-400" },
+  { href: "/monitor", label: "Siqnal Monitoru", icon: BellRing, color: "text-yellow-400", isNew: true },
   { href: "/radar", label: "Market Radar", icon: Activity, color: "text-purple-400" },
   { href: "/scanner", label: "Scanner", icon: Scan, color: "text-cyan-400" },
   { href: "/futures", label: "Futures Intel", icon: BarChart3, color: "text-orange-400" },
@@ -38,7 +39,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/monitor" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
@@ -187,7 +188,7 @@ export function Navbar() {
               const isActive = pathname === mod.href || (
                   mod.href === "/dashboard" && (
                     pathname === "/dashboard" ||
-                    (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner" && pathname !== "/matrix")
+                    (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/monitor" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner" && pathname !== "/matrix")
                   )
               )
               return (
@@ -200,6 +201,7 @@ export function Navbar() {
                   )}>
                   <mod.icon className={cn("w-3.5 h-3.5", isActive ? mod.color : "")} />
                   {mod.label}
+                  {mod.isNew && <span className="rounded bg-yellow-500/20 px-1 text-[7px] font-bold text-yellow-400">YENİ</span>}
                   {isActive && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-full" />}
                 </Link>
               )
