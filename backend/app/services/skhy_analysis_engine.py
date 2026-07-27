@@ -1065,8 +1065,14 @@ class SkhyAnalysisEngine:
         main_activation = activation_text(main_label, main_dir, main_path)
         alt_activation = activation_text(alt_label, alt_dir, alt_path)
 
+        h4_direction = "LONG" if h4_sig in ("LONG", "STRONG_LONG") else "SHORT" if h4_sig in ("SHORT", "STRONG_SHORT") else "WAIT"
+        h4_reason = (
+            f"4H siqnalı {h4_direction} istiqamətində"
+            if h4_direction != "WAIT"
+            else "4H istiqaməti üçün təsdiq yoxdur"
+        )
         main_reasons = [
-            f"{'4H' if h4_sig else 'H4'} siqnalı {main_label} istiqamətində" if h4_sig in ("LONG","STRONG_LONG","SHORT","STRONG_SHORT") else "Neytral 4H bazası",
+            h4_reason,
             f"1H {h1_trend} trend",
             f"Ehtimal: {max(long_prob,short_prob)}%",
         ]

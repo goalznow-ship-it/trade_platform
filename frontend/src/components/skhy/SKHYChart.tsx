@@ -101,7 +101,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const [dbg, setDbg] = useState<string>("")
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
     aiOverlay: true, structure: false, channel: false, breakout: false, retest: false,
-    fibonacci: false, targets: false, mainScenario: true, altScenario: true,
+    fibonacci: false, targets: false, mainScenario: true, altScenario: false,
     fakeout: false, smc: false, liquidity: false, ema: false, atrStop: false,
     volumeProfile: false, elliott: false, triggers: true,
     patterns: false, cone: false,
@@ -143,10 +143,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const ew = activeAnalysis?.elliott_wave as Record<string, unknown> | undefined
   const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
   const mainDir = s(mainSc?.direction_az || mainSc?.direction || "")
+  const activeDirection: "LONG" | "SHORT" =
+    mainDir.includes("LONG") || mainDir.includes("ALIŞ") || mainDir.includes("UP") ? "LONG" : "SHORT"
   const mainProb = n(mainSc?.probability)
-  const altSc = norm.scenarios.alt
-  const altDir = s(altSc?.direction || "")
-  const altProb = n(altSc?.probability)
   const invalLevel = n(activeAnalysis?.invalidation_level)
   const tradePlan = activeAnalysis?.trade_plan as Record<string, unknown> | undefined
   const analysisTriggers = (activeAnalysis?.triggers || {}) as Record<string, unknown>
@@ -160,8 +159,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     const chart = chartRef.current; const cs = candleSeriesRef.current; const d = ohlcv.length > 0 ? ohlcv : lastValidOhlcvRef.current
     if (!chart || !cs || d.length === 0) return
     const prices: number[] = [d[d.length - 1].close]
-    if (norm.longTrigger > 0) prices.push(norm.longTrigger)
-    if (norm.shortTrigger > 0) prices.push(norm.shortTrigger)
+    if (activeDirection === "LONG" && norm.longTrigger > 0) prices.push(norm.longTrigger)
+    if (activeDirection === "SHORT" && norm.shortTrigger > 0) prices.push(norm.shortTrigger)
     if (norm.breakout.top > 0) prices.push(norm.breakout.top, norm.breakout.bottom)
     for (const s of norm.supports) { if (s.price > 0) prices.push(s.price) }
     for (const r of norm.resistances) { if (r.price > 0) prices.push(r.price) }
@@ -244,7 +243,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     if (overlays.patterns) track("pattern", () => drawPatternPrimitive(ctx, toX, toY, norm, data, w, confidence, lx, candleW))
     // 7. Scenario paths are native chart series so zoom and pan remain exact.
     // 8. TRIGGERS (drawn on top of everything)
-    if (overlays.triggers) track("triggers", () => drawTriggersPrimitive(ctx, pw, h, norm, cs))
+    if (overlays.triggers) track("triggers", () => drawTriggersPrimitive(ctx, pw, h, norm, cs, activeDirection))
 
     // 9. Entry, stop and targets are actionable only after the execution threshold.
     if (showEntrySLTP) {
@@ -270,7 +269,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       setDbg(nextDbg)
     }
     return true
-  }, [ohlcv, overlays, activeAnalysis, triggersProp, sr, confidence, norm, ew, fib, ds, cl, bz, sp, th, cb, price, activePatterns, tradePlan, mainSc, ltPrice, stPrice, longProb, shortProb, hasAnalysis, analysisTriggers, fpv2, invalLevel, showEntrySLTP])
+  }, [ohlcv, overlays, activeAnalysis, triggersProp, sr, confidence, norm, ew, fib, ds, cl, bz, sp, th, cb, price, activePatterns, tradePlan, mainSc, ltPrice, stPrice, longProb, shortProb, hasAnalysis, analysisTriggers, fpv2, invalLevel, showEntrySLTP, activeDirection])
 
   // ── DIRECT VISIBLE CANVAS RENDER ──
   useEffect(() => {
@@ -404,7 +403,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
       if (vr) chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, ohlcv.length - 60), to: ohlcv.length + 55 })
     }
     markDirty()
-  }, [chartReady, ohlcv, overlays, markDirty])
+  }, [activeDirection, chartReady, ohlcv, overlays, markDirty])
 
   useEffect(() => {
     if (!chartReady) return
@@ -428,13 +427,14 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
         }))
     }
     mainForecastRef.current?.applyOptions({
+      color: activeDirection === "LONG" ? "#22c55e" : "#ef4444",
       lineStyle: confidence >= 50 ? LineStyle.Solid : LineStyle.Dashed,
     })
     mainForecastRef.current?.setData(overlays.aiOverlay && overlays.mainScenario ? toSeriesData(norm.scenarios.main) : [])
-    altForecastRef.current?.setData(overlays.aiOverlay && overlays.altScenario ? toSeriesData(norm.scenarios.alt) : [])
+    altForecastRef.current?.setData([])
     fakeoutForecastRef.current?.setData(overlays.aiOverlay && overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
     markDirty()
-  }, [activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.aiOverlay, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
+  }, [activeDirection, activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.aiOverlay, overlays.fakeout, overlays.mainScenario, markDirty])
 
   useEffect(() => { markDirty() }, [markDirty, analysis, triggersProp, sr, confidence, price])
 
@@ -457,7 +457,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     setOverlays(prev => {
       if (key === "mainScenario") {
         const enabled = !prev.mainScenario
-        return { ...prev, mainScenario: enabled, altScenario: enabled }
+        return { ...prev, mainScenario: enabled }
       }
       return { ...prev, [key]: !prev[key] }
     })
@@ -554,18 +554,12 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             <div className="text-[8px] text-gray-500">Təsdiq üçün trigger bağlanışı gözlənilir</div>
           </div>
         )}
-        {overlays.aiOverlay && (overlays.mainScenario || overlays.altScenario) && (norm.scenarios.main || norm.scenarios.alt) && (
+        {overlays.aiOverlay && overlays.mainScenario && norm.scenarios.main && (
           <div className="absolute top-14 left-2 z-[8] flex items-center gap-3 pointer-events-none rounded border border-gray-700/50 bg-gray-950/80 px-2 py-1 shadow-lg backdrop-blur-sm">
             {norm.scenarios.main && (
-              <span className="flex items-center gap-1 text-[8px] font-semibold text-cyan-300">
-                <span className="h-0.5 w-4 bg-cyan-400" />
-                Əsas {s(norm.scenarios.main.direction)} · {n(norm.scenarios.main.probability)}%
-              </span>
-            )}
-            {altSc && (
-              <span className="flex items-center gap-1 text-[8px] font-semibold text-amber-300">
-                <span className="h-0.5 w-4 border-t border-dashed border-amber-400" />
-                Alternativ {altDir} · {altProb}%
+              <span className={cn("flex items-center gap-1 text-[8px] font-semibold", activeDirection === "LONG" ? "text-green-300" : "text-red-300")}>
+                <span className={cn("h-0.5 w-4", activeDirection === "LONG" ? "bg-green-400" : "bg-red-400")} />
+                Əsas {activeDirection} · {n(norm.scenarios.main.probability)}%
               </span>
             )}
             <span className={cn("text-[7px] font-bold", confidence >= 50 ? "text-cyan-400" : "text-yellow-500")}>
@@ -1237,7 +1231,7 @@ function buildHover(
 
 function drawTriggersPrimitive(
   ctx: CanvasRenderingContext2D, w: number, h: number,
-  norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">,
+  norm: NormalizedAnalysis, cs: ISeriesApi<"Candlestick">, activeDirection: "LONG" | "SHORT",
 ): PrimitiveCount {
   let dc = 0; let vc = 0; let ec = 0
   const drawOne = (label: string, price: number, color: string, badgeColor: string) => {
@@ -1263,8 +1257,11 @@ function drawTriggersPrimitive(
     }
   }
 
-  drawOne("LONG", norm.longTrigger, "rgba(34,197,94,1)", "rgba(34,197,94,1)")
-  drawOne("SHORT", norm.shortTrigger, "rgba(239,68,68,1)", "rgba(239,68,68,1)")
+  if (activeDirection === "LONG") {
+    drawOne("LONG", norm.longTrigger, "rgba(34,197,94,1)", "rgba(34,197,94,1)")
+  } else {
+    drawOne("SHORT", norm.shortTrigger, "rgba(239,68,68,1)", "rgba(239,68,68,1)")
+  }
   return { dataCount: dc, visibleCount: vc, edgeCount: ec }
 }
 
