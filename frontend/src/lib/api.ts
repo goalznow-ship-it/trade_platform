@@ -153,8 +153,18 @@ export const api = {
 
   getBalance: () => request<any>("/api/v1/trade/balance"),
 
-  saveAPIKeys: (data: { exchange: string; api_key: string; secret_key: string }) =>
+  getTradingStatus: () => request<any>("/api/v1/trade/status"),
+
+  getExchangeCredentials: () => request<any[]>("/api/v1/trade/api-keys"),
+
+  testAPIKeys: (data: { exchange: string; api_key: string; secret_key: string; passphrase?: string; label?: string }) =>
+    request<any>("/api/v1/trade/api-keys/test", { method: "POST", body: JSON.stringify(data) }),
+
+  saveAPIKeys: (data: { exchange: string; api_key: string; secret_key: string; passphrase?: string; label?: string }) =>
     request("/api/v1/trade/api-keys", { method: "POST", body: JSON.stringify(data) }),
+
+  removeAPIKeys: (exchange: string) =>
+    request(`/api/v1/trade/api-keys/${encodeURIComponent(exchange)}`, { method: "DELETE" }),
 
   getTradeHistory: (params?: { skip?: number; limit?: number; symbol?: string }) => {
     const q = new URLSearchParams()

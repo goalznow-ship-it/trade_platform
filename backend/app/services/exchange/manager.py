@@ -141,6 +141,27 @@ class ExchangeManager:
             logger.error(f"Save credentials error: {e}")
             return False
 
+    async def test_credentials(
+        self,
+        exchange: str,
+        api_key: str,
+        secret_key: str,
+        passphrase: Optional[str] = None,
+    ) -> bool:
+        factory = self._exchange_factories.get(exchange)
+        if not factory:
+            return False
+        client = factory()
+        try:
+            return bool(await client.connect(api_key, secret_key, passphrase))
+        except Exception:
+            return False
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
     async def remove_credentials(self, user_id: int, exchange: str,
                                    db: AsyncSession) -> bool:
         try:

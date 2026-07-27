@@ -44,11 +44,11 @@ class OrderRequest(BaseModel):
 
 
 class APIKeyRequest(BaseModel):
-    exchange: str
-    api_key: str
-    secret_key: str
+    exchange: str = Field(pattern="^(binance|bybit)$")
+    api_key: str = Field(min_length=8, max_length=255)
+    secret_key: str = Field(min_length=8, max_length=255)
     passphrase: Optional[str] = None
-    label: Optional[str] = None
+    label: Optional[str] = Field(default=None, max_length=100)
 
 
 class TradeNoteUpdate(BaseModel):
@@ -69,6 +69,38 @@ class ModifyOrderRequest(BaseModel):
     price: Optional[float] = None
     quantity: Optional[float] = None
     stop_price: Optional[float] = None
+
+
+@router.get("/status")
+async def trading_status(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.exchange import ExchangeCredentials
+
+    result = await db.execute(
+        select(ExchangeCredentials.exchange).where(
+            ExchangeCredentials.user_id == user.id,
+            ExchangeCredentials.is_active == True,
+        )
+    )
+    configured_exchanges = list(result.scalars().all())
+    kill_switch_active = False
+    try:
+        kill_switch_active = await redis_client.get("trading:kill_switch") == "1"
+    except Exception:
+        pass
+    return {
+        "default_mode": "paper",
+        "live_trading_enabled": settings.TRADING_ENABLED,
+        "kill_switch_active": kill_switch_active,
+        "accepting_live_orders": (
+            settings.TRADING_ENABLED
+            and not kill_switch_active
+            and bool(configured_exchanges)
+        ),
+        "configured_exchanges": configured_exchanges,
+    }
 
 
 @router.post("/order")
@@ -507,19 +539,63 @@ async def export_trades_csv(
     )
 
 
+@router.get("/api-keys")
+async def list_api_keys(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.exchange import ExchangeCredentials
+
+    result = await db.execute(
+        select(ExchangeCredentials).where(
+            ExchangeCredentials.user_id == user.id,
+            ExchangeCredentials.is_active == True,
+        ).order_by(ExchangeCredentials.exchange)
+    )
+    return [
+        {
+            "exchange": credential.exchange,
+            "label": credential.label,
+            "configured": True,
+            "last_used": credential.last_used,
+            "created_at": credential.created_at,
+            "updated_at": credential.updated_at,
+        }
+        for credential in result.scalars().all()
+    ]
+
+
+@router.post("/api-keys/test")
+async def test_api_keys(
+    req: APIKeyRequest,
+    user: User = Depends(get_current_user),
+):
+    connected = await exchange_manager.test_credentials(
+        req.exchange, req.api_key, req.secret_key, req.passphrase,
+    )
+    if not connected:
+        raise HTTPException(400, "Exchange connection failed")
+    return {"exchange": req.exchange, "connected": True}
+
+
 @router.post("/api-keys")
 async def save_api_keys(
     req: APIKeyRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    connected = await exchange_manager.test_credentials(
+        req.exchange, req.api_key, req.secret_key, req.passphrase,
+    )
+    if not connected:
+        raise HTTPException(400, "Exchange connection failed; credentials were not saved")
     success = await exchange_manager.save_credentials(
         user.id, req.exchange, req.api_key, req.secret_key,
         passphrase=req.passphrase, label=req.label, db=db,
     )
     if not success:
         raise HTTPException(400, "Failed to save API keys")
-    return {"message": "API keys saved securely"}
+    return {"message": "API keys verified and saved securely", "exchange": req.exchange}
 
 
 @router.delete("/api-keys/{exchange}")
@@ -528,5 +604,9 @@ async def remove_api_keys(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await exchange_manager.remove_credentials(user.id, exchange, db)
+    if exchange not in {"binance", "bybit"}:
+        raise HTTPException(400, "Unsupported exchange")
+    removed = await exchange_manager.remove_credentials(user.id, exchange, db)
+    if not removed:
+        raise HTTPException(400, "Failed to remove API keys")
     return {"message": "API keys removed"}
