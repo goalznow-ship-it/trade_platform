@@ -72,6 +72,19 @@ class ModifyOrderRequest(BaseModel):
     stop_price: Optional[float] = None
 
 
+class ClosePositionRequest(BaseModel):
+    exchange: str = Field(default="binance", pattern="^(binance|bybit)$")
+    symbol: str = Field(min_length=3, max_length=30)
+    percentage: int = Field(default=100, ge=1, le=100)
+    client_order_id: str = Field(
+        min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$",
+    )
+
+
+def _canonical_symbol(symbol: str) -> str:
+    return symbol.upper().split(":")[0].replace("/", "").replace("-", "")
+
+
 @router.get("/status")
 async def trading_status(
     user: User = Depends(get_current_user),
@@ -389,6 +402,101 @@ async def get_positions(
                     "exchange": exchange_name,
                 })
     return positions
+
+
+@router.post("/positions/close")
+async def close_position(
+    req: ClosePositionRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Close all or part of an existing position using a reduce-only market order."""
+    if not settings.TRADING_ENABLED:
+        raise HTTPException(503, "Live trading is disabled by server configuration")
+    try:
+        if await redis_client.get("trading:kill_switch") == "1":
+            raise HTTPException(503, "Emergency trading kill switch is active")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    existing = await db.execute(
+        select(Order).where(
+            Order.user_id == user.id,
+            Order.client_order_id == req.client_order_id,
+        )
+    )
+    existing_order = existing.scalar_one_or_none()
+    if existing_order:
+        return {
+            "order_id": existing_order.exchange_order_id,
+            "symbol": existing_order.symbol,
+            "side": existing_order.side,
+            "status": existing_order.status,
+            "filled_quantity": existing_order.filled_quantity,
+            "idempotent_replay": True,
+        }
+
+    exchange = await exchange_manager.get_user_exchange(user.id, req.exchange, db)
+    if not exchange or not exchange.is_connected:
+        raise HTTPException(400, "Exchange not connected")
+
+    positions = await exchange.get_positions(req.symbol)
+    target = next(
+        (position for position in positions
+         if _canonical_symbol(position.symbol) == _canonical_symbol(req.symbol)),
+        None,
+    )
+    if target is None or target.size <= 0:
+        raise HTTPException(404, "Open position not found")
+    if target.side not in ("long", "short"):
+        raise HTTPException(409, "Position side is unavailable")
+
+    quantity = target.size * req.percentage / 100
+    if quantity <= 0 or quantity > target.size:
+        raise HTTPException(422, "Close quantity exceeds open position")
+    close_side = "sell" if target.side == "long" else "buy"
+    ex_req = ExchangeOrderRequest(
+        symbol=req.symbol,
+        side=close_side,
+        quantity=quantity,
+        order_type="market",
+        leverage=max(target.leverage, 1),
+        reduce_only=True,
+        margin_mode="isolated" if target.isolated else "cross",
+        client_order_id=req.client_order_id,
+    )
+    result = await exchange_manager.create_order(user.id, req.exchange, ex_req, db)
+    if result.error:
+        raise HTTPException(400, result.error)
+
+    order_record = Order(
+        user_id=user.id,
+        symbol=req.symbol,
+        side=close_side,
+        type="market",
+        quantity=quantity,
+        filled_quantity=result.filled_quantity,
+        status=result.status,
+        exchange=req.exchange,
+        exchange_order_id=result.order_id,
+        client_order_id=req.client_order_id,
+    )
+    db.add(order_record)
+    await db.commit()
+    return {
+        "order_id": result.order_id,
+        "symbol": result.symbol,
+        "side": result.side,
+        "status": result.status,
+        "requested_percentage": req.percentage,
+        "requested_quantity": quantity,
+        "filled_quantity": result.filled_quantity,
+        "avg_price": result.avg_price,
+        "reduce_only": True,
+        "idempotent_replay": False,
+    }
 
 
 @router.get("/balance")

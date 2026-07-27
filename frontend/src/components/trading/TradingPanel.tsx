@@ -6,7 +6,7 @@ import { useMarketStore } from "@/store/market"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { cn, formatPrice } from "@/lib/utils"
-import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ShieldCheck, Store } from "lucide-react"
+import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ShieldCheck, Store, X } from "lucide-react"
 
 type Mode = "paper" | "live"
 type Side = "long" | "short"
@@ -41,6 +41,29 @@ interface OrderPreview {
   estimated_slippage?: { estimated_slippage_pct?: number; liquidity_tier?: string }
 }
 
+interface LivePosition {
+  exchange: string
+  symbol: string
+  side: "long" | "short"
+  size: number
+  entry_price: number
+  mark_price: number
+  liquidation_price: number
+  leverage: number
+  unrealized_pnl: number
+}
+
+interface LiveOrder {
+  order_id: string
+  symbol: string
+  side: string
+  order_type: string
+  quantity: number
+  filled_quantity: number
+  price?: number | null
+  status: string
+}
+
 const LEVERAGE_OPTIONS = [1, 2, 3, 5, 10, 20, 50]
 const fieldClass = "w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white outline-none focus:border-blue-500"
 
@@ -56,13 +79,15 @@ export function TradingPanel() {
   const [takeProfit, setTakeProfit] = useState("")
   const [status, setStatus] = useState<TradingStatus | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
-  const [positions, setPositions] = useState<any[]>([])
+  const [positions, setPositions] = useState<LivePosition[]>([])
+  const [openOrders, setOpenOrders] = useState<LiveOrder[]>([])
   const [restPrice, setRestPrice] = useState(0)
   const [preview, setPreview] = useState<OrderPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [closeDraft, setCloseDraft] = useState<{ position: LivePosition; percentage: number } | null>(null)
 
   const ticker = tickers[selectedSymbol] || tickers[selectedSymbol.replace("/", "")] || tickers[selectedSymbol.replace("/", "-")]
   const marketPrice = Number(ticker?.price || restPrice || 0)
@@ -74,14 +99,16 @@ export function TradingPanel() {
 
   async function loadAccount() {
     try {
-      const [statusData, balanceData, positionData] = await Promise.all([
+      const [statusData, balanceData, positionData, orderData] = await Promise.all([
         api.getTradingStatus(),
         api.getBalance().catch(() => ({})),
         api.getPositions().catch(() => []),
+        api.getOpenOrders("binance").catch(() => []),
       ])
       setStatus(statusData)
       setBalance(balanceData?.binance?.free ?? null)
-      setPositions(Array.isArray(positionData) ? positionData : [])
+      setPositions(Array.isArray(positionData) ? positionData as LivePosition[] : [])
+      setOpenOrders(Array.isArray(orderData) ? orderData as LiveOrder[] : [])
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Trading statusu alınmadı")
     }
@@ -186,6 +213,42 @@ export function TradingPanel() {
     }
   }
 
+  async function handleClosePosition() {
+    if (!closeDraft || liveUnavailable) return
+    setBusy(true); setError(null)
+    try {
+      const clientOrderId = `close_${crypto.randomUUID().replaceAll("-", "")}`
+      const result = await api.closePosition({
+        exchange: closeDraft.position.exchange,
+        symbol: closeDraft.position.symbol,
+        percentage: closeDraft.percentage,
+        client_order_id: clientOrderId,
+      })
+      setNotice(`${closeDraft.percentage}% reduce-only close qəbul edildi: ${result.order_id || result.status}`)
+      setCloseDraft(null)
+      await loadAccount()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Mövqe bağlanmadı")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleCancelOrder(order: LiveOrder) {
+    if (!window.confirm(`${order.symbol} ${order.order_type} order-i ləğv edilsin?`)) return
+    setBusy(true); setError(null)
+    try {
+      const result = await api.cancelOrder({ exchange: "binance", symbol: order.symbol, order_id: order.order_id })
+      if (!result.success) throw new Error("Exchange order-i ləğv etmədi")
+      setNotice("Açıq order ləğv edildi")
+      await loadAccount()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Order ləğv edilmədi")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="space-y-3 border-b border-gray-800 p-3">
@@ -285,8 +348,33 @@ export function TradingPanel() {
       <div className="p-3">
         <div className="mb-2 text-xs font-medium text-gray-400">Live mövqelər ({positions.length})</div>
         {!positions.length ? <div className="py-3 text-center text-xs text-gray-600">Açıq live mövqe yoxdur</div> : positions.slice(0, 4).map((position) => (
-          <div key={`${position.exchange}-${position.symbol}-${position.side}`} className="mb-1 rounded bg-gray-900 p-2 text-xs text-gray-400">
-            <span className="font-semibold text-white">{position.symbol}</span> · {position.side} · {position.size} <span className={cn("float-right", position.unrealized_pnl >= 0 ? "text-green-400" : "text-red-400")}>{formatPrice(position.unrealized_pnl)}</span>
+          <div key={`${position.exchange}-${position.symbol}-${position.side}`} className="mb-2 space-y-2 rounded border border-gray-800 bg-gray-900 p-2 text-xs text-gray-400">
+            <div><span className="font-semibold text-white">{position.symbol}</span> · <span className={position.side === "long" ? "text-green-400" : "text-red-400"}>{position.side.toUpperCase()}</span> · {position.leverage}x <span className={cn("float-right", position.unrealized_pnl >= 0 ? "text-green-400" : "text-red-400")}>{formatPrice(position.unrealized_pnl)}</span></div>
+            <div className="grid grid-cols-2 gap-1 text-[11px]">
+              <span>Ölçü <b className="float-right text-white">{position.size}</b></span>
+              <span>Giriş <b className="float-right text-white">{formatPrice(position.entry_price)}</b></span>
+              <span>Mark <b className="float-right text-white">{formatPrice(position.mark_price)}</b></span>
+              <span>Likvidasiya <b className="float-right text-red-300">{position.liquidation_price ? formatPrice(position.liquidation_price) : "—"}</b></span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {[25, 50, 100].map((percentage) => <button key={percentage} disabled={busy || liveUnavailable} onClick={() => setCloseDraft({ position, percentage })} className="rounded bg-red-950/40 py-1 text-[11px] text-red-300 hover:bg-red-900/50 disabled:opacity-40">{percentage}% bağla</button>)}
+            </div>
+          </div>
+        ))}
+
+        {closeDraft && (
+          <div className="mb-3 space-y-2 rounded border border-red-500/40 bg-red-950/30 p-2 text-xs">
+            <div className="flex items-center justify-between"><b className="text-red-200">REAL MÖVQE BAĞLAMA</b><button onClick={() => setCloseDraft(null)}><X className="h-3.5 w-3.5" /></button></div>
+            <p className="text-gray-300">{closeDraft.position.symbol} mövqeyinin <b>{closeDraft.percentage}%</b> hissəsi reduce-only market order ilə bağlanacaq.</p>
+            <div className="grid grid-cols-2 gap-2"><Button variant="ghost" disabled={busy} onClick={() => setCloseDraft(null)}>Ləğv et</Button><Button variant="danger" disabled={busy || liveUnavailable} onClick={handleClosePosition}>{busy ? "Göndərilir..." : "BAĞLANMANI TƏSDİQLƏ"}</Button></div>
+          </div>
+        )}
+
+        <div className="mb-2 mt-3 text-xs font-medium text-gray-400">Açıq order-lər ({openOrders.length})</div>
+        {!openOrders.length ? <div className="py-2 text-center text-xs text-gray-600">Açıq live order yoxdur</div> : openOrders.slice(0, 6).map((order) => (
+          <div key={order.order_id} className="mb-1 flex items-center justify-between rounded bg-gray-900 p-2 text-xs">
+            <div><b className="text-white">{order.symbol}</b><div className="text-[10px] text-gray-500">{order.side.toUpperCase()} · {order.order_type} · {order.quantity} @ {order.price ? formatPrice(order.price) : "market"}</div></div>
+            <button disabled={busy || liveUnavailable} onClick={() => handleCancelOrder(order)} className="rounded p-1 text-red-400 hover:bg-red-950/50 disabled:opacity-40" title="Order-i ləğv et"><X className="h-4 w-4" /></button>
           </div>
         ))}
       </div>

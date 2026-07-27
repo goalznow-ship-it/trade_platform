@@ -149,6 +149,18 @@ export const api = {
     request<any>("/api/v1/trade/order/preview", { method: "POST", body: JSON.stringify(data) }),
 
   getPositions: () => request<any[]>("/api/v1/trade/positions"),
+  closePosition: (data: { exchange: string; symbol: string; percentage: number; client_order_id: string }) =>
+    request<any>("/api/v1/trade/positions/close", { method: "POST", body: JSON.stringify(data) }),
+
+  getOpenOrders: (exchange = "binance", symbol?: string) => {
+    const query = new URLSearchParams({ exchange })
+    if (symbol) query.set("symbol", symbol)
+    return request<any[]>(`/api/v1/trade/orders?${query.toString()}`)
+  },
+
+  cancelOrder: (data: { exchange: string; symbol: string; order_id: string }) =>
+    request<{ success: boolean }>("/api/v1/trade/cancel", { method: "POST", body: JSON.stringify(data) }),
+
   reconcileOrders: (exchange = "binance") =>
     request<any>(`/api/v1/trade/orders/reconcile?exchange=${encodeURIComponent(exchange)}`, {
       method: "POST",
