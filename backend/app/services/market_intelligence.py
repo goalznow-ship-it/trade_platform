@@ -51,7 +51,7 @@ class MarketIntelligenceService:
     async def _prices(self) -> dict:
         payload = await self._json(
             f"{self.SPOT_URL}/api/v3/ticker/24hr",
-            {"symbols": json.dumps(self.SYMBOLS)},
+            {"symbols": json.dumps(self.SYMBOLS, separators=(",", ":"))},
         )
         now = utc_now()
         items = []
@@ -132,7 +132,18 @@ class MarketIntelligenceService:
     async def _liquidations(self) -> dict:
         # Binance's public force-order endpoint can be unavailable by region. That is
         # represented explicitly instead of manufacturing heatmap levels.
-        rows = await self._json(f"{self.FUTURES_URL}/fapi/v1/allForceOrders", {"limit": 100})
+        try:
+            rows = await self._json(f"{self.FUTURES_URL}/fapi/v1/allForceOrders", {"limit": 100})
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400:
+                return {
+                    "items": [],
+                    **data_meta(
+                        "Binance Futures force orders",
+                        error_reason="Binance public liquidation feed hazırda deaktivdir",
+                    ),
+                }
+            raise
         now = utc_now()
         clusters: dict[tuple[str, int], dict] = {}
         for row in rows:
