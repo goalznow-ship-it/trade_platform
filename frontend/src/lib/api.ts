@@ -264,6 +264,19 @@ export const api = {
   closePaperPosition: (id: number) =>
     request(`/api/v1/paper/positions/${id}/close`, { method: "POST" }),
 
+  cancelPaperOrder: (id: number) =>
+    request(`/api/v1/paper/orders/${id}`, { method: "DELETE" }),
+
+  updatePaperPositionRisk: (id: number, stopLoss?: number, takeProfit?: number) => {
+    const query = new URLSearchParams()
+    if (stopLoss != null) query.set("stop_loss", String(stopLoss))
+    if (takeProfit != null) query.set("take_profit", String(takeProfit))
+    return request(`/api/v1/paper/positions/${id}/sl-tp?${query}`, { method: "PUT" })
+  },
+
+  getClosedPaperPositions: () =>
+    request<any[]>("/api/v1/paper/closed-positions"),
+
   resetPaperAccount: () =>
     request("/api/v1/paper/account/reset", { method: "POST" }),
 
