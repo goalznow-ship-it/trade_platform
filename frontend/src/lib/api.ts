@@ -19,7 +19,7 @@ async function refreshAccessToken(): Promise<string | null> {
   return data.access_token
 }
 
-async function request<T>(endpoint: string, options?: RequestInit, retried = false): Promise<T> {
+async function request<T>(endpoint: string, options?: RequestInit, retried = false, timeoutMs = 15000): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
   const headers: Record<string, string> = {
     ...(options?.headers as Record<string, string>),
@@ -30,7 +30,7 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   let res: Response
   try {
     res = await fetch(`${API_URL}${endpoint}`, {
@@ -40,7 +40,7 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("Sorğu 15 saniyə ərzində cavab vermədi")
+      throw new Error(`Sorğu ${Math.round(timeoutMs / 1000)} saniyə ərzində cavab vermədi`)
     }
     throw error
   } finally {
@@ -49,7 +49,7 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
   if (res.status === 401 && typeof window !== "undefined" && !retried && endpoint !== "/api/v1/auth/refresh") {
     refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null })
     const accessToken = await refreshPromise
-    if (accessToken) return request<T>(endpoint, options, true)
+    if (accessToken) return request<T>(endpoint, options, true, timeoutMs)
   }
   if (res.status === 401 && typeof window !== "undefined") {
     localStorage.removeItem("token")
@@ -404,5 +404,10 @@ export const api = {
     request<any>(`/api/v1/skhy/diagnostics?timeframe=${encodeURIComponent(timeframe)}`),
 
   runSkhyBacktest: (timeframe = "1h", mode = "balanced", limit = 500) =>
-    request<any>(`/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}`),
+    request<any>(
+      `/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}`,
+      undefined,
+      false,
+      45000,
+    ),
 }

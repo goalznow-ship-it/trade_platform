@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from app.services.skhy_market_data import skhy_market_data
 from app.services.skhy_indicators import skhy_indicators
 from app.services.skhy_structure import skhy_structure
+from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
@@ -11,15 +12,14 @@ TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 class SkhyAnalysisEngine:
     async def get_full_analysis(self, timeframe: str | None = None) -> dict:
         active_tf = timeframe or "1h"
+        cache_key = f"skhy:analysis:{active_tf}"
+        cached = await cache_get(cache_key)
+        if isinstance(cached, dict) and cached.get("scores"):
+            return cached
+
         now_iso = datetime.now(timezone.utc).isoformat()
         snapshot = await skhy_market_data.get_snapshot()
-
-        if timeframe:
-            tfs = [timeframe]
-        else:
-            tfs = TIMEFRAMES
-
-        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200, skip_cache=bool(timeframe)) for tf in tfs}
+        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200) for tf in TIMEFRAMES}
         ohlcv_results = await asyncio.gather(*ohlcv_tasks.values(), return_exceptions=True)
         ohlcv_data = {}
         for tf, result in zip(ohlcv_tasks.keys(), ohlcv_results):
@@ -29,41 +29,37 @@ class SkhyAnalysisEngine:
             else:
                 ohlcv_data[tf] = result
 
-        if timeframe:
-            data = ohlcv_data.get(timeframe, [])
+        active_data = ohlcv_data.get(active_tf, [])
+        if len(active_data) < 30:
+            return {
+                "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
+                "timestamp": now_iso, "last_updated": now_iso, "active_timeframe": active_tf,
+                "snapshot": snapshot, "timeframes": {active_tf: {"error": f"Insufficient data ({len(active_data)} candles)", "signal": "WAIT"}},
+                "alignment": {"primary_direction": "neutral", "confidence": 0, "status": "NO_DATA"},
+                "scores": {k: 0 for k in ["trend_score","structure_score","momentum_score","volume_score","liquidity_score","pattern_score","futures_score","orderflow_score","multitimeframe_score","risk_score"]} | {"overall": 0, "status": "NO_DATA_"+active_tf, "long_probability": 50, "short_probability": 50, "signal_confidence": 0},
+                "triggers": {}, "patterns": [], "support_resistance": {}, "support_zone": {}, "resistance_zone": {},
+                "elliott_wave": {"status":"insufficient_data"}, "fibonacci": {"status":"insufficient_data"},
+                "fibonacci_levels": {"status":"insufficient_data"}, "detected_structure": {"status":"insufficient_data"},
+                "channel_lines": {"status":"insufficient_data"}, "breakout_zone": {"status":"insufficient_data"},
+                "scenario_paths": {}, "main_scenario_path": [], "alternative_scenario_path": [], "fakeout_scenario_path": [],
+                "target_hierarchy": {"targets":[]}, "time_estimates": {"status":"insufficient_data"},
+                "activation_conditions": {}, "confidence_breakdown": {},
+                "invalidation_level": 0, "module_errors": {f"{active_tf}_data": f"Insufficient data ({len(active_data)} candles)"},
+                "data_freshness": snapshot.get("data_freshness", "unknown") if isinstance(snapshot, dict) else "unknown",
+                "explanation_az": f"{active_tf} üçün kifayət qədər məlumat yoxdur ({len(active_data)} şam).",
+            }
+
+        tf_analysis = {}
+        analysis_order = [active_tf, *[tf for tf in TIMEFRAMES if tf != active_tf]]
+        for tf in analysis_order:
+            data = ohlcv_data.get(tf, [])
             if len(data) < 30:
-                return {
-                    "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
-                    "timestamp": now_iso, "last_updated": now_iso, "active_timeframe": timeframe,
-                    "snapshot": snapshot, "timeframes": {timeframe: {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}},
-                    "alignment": {"primary_direction": "neutral", "confidence": 0, "status": "NO_DATA"},
-                    "scores": {k: 0 for k in ["trend_score","structure_score","momentum_score","volume_score","liquidity_score","pattern_score","futures_score","orderflow_score","multitimeframe_score","risk_score"]} | {"overall": 0, "status": "NO_DATA_"+timeframe, "long_probability": 50, "short_probability": 50, "signal_confidence": 0},
-                    "triggers": {}, "patterns": [], "support_resistance": {}, "support_zone": {}, "resistance_zone": {},
-                    "elliott_wave": {"status":"insufficient_data"}, "fibonacci": {"status":"insufficient_data"},
-                    "fibonacci_levels": {"status":"insufficient_data"}, "detected_structure": {"status":"insufficient_data"},
-                    "channel_lines": {"status":"insufficient_data"}, "breakout_zone": {"status":"insufficient_data"},
-                    "scenario_paths": {}, "main_scenario_path": [], "alternative_scenario_path": [], "fakeout_scenario_path": [],
-                    "target_hierarchy": {"targets":[]}, "time_estimates": {"status":"insufficient_data"},
-                    "activation_conditions": {}, "confidence_breakdown": {},
-                    "invalidation_level": 0, "module_errors": {f"{timeframe}_data": f"Insufficient data ({len(data)} candles)"},
-                    "data_freshness": snapshot.get("data_freshness", "unknown") if isinstance(snapshot, dict) else "unknown",
-                    "explanation_az": f"{timeframe} üçün kifayət qədər məlumat yoxdur ({len(data)} şam).",
-                }
+                tf_analysis[tf] = {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}
+                continue
             indicators = skhy_indicators.analyze(data)
             structure = skhy_structure.analyze(data)
-            tf_analysis = {timeframe: self._analyze_timeframe(data, indicators, structure, timeframe)}
-            ohlcv_all = {timeframe: ohlcv_data.get(timeframe, [])}
-        else:
-            tf_analysis = {}
-            for tf in TIMEFRAMES:
-                data = ohlcv_data.get(tf, [])
-                if len(data) < 30:
-                    tf_analysis[tf] = {"error": f"Insufficient data ({len(data)} candles)", "signal": "WAIT"}
-                    continue
-                indicators = skhy_indicators.analyze(data)
-                structure = skhy_structure.analyze(data)
-                tf_analysis[tf] = self._analyze_timeframe(data, indicators, structure, tf)
-            ohlcv_all = ohlcv_data
+            tf_analysis[tf] = self._analyze_timeframe(data, indicators, structure, tf)
+        ohlcv_all = ohlcv_data
 
         alignment = self._compute_alignment(tf_analysis)
         scores = self._compute_scores(tf_analysis, alignment, snapshot)
@@ -94,7 +90,7 @@ class SkhyAnalysisEngine:
         sup_zone = {"top": detected_structure.get("support_zone_top"), "bottom": detected_structure.get("support_zone_bottom")}
         res_zone = {"top": detected_structure.get("resistance_zone_top"), "bottom": detected_structure.get("resistance_zone_bottom")}
 
-        return {
+        result = {
             "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
             "timestamp": now_iso, "last_updated": now_iso,
             "active_timeframe": active_tf,
@@ -120,6 +116,8 @@ class SkhyAnalysisEngine:
             "module_errors": module_errors, "data_freshness": data_freshness,
             "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
         }
+        await cache_set(cache_key, result, ttl=10)
+        return result
 
     def _analyze_timeframe(self, data, indicators, structure, tf):
         if not data: return {"error": "No data", "signal": "WAIT"}
@@ -148,13 +146,18 @@ class SkhyAnalysisEngine:
         signal = "STRONG_LONG" if bullish_pct >= 75 else "LONG" if bullish_pct >= 60 else "STRONG_SHORT" if bearish_pct >= 75 else "SHORT" if bearish_pct >= 60 else "WAIT"
         volatility = round(np.std([d["close"] for d in data[-20:]]) / np.mean([d["close"] for d in data[-20:]]), 4) if len(data) >= 20 else 0
         bos = structure.get("break_of_structure", []); choch = structure.get("change_of_character", [])
+        liquidity = structure.get("liquidity", {})
         return {
             "signal": signal, "trend": overall, "market_structure": ms.get("trend", "undefined"),
             "bullish_score": bullish_pct, "bearish_score": bearish_pct,
             "momentum": momentum.get("rsi", "neutral"), "volume": volume_info.get("relative_volume", "normal"),
             "volatility": volatility, "support": support, "resistance": resistance,
             "bos": len(bos), "bos_details": bos[-3:] if bos else [], "choch": len(choch),
-            "choch_details": choch[-3:] if choch else [], "liquidity": structure.get("liquidity", {}),
+            "choch_details": choch[-3:] if choch else [],
+            "liquidity": {
+                "nearest_above": liquidity.get("nearest_above"),
+                "nearest_below": liquidity.get("nearest_below"),
+            },
             "pattern": self._detect_tf_pattern(data, tf), "close": close,
         }
 
@@ -187,9 +190,9 @@ class SkhyAnalysisEngine:
         h4_h1_aligned = (h4 in ("LONG","STRONG_LONG") and h1 in ("LONG","STRONG_LONG")) or (h4 in ("SHORT","STRONG_SHORT") and h1 in ("SHORT","STRONG_SHORT"))
         d1 = tf_analysis.get("1d", {}).get("signal", "WAIT")
         conflicts = []
-        if h4 in ("LONG","STRONG_LONG") and h1 in ("SHORT","STRONG_SHORT"): conflicts.append("4H bullish but 1H bearish")
-        if h4 in ("SHORT","STRONG_SHORT") and h1 in ("LONG","STRONG_LONG"): conflicts.append("4H bearish but 1H bullish")
-        if d1 == "WAIT" and h4 != "WAIT": conflicts.append("Daily trend neutral")
+        if h4 in ("LONG","STRONG_LONG") and h1 in ("SHORT","STRONG_SHORT"): conflicts.append("4H yüksəlir, 1H isə enir")
+        if h4 in ("SHORT","STRONG_SHORT") and h1 in ("LONG","STRONG_LONG"): conflicts.append("4H enir, 1H isə yüksəlir")
+        if d1 == "WAIT" and h4 != "WAIT": conflicts.append("Günlük trend neytraldır")
         primary_direction = "long" if long_count > short_count else "short" if short_count > long_count else "neutral"
         confidence = round((max(long_count, short_count) / total) * 100) if total > 0 else 0
         return {
@@ -200,25 +203,23 @@ class SkhyAnalysisEngine:
         }
 
     def _compute_scores(self, tf_analysis, alignment, snapshot):
-        tf_count = sum(1 for v in tf_analysis.values() if "signal" in v)
-        if tf_count == 0: return {"overall": 0, "status": "NO_DATA"}
-        trend_score=structure_score=momentum_score=volume_score=liquidity_score=pattern_score=futures_score=orderflow_score=0
-        multitimeframe_score = alignment["confidence"]; risk_score = 50
-        for v in tf_analysis.values():
-            if "trend" not in v: continue
-            trend_score += 12 if v.get("trend") == "bullish" else 12 if v.get("trend") == "bearish" else 5
-            structure_score += 12 if v.get("market_structure") == "bullish" else 12 if v.get("market_structure") == "bearish" else 5
-            mom = v.get("momentum", "neutral")
-            momentum_score += 10 if mom in ("bullish","oversold") else 10 if mom in ("bearish","overbought") else 5
-            vol = v.get("volume", "normal")
-            volume_score += 12 if vol in ("high","above_average") else 5
-            liq = v.get("liquidity", {})
-            liquidity_score += 10 if liq.get("nearest_above") or liq.get("nearest_below") else 5
-            pattern_score += 10 if v.get("bos",0) > 0 or v.get("choch",0) > 0 else 5
-        tf_count = max(tf_count, 1)
-        trend_score = min(trend_score//tf_count,100); structure_score = min(structure_score//tf_count,100)
-        momentum_score = min(momentum_score//tf_count,100); volume_score = min(volume_score//tf_count,100)
-        liquidity_score = min(liquidity_score//tf_count,100); pattern_score = min(pattern_score//tf_count,100)
+        valid = [v for v in tf_analysis.values() if "trend" in v and "signal" in v]
+        if not valid: return {"overall": 0, "status": "NO_DATA"}
+
+        def average_score(values):
+            return round(sum(values) / len(values)) if values else 0
+
+        trend_score = average_score([80 if v.get("trend") in ("bullish", "bearish") else 45 for v in valid])
+        structure_score = average_score([80 if v.get("market_structure") in ("bullish", "bearish") else 45 for v in valid])
+        momentum_score = average_score([75 if v.get("momentum") in ("bullish", "bearish", "oversold", "overbought") else 45 for v in valid])
+        volume_score = average_score([80 if v.get("volume") in ("high", "above_average") else 45 for v in valid])
+        liquidity_score = average_score([
+            75 if (v.get("liquidity", {}).get("nearest_above") or v.get("liquidity", {}).get("nearest_below")) else 40
+            for v in valid
+        ])
+        pattern_score = average_score([80 if v.get("bos", 0) > 0 or v.get("choch", 0) > 0 else 40 for v in valid])
+        futures_score = 50
+        orderflow_score = 40
         funding = snapshot.get("funding", {})
         if funding:
             fr = funding.get("funding_rate", 0)
@@ -227,18 +228,26 @@ class SkhyAnalysisEngine:
         if oi.get("open_interest"): futures_score = min(futures_score + 10, 100)
         ls = snapshot.get("long_short_ratio", {})
         lsr = ls.get("long_short_ratio", 1)
-        orderflow_score += 30 if lsr > 1.5 else 30 if lsr < 0.7 else 15
+        orderflow_score += 15 if lsr > 1.5 or lsr < 0.7 else 5
         taker = snapshot.get("taker_buy_sell_ratio", {})
         tbr = taker.get("buy_sell_ratio", 1)
-        if tbr > 1.2: orderflow_score += 20; futures_score += 10
-        elif tbr < 0.8: orderflow_score += 20; futures_score += 10
-        else: orderflow_score += 10
+        if tbr > 1.2 or tbr < 0.8:
+            orderflow_score += 20
+            futures_score = min(futures_score + 10, 100)
+        else:
+            orderflow_score += 5
+        orderflow_score = min(orderflow_score, 100)
+        multitimeframe_score = alignment["confidence"]
+        risk_score = 50
         risk_score = risk_score - (10 if alignment.get("conflicts") else 0) + (10 if alignment.get("h4_h1_aligned") else 0)
         overall = round((trend_score*0.15 + structure_score*0.12 + momentum_score*0.12 + volume_score*0.10 +
                          liquidity_score*0.10 + pattern_score*0.08 + futures_score*0.10 + orderflow_score*0.08 +
                          multitimeframe_score*0.10 + risk_score*0.05))
         status = "STRONG_TRADE_READY" if overall >= 80 else "TRADE_READY" if overall >= 70 else "WATCHLIST" if overall >= 50 else "WAIT"
-        long_prob = round(trend_score*0.3 + momentum_score*0.2 + volume_score*0.1 + (100-structure_score)*0.1 + multitimeframe_score*0.3)
+        long_weight = sum(1.5 if v.get("signal") == "STRONG_LONG" else 1 for v in valid if v.get("signal") in ("LONG", "STRONG_LONG"))
+        short_weight = sum(1.5 if v.get("signal") == "STRONG_SHORT" else 1 for v in valid if v.get("signal") in ("SHORT", "STRONG_SHORT"))
+        directional_weight = long_weight + short_weight
+        long_prob = round(long_weight / directional_weight * 100) if directional_weight else 50
         short_prob = 100 - long_prob
         return {
             "trend_score": trend_score, "structure_score": structure_score, "momentum_score": momentum_score,
@@ -1439,12 +1448,13 @@ class SkhyAnalysisEngine:
     def _generate_explanation(self, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone):
         h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{}); d1 = tf_analysis.get("1d",{})
         h4_trend = h4.get("trend","məlum deyil"); h1_trend = h1.get("trend","məlum deyil"); d1_trend = d1.get("trend","məlum deyil")
+        trend_az = {"bullish": "yüksələn", "bearish": "enən", "neutral": "neytral"}
         lines = [f"SKHYUSDT analizi:"]
         struct_label = detected_structure.get("label_az","")
         if struct_label: lines.append(f"Aşkarlanan struktur: {struct_label}.")
-        if d1_trend != "neutral": lines.append(f"Günlük trend {d1_trend}-dir.")
-        if h4_trend != "neutral": lines.append(f"4H {h4_trend} struktur.")
-        h1_dir = "yüksələn" if h1_trend=="bullish" else "enən" if h1_trend=="bearish" else "neytral"
+        if d1_trend in trend_az: lines.append(f"Günlük trend {trend_az[d1_trend]} istiqamətdədir.")
+        if h4_trend in trend_az: lines.append(f"4H struktur {trend_az[h4_trend]} istiqamətdədir.")
+        h1_dir = trend_az.get(h1_trend, "məlum deyil")
         lines.append(f"1H {h1_dir}.")
         bz = breakout_zone
         if bz.get("status")=="calculated":

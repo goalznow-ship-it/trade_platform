@@ -90,6 +90,7 @@ export default function SkhyTerminalPage() {
   const requestIdRef = useRef(0)
 
   function logDebug(tag: string, ...args: unknown[]) {
+    if (process.env.NODE_ENV === "production") return
     const ts = new Date().toISOString().slice(11, 23)
     console.log(`[${ts}][SKHY] ${tag}`, ...args)
   }
@@ -157,14 +158,15 @@ export default function SkhyTerminalPage() {
   }, [])
 
   useEffect(() => {
-    const reqId = ++requestIdRef.current
     logDebug("TIMEFRAME_CHANGE", { timeframe })
     fetchData(timeframe)
-    api.getSkhyDiagnostics(timeframe).then(d => { if (reqId === requestIdRef.current) setDiagnostics(d) }).catch(() => {})
+    api.getSkhyDiagnostics(timeframe).then(d => {
+      if (!d?.timeframe || d.timeframe === timeframe) setDiagnostics(d)
+    }).catch(() => {})
   }, [timeframe, fetchData])
 
   useEffect(() => {
-    const interval = setInterval(() => fetchData(timeframe), 5000)
+    const interval = setInterval(() => fetchData(timeframe), 15000)
     return () => clearInterval(interval)
   }, [timeframe, fetchData])
 
@@ -264,12 +266,6 @@ export default function SkhyTerminalPage() {
   const displayError = analysisError || schemaError || (analysis !== null && scores.overall === 0 && String(scores.status || "").startsWith("NO_DATA") ? "Timeframe məlumatı yoxdur" : null)
 
   const normalizedAnalysis = useMemo(() => clientNormalize(analysis), [analysis])
-  const normIdentityRef = useRef(normalizedAnalysis)
-  useEffect(() => {
-    if (normIdentityRef.current !== normalizedAnalysis) normIdentityRef.current = normalizedAnalysis
-    console.log("[SKHY] SAME_NORMALIZED_OBJECT", normIdentityRef.current === normalizedAnalysis)
-  }, [normalizedAnalysis])
-
   const runBacktest = async () => {
     setBacktestRunning(true)
     try {
@@ -406,7 +402,7 @@ export default function SkhyTerminalPage() {
                         if (!r) return null
                         return (
                           <>
-                            <MetricBox label="Trell sayı" value={String(r.total_trades ?? "—")} />
+                            <MetricBox label="Ticarət sayı" value={String(r.total_trades ?? "—")} />
                             <MetricBox label="Qazanma %" value={String(r.win_rate ?? "—") + "%"} color="text-green-400" />
                             <MetricBox label="Balans dəyişimi" value={String(r.return_pct ?? "—") + "%"} color="text-yellow-400" />
                             <MetricBox label="Profit Factor" value={String(r.profit_factor ?? "—")} color="text-blue-400" />

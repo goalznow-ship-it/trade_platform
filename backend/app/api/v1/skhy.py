@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.responses import JSONResponse
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from app.core.websocket_manager import ws_manager, Channel
 from app.core.security import get_current_user
@@ -13,6 +14,51 @@ from app.core.logging import logger
 router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
 TF_PATTERN = "^(1m|5m|15m|30m|1h|4h|1d)$"
+
+async def _build_snapshot_payload(timeframe: str) -> dict:
+    snapshot = await skhy_market_data.get_snapshot()
+    ticker = snapshot.get("ticker", {})
+    if not ticker:
+        raise RuntimeError("Binance Futures API cavab vermir")
+
+    funding = snapshot.get("funding", {})
+    oi = snapshot.get("open_interest", {})
+    ls = snapshot.get("long_short_ratio", {})
+    taker = snapshot.get("taker_buy_sell_ratio", {})
+    ob = snapshot.get("orderbook", {})
+    ohlcv = await skhy_market_data.get_ohlcv(timeframe, 5)
+    current_candle = ohlcv[-1] if ohlcv else None
+
+    return {
+        "symbol": "SKHYUSDT",
+        "exchange": "Binance Futures",
+        "market": "USDT Perpetual",
+        "timeframe": timeframe,
+        "live_price": ticker.get("price"),
+        "mark_price": ticker.get("mark_price"),
+        "index_price": ticker.get("index_price"),
+        "change_24h": ticker.get("change_percent"),
+        "high_24h": ticker.get("high_24h"),
+        "low_24h": ticker.get("low_24h"),
+        "volume_24h": ticker.get("volume_24h"),
+        "funding_rate": funding.get("funding_rate"),
+        "next_funding_time": funding.get("next_funding_time"),
+        "open_interest": oi.get("open_interest"),
+        "oi_change": None,
+        "long_short_ratio": ls.get("long_short_ratio"),
+        "taker_buy_sell_ratio": taker.get("buy_sell_ratio"),
+        "bid": ticker.get("bid"),
+        "ask": ticker.get("ask"),
+        "spread": ob.get("bid_ask_spread"),
+        "current_candle_open": current_candle["open"] if current_candle else None,
+        "current_candle_close": current_candle["close"] if current_candle else None,
+        "current_candle_high": current_candle["high"] if current_candle else None,
+        "current_candle_low": current_candle["low"] if current_candle else None,
+        "latest_update": datetime.now(timezone.utc).isoformat(),
+        "provider_status": "connected",
+        "data_freshness": snapshot.get("data_freshness", "live"),
+    }
+
 
 @router.get("/ohlcv")
 async def get_ohlcv(timeframe: str = "1h", limit: int = 200):
@@ -27,51 +73,7 @@ async def get_ohlcv(timeframe: str = "1h", limit: int = 200):
 @router.get("/snapshot")
 async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
     try:
-        snapshot = await skhy_market_data.get_snapshot()
-        ticker = snapshot.get("ticker", {})
-        funding = snapshot.get("funding", {})
-        ohlcv = await skhy_market_data.get_ohlcv(timeframe, 5, skip_cache=True)
-        if not ticker:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "SKHYUSDT məlumatı əldə edilə bilmir", "status": "unavailable", "reason": "Binance Futures API cavab vermir"}
-            )
-        oi = snapshot.get("open_interest", {})
-        ls = snapshot.get("long_short_ratio", {})
-        taker = snapshot.get("taker_buy_sell_ratio", {})
-        ob = snapshot.get("orderbook", {})
-
-        current_candle = ohlcv[-1] if ohlcv else None
-
-        return {
-            "symbol": "SKHYUSDT",
-            "exchange": "Binance Futures",
-            "market": "USDT Perpetual",
-            "timeframe": timeframe,
-            "live_price": ticker.get("price"),
-            "mark_price": ticker.get("mark_price"),
-            "index_price": ticker.get("index_price"),
-            "change_24h": ticker.get("change_percent"),
-            "high_24h": ticker.get("high_24h"),
-            "low_24h": ticker.get("low_24h"),
-            "volume_24h": ticker.get("volume_24h"),
-            "funding_rate": funding.get("funding_rate"),
-            "next_funding_time": funding.get("next_funding_time"),
-            "open_interest": oi.get("open_interest"),
-            "oi_change": None,
-            "long_short_ratio": ls.get("long_short_ratio"),
-            "taker_buy_sell_ratio": taker.get("buy_sell_ratio"),
-            "bid": ticker.get("bid"),
-            "ask": ticker.get("ask"),
-            "spread": ob.get("bid_ask_spread"),
-            "current_candle_open": current_candle["open"] if current_candle else None,
-            "current_candle_close": current_candle["close"] if current_candle else None,
-            "current_candle_high": current_candle["high"] if current_candle else None,
-            "current_candle_low": current_candle["low"] if current_candle else None,
-            "latest_update": datetime.now(timezone.utc).isoformat(),
-            "provider_status": "connected",
-            "data_freshness": snapshot.get("data_freshness", "live"),
-        }
+        return await _build_snapshot_payload(timeframe)
     except Exception as e:
         logger.error(f"SKHY snapshot error: {e}")
         return JSONResponse(
@@ -245,6 +247,7 @@ def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
                 position_direction = signal
                 trades.append({
                     "entry_time": ohlcv[i]["time"],
+                    "entry_index": i,
                     "direction": signal,
                     "entry_price": entry_price,
                 })
@@ -252,9 +255,7 @@ def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
         elif in_position:
             exit_reason = None
             exit_price = None
-            bars_held = i - (trades[-1]["entry_index"] if trades and "entry_index" in trades[-1] else 0) if trades else 0
-            if not trades[-1].get("entry_index"):
-                trades[-1]["entry_index"] = i
+            bars_held = i - trades[-1]["entry_index"] if trades else 0
 
             if position_direction == "long":
                 tp = entry_price * 1.03
@@ -298,9 +299,12 @@ def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
                 in_position = False
 
     total_pnl = balance - initial_balance
-    wins = sum(1 for t in trades if t.get("pnl", 0) > 0) if trades else 0
-    losses = sum(1 for t in trades if t.get("pnl", 0) <= 0) if trades else 0
-    total_trades = len(trades)
+    closed_trades = [t for t in trades if "pnl" in t]
+    wins = sum(1 for t in closed_trades if t["pnl"] > 0)
+    losses = sum(1 for t in closed_trades if t["pnl"] <= 0)
+    total_trades = len(closed_trades)
+    gross_profit = sum(t["pnl"] for t in closed_trades if t["pnl"] > 0)
+    gross_loss = abs(sum(t["pnl"] for t in closed_trades if t["pnl"] < 0))
 
     return {
         "initial_balance": initial_balance,
@@ -311,9 +315,10 @@ def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
         "win_rate": round(wins / total_trades * 100, 1) if total_trades > 0 else 0,
         "wins": wins,
         "losses": losses,
-        "avg_win": round(sum(t["pnl"] for t in trades if t.get("pnl", 0) > 0) / wins, 2) if wins > 0 else 0,
-        "avg_loss": round(abs(sum(t["pnl"] for t in trades if t.get("pnl", 0) < 0)) / losses, 2) if losses > 0 else 0,
-        "profit_factor": round(sum(t["pnl"] for t in trades if t.get("pnl", 0) > 0) / abs(sum(t["pnl"] for t in trades if t.get("pnl", 0) < 0)), 2) if any(t.get("pnl", 0) < 0 for t in trades) else float("inf"),
+        "avg_win": round(gross_profit / wins, 2) if wins > 0 else 0,
+        "avg_loss": round(gross_loss / losses, 2) if losses > 0 else 0,
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else None,
+        "open_positions": 1 if in_position else 0,
         "trades": trades[-50:],
         "commission_model": f"{commission*100}% per trade",
         "slippage_model": f"{slippage*100}% per entry/exit",
@@ -326,19 +331,29 @@ async def skhy_websocket(websocket: WebSocket, timeframe: str = "1h"):
     logger.info(f"SKHY WS connected: {client_id} (timeframe={timeframe})")
 
     async def stream_data():
+        last_analysis_sent = 0.0
         while True:
             try:
-                snapshot = await skhy_market_data.get_snapshot()
-                analysis = await skhy_analysis.get_full_analysis(timeframe)
-                scenarios = await skhy_analysis.get_scenarios(timeframe)
+                snapshot = await _build_snapshot_payload(timeframe)
+                payload = {"snapshot": snapshot}
+                now = time.monotonic()
+                if now - last_analysis_sent >= 15:
+                    analysis = await skhy_analysis.get_full_analysis(timeframe)
+                    payload["analysis"] = analysis
+                    payload["scenarios"] = {
+                        "main_scenario": analysis.get("scenario_paths", {}).get("main_scenario", {}),
+                        "alternative_scenario": analysis.get("scenario_paths", {}).get("alternative_scenario", {}),
+                        "risk_fakeout_scenario": analysis.get("scenario_paths", {}).get("fakeout_scenario", {}),
+                        "target_hierarchy": analysis.get("target_hierarchy", {}),
+                        "time_estimates": analysis.get("time_estimates", {}),
+                        "activation_conditions": analysis.get("activation_conditions", {}),
+                        "confidence_breakdown": analysis.get("confidence_breakdown", {}),
+                    }
+                    last_analysis_sent = now
 
                 await websocket.send_json({
                     "event": "skhy_update",
-                    "data": {
-                        "snapshot": snapshot,
-                        "analysis": analysis,
-                        "scenarios": scenarios,
-                    },
+                    "data": payload,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
                 await asyncio.sleep(3)

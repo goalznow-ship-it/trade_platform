@@ -147,8 +147,6 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const altSc = norm.scenarios.alt
   const altDir = s(altSc?.direction || "")
   const altProb = n(altSc?.probability)
-  const mainActivation = s(mainSc?.activation_trigger)
-  const altActivation = s(altSc?.activation_trigger)
   const invalLevel = n(activeAnalysis?.invalidation_level)
   const tradePlan = activeAnalysis?.trade_plan as Record<string, unknown> | undefined
   const analysisTriggers = (activeAnalysis?.triggers || {}) as Record<string, unknown>
@@ -316,16 +314,26 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
 
   useEffect(() => {
     let cancelled = false
-    api.getSkhyOHLCV(activeTimeframe, 240).then((res) => {
-      if (cancelled) return
-      if (res?.data && Array.isArray(res.data) && (res.data as Candle[]).length > 0) {
-        setOhlcv(res.data)
-        lastValidOhlcvRef.current = res.data as Candle[]
-        const closes = (res.data as Candle[]).map((d: Candle) => d.close)
-        if (closes.length >= 100) setEmaValues({ ema20: calcLastEMA(closes, 20), ema50: calcLastEMA(closes, 50), ema100: calcLastEMA(closes, 100) })
+    fitDoneRef.current = false
+    const loadOhlcv = async () => {
+      try {
+        const res = await api.getSkhyOHLCV(activeTimeframe, 240)
+        if (cancelled) return
+        if (res?.data && Array.isArray(res.data) && (res.data as Candle[]).length > 0) {
+          const candles = res.data as Candle[]
+          setOhlcv(candles)
+          lastValidOhlcvRef.current = candles
+          const closes = candles.map((d: Candle) => d.close)
+          if (closes.length >= 100) setEmaValues({ ema20: calcLastEMA(closes, 20), ema50: calcLastEMA(closes, 50), ema100: calcLastEMA(closes, 100) })
+        }
+      } catch {
+        // Keep the last valid candles and retry; transient startup/network errors
+        // must not leave the chart permanently empty.
       }
-    }).catch(() => {})
-    return () => { cancelled = true }
+    }
+    loadOhlcv()
+    const interval = setInterval(loadOhlcv, 15000)
+    return () => { cancelled = true; clearInterval(interval) }
   }, [activeTimeframe])
 
   useEffect(() => {
@@ -422,11 +430,11 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     mainForecastRef.current?.applyOptions({
       lineStyle: confidence >= 50 ? LineStyle.Solid : LineStyle.Dashed,
     })
-    mainForecastRef.current?.setData(overlays.mainScenario ? toSeriesData(norm.scenarios.main) : [])
-    altForecastRef.current?.setData(overlays.altScenario ? toSeriesData(norm.scenarios.alt) : [])
-    fakeoutForecastRef.current?.setData(overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
+    mainForecastRef.current?.setData(overlays.aiOverlay && overlays.mainScenario ? toSeriesData(norm.scenarios.main) : [])
+    altForecastRef.current?.setData(overlays.aiOverlay && overlays.altScenario ? toSeriesData(norm.scenarios.alt) : [])
+    fakeoutForecastRef.current?.setData(overlays.aiOverlay && overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
     markDirty()
-  }, [activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
+  }, [activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.aiOverlay, overlays.altScenario, overlays.fakeout, overlays.mainScenario, markDirty])
 
   useEffect(() => { markDirty() }, [markDirty, analysis, triggersProp, sr, confidence, price])
 
@@ -446,7 +454,14 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const handleMouseLeave = () => setTooltip(null)
 
   const toggleOverlay = useCallback((key: OverlayKey) => {
-    setOverlays(prev => ({ ...prev, [key]: !prev[key] })); dirtyRef.current = true
+    setOverlays(prev => {
+      if (key === "mainScenario") {
+        const enabled = !prev.mainScenario
+        return { ...prev, mainScenario: enabled, altScenario: enabled }
+      }
+      return { ...prev, [key]: !prev[key] }
+    })
+    dirtyRef.current = true
   }, [])
 
   const toggleItems: { key: OverlayKey; label: string }[] = [
@@ -539,33 +554,23 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             <div className="text-[8px] text-gray-500">Təsdiq üçün trigger bağlanışı gözlənilir</div>
           </div>
         )}
-        {(norm.scenarios.main || norm.scenarios.alt) && (
-          <div className="absolute bottom-3 right-14 z-[8] w-[265px] pointer-events-none rounded-md border border-gray-700/60 bg-gray-950/90 px-2.5 py-2 shadow-xl backdrop-blur-sm">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-300">AI gələcək ssenariləri</span>
-              <span className={cn("rounded px-1.5 py-0.5 text-[8px] font-bold", confidence >= 50 ? "bg-cyan-500/15 text-cyan-300" : "bg-yellow-500/15 text-yellow-400")}>
-                {confidence >= 50 ? "AKTİV PROQNOZ" : "ŞƏRTİ PROQNOZ"}
-              </span>
-            </div>
+        {overlays.aiOverlay && (overlays.mainScenario || overlays.altScenario) && (norm.scenarios.main || norm.scenarios.alt) && (
+          <div className="absolute top-14 left-2 z-[8] flex items-center gap-3 pointer-events-none rounded border border-gray-700/50 bg-gray-950/80 px-2 py-1 shadow-lg backdrop-blur-sm">
             {norm.scenarios.main && (
-              <div className="mb-1 rounded border border-cyan-500/20 bg-cyan-500/5 px-2 py-1">
-                <div className="flex items-center justify-between text-[9px]">
-                  <span className="flex items-center gap-1.5 font-semibold text-cyan-300"><span className="h-0.5 w-5 bg-cyan-400" />Əsas: {s(norm.scenarios.main.direction)}</span>
-                  <span className="font-mono text-cyan-200">{n(norm.scenarios.main.probability)}%</span>
-                </div>
-                {mainActivation && <div className="mt-0.5 truncate text-[7px] text-gray-500">Aktivasiya: {mainActivation}</div>}
-              </div>
+              <span className="flex items-center gap-1 text-[8px] font-semibold text-cyan-300">
+                <span className="h-0.5 w-4 bg-cyan-400" />
+                Əsas {s(norm.scenarios.main.direction)} · {n(norm.scenarios.main.probability)}%
+              </span>
             )}
             {altSc && (
-              <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1">
-                <div className="flex items-center justify-between text-[9px]">
-                  <span className="flex items-center gap-1.5 font-semibold text-amber-300"><span className="h-0.5 w-5 border-t border-dashed border-amber-400" />Alternativ: {altDir}</span>
-                  <span className="font-mono text-amber-200">{altProb}%</span>
-                </div>
-                {altActivation && <div className="mt-0.5 truncate text-[7px] text-gray-500">Aktivasiya: {altActivation}</div>}
-              </div>
+              <span className="flex items-center gap-1 text-[8px] font-semibold text-amber-300">
+                <span className="h-0.5 w-4 border-t border-dashed border-amber-400" />
+                Alternativ {altDir} · {altProb}%
+              </span>
             )}
-            <div className="mt-1 text-[7px] text-gray-600">Mavi nazik xətlər kanal sərhədləridir; cyan/narıncı yollar şərti qiymət ssenariləridir.</div>
+            <span className={cn("text-[7px] font-bold", confidence >= 50 ? "text-cyan-400" : "text-yellow-500")}>
+              {confidence >= 50 ? "AKTİV" : "ŞƏRTİ"}
+            </span>
           </div>
         )}
       </div>
