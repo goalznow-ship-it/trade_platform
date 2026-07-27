@@ -7,6 +7,20 @@ from app.services.market_coverage import market_coverage
 
 
 class StreamingService:
+    WORKER_INTERVALS = {
+        "orderflow": 2,
+        "derivatives": 10,
+        "news": 60,
+        "sentiment": 120,
+        "onchain": 300,
+        "macro": 300,
+        "brain": 60,
+        "fear_greed": 60,
+        "breadth": 60,
+        "signals": 60,
+        "heartbeat": 5,
+    }
+
     def __init__(self):
         self._tasks: List[asyncio.Task] = []
         self._running = False
@@ -59,12 +73,18 @@ class StreamingService:
         except Exception:
             logger.exception("Streaming worker %s terminated", name)
 
+    def _beat(self, name: str) -> None:
+        self._heartbeats[name] = datetime.now(timezone.utc).timestamp()
+
+    def _stale_after(self, name: str) -> int:
+        return self.WORKER_INTERVALS.get(name, 60) + 90
+
     async def _watchdog(self):
         while self._running:
             await asyncio.sleep(30)
             now = datetime.now(timezone.utc).timestamp()
             for name, last in list(self._heartbeats.items()):
-                if now - last > 330:
+                if now - last > self._stale_after(name):
                     logger.warning("Streaming worker %s is stale", name)
             await ws_manager.broadcast(Channel.MARKET, "streaming_heartbeat", {
                 "workers": {k: round(now - v, 1) for k, v in self._heartbeats.items()},
@@ -106,6 +126,7 @@ class StreamingService:
                     })
                 except Exception:
                     pass
+            self._beat("orderflow")
             await asyncio.sleep(2)
 
     async def _stream_derivatives(self, symbols: List[str]):
@@ -149,6 +170,7 @@ class StreamingService:
                     })
                 except Exception:
                     pass
+            self._beat("derivatives")
             await asyncio.sleep(10)
 
     async def _stream_news(self):
@@ -163,6 +185,7 @@ class StreamingService:
                     })
             except Exception:
                 pass
+            self._beat("news")
             await asyncio.sleep(60)
 
     async def _stream_sentiment(self, symbols: List[str]):
@@ -186,6 +209,7 @@ class StreamingService:
                 })
             except Exception:
                 pass
+            self._beat("sentiment")
             await asyncio.sleep(120)
 
     async def _stream_onchain(self, symbols: List[str]):
@@ -201,6 +225,7 @@ class StreamingService:
                     })
                 except Exception:
                     pass
+            self._beat("onchain")
             await asyncio.sleep(300)
 
     async def _stream_macro(self):
@@ -214,6 +239,7 @@ class StreamingService:
                 })
             except Exception:
                 pass
+            self._beat("macro")
             await asyncio.sleep(300)
 
     async def _stream_brain(self, symbols: List[str]):
@@ -229,6 +255,7 @@ class StreamingService:
                     })
                 except Exception:
                     pass
+            self._beat("brain")
             await asyncio.sleep(60)
 
     async def _stream_fear_greed(self):
@@ -246,6 +273,7 @@ class StreamingService:
                     })
             except Exception:
                 logger.exception("Fear/greed stream failed")
+            self._beat("fear_greed")
             await asyncio.sleep(60)
 
     async def _stream_breadth(self, symbols: List[str]):
@@ -277,6 +305,7 @@ class StreamingService:
                 })
             except Exception:
                 logger.exception("Market breadth stream failed")
+            self._beat("breadth")
             await asyncio.sleep(60)
 
     async def _ticker_or_none(self, symbol: str):
@@ -311,6 +340,7 @@ class StreamingService:
                     "transitions": transitions,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
+            self._beat("signals")
             await asyncio.sleep(60)
 
 
@@ -321,7 +351,7 @@ class StreamingService:
             "workers": {
                 name: {
                     "last_heartbeat_ago_secs": round(now - ts, 1),
-                    "alive": now - ts < 30,
+                    "alive": now - ts < self._stale_after(name),
                 }
                 for name, ts in self._heartbeats.items()
             },

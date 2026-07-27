@@ -54,15 +54,25 @@ async def search(q: str = Query(min_length=1)):
 
 @router.get("/symbols")
 async def get_symbols():
+    from app.services.market_coverage import market_coverage
+
     cache_key = "market:symbols"
     cached = await cache_get(cache_key)
     if cached is not None:
-        return cached
+        cached_symbols = [
+            item.get("symbol")
+            for item in cached
+            if isinstance(item, dict) and item.get("symbol")
+        ]
+        normalized = market_coverage._with_required_symbols(cached_symbols, len(cached_symbols))
+        return [
+            {"symbol": symbol, "name": symbol.split("/")[0], "exchange": market_coverage.get_symbol_exchange(symbol)}
+            for symbol in normalized
+        ]
 
-    from app.services.market_coverage import market_coverage
     top_symbols = await market_coverage.get_top_symbols(30)
     symbols = [
-        {"symbol": s, "name": s.split("/")[0], "exchange": "binance"}
+        {"symbol": s, "name": s.split("/")[0], "exchange": market_coverage.get_symbol_exchange(s)}
         for s in top_symbols
     ]
     await cache_set(cache_key, symbols, ttl=3600)

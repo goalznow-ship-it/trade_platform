@@ -16,12 +16,11 @@ TOP_30_FALLBACK = [
     "TRX/USDT", "LTC/USDT", "ATOM/USDT", "NEAR/USDT", "APT/USDT",
     "FIL/USDT", "ARB/USDT", "OP/USDT", "SUI/USDT", "INJ/USDT",
     "UNI/USDT", "ETC/USDT", "FET/USDT", "TIA/USDT", "WIF/USDT",
-    "1000PEPE/USDT", "SKY/USDT", "SKH/USDT", "AAVE/USDT", "SEI/USDT",
+    "1000PEPE/USDT", "SKY/USDT", "BCH/USDT", "AAVE/USDT", "SEI/USDT",
 ]
 
-# Symbols that require Bybit (not on Binance futures)
+# Verified exchange overrides for symbols outside the dynamic Binance ranking.
 SYMBOL_EXCHANGE_OVERRIDE = {
-    "SKH": "bybit",
     "SKHY": "binance",
 }
 
@@ -42,16 +41,28 @@ class MarketCoverageService:
         # Repair symbols cached by older releases that used spot asset names
         # for Binance perpetual contracts.
         aliases = {"PEPE/USDT": "1000PEPE/USDT"}
-        return list(dict.fromkeys(aliases.get(symbol, symbol) for symbol in symbols))
+        excluded = {"SKH/USDT"}
+        return list(dict.fromkeys(
+            aliases.get(symbol, symbol)
+            for symbol in symbols
+            if symbol not in excluded
+        ))
 
     @staticmethod
     def _with_required_symbols(symbols: List[str], count: int) -> List[str]:
-        required = ["SKH/USDT", "SKHY/USDT"]
-        ranked = [symbol for symbol in symbols if symbol not in required]
-        return ranked[:max(0, count - len(required))] + required[:count]
+        anchors = ["BTC/USDT", "ETH/USDT"]
+        required_tail = ["SKHY/USDT"]
+        required = anchors + required_tail
+        excluded = {"SKH/USDT"}
+        ranked = [
+            symbol for symbol in symbols
+            if symbol not in required and symbol not in excluded
+        ]
+        middle_count = max(0, count - len(required))
+        return (anchors + ranked[:middle_count] + required_tail)[:count]
 
     def get_symbol_exchange(self, symbol: str) -> str:
-        """Get the exchange for a symbol. Bybit for SKH/SKHY, Binance otherwise."""
+        """Return the verified exchange for a covered symbol."""
         base = symbol.split("/")[0] if "/" in symbol else symbol
         return self._symbol_exchange_override.get(base, "binance")
 
@@ -124,7 +135,7 @@ class MarketCoverageService:
             return self._fallback
 
     async def get_bybit_ticker(self, symbol: str) -> dict:
-        """Fetch ticker from Bybit (for symbols not on Binance like SKH/SKHY)."""
+        """Fetch a ticker for an explicitly verified Bybit symbol."""
         from app.services.market import market_service
         bybit_ex = market_service.exchanges.get("bybit")
         if not bybit_ex:

@@ -1,3 +1,6 @@
+import asyncio
+import json
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from app.core.websocket_manager import ws_manager
 from app.core.database import async_session_factory
@@ -5,6 +8,40 @@ from app.core.security import get_user_from_token, require_admin
 from app.core.logging import logger
 
 router = APIRouter()
+
+
+async def _authenticate_connection(websocket: WebSocket, client, legacy_token: str) -> bool:
+    """Authenticate without putting credentials in the WebSocket URL.
+
+    Query-token support remains temporarily available for older clients, while
+    current clients send an auth message immediately after the connection opens.
+    """
+    if legacy_token:
+        async with async_session_factory() as db:
+            try:
+                user = await get_user_from_token(legacy_token, db)
+                await ws_manager.mark_authenticated(client, user.id)
+                return True
+            except Exception:
+                await websocket.close(code=1008, reason="Invalid authentication token")
+                return False
+
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=5)
+        message = json.loads(raw)
+    except (asyncio.TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+        await websocket.close(code=1008, reason="Authentication required")
+        return False
+
+    if message.get("type") != "auth" or not isinstance(message.get("data"), dict):
+        await websocket.close(code=1008, reason="Authentication required")
+        return False
+
+    await ws_manager.handle_message(client, raw)
+    if not client.is_authenticated:
+        await websocket.close(code=1008, reason="Invalid authentication token")
+        return False
+    return True
 
 
 @router.websocket("/ws/v2")
@@ -37,16 +74,9 @@ async def websocket_v2(websocket: WebSocket, token: str = Query("")):
 @router.websocket("/ws/v2/{channel}")
 async def websocket_v2_channel(websocket: WebSocket, channel: str, token: str = Query("")):
     client = await ws_manager.connect(websocket)
-    if not token:
-        await websocket.close(code=1008, reason="Authentication required")
+    if not await _authenticate_connection(websocket, client, token):
+        await ws_manager.disconnect(client.client_id)
         return
-    async with async_session_factory() as db:
-        try:
-            user = await get_user_from_token(token, db)
-            await ws_manager.mark_authenticated(client, user.id)
-        except Exception:
-            await websocket.close(code=1008, reason="Invalid authentication token")
-            return
     await ws_manager.subscribe(client, channel)
     try:
         while True:
@@ -66,16 +96,9 @@ async def websocket_v2_channel(websocket: WebSocket, channel: str, token: str = 
 @router.websocket("/ws/v2/ticker/{symbol:path}")
 async def websocket_ticker(websocket: WebSocket, symbol: str, token: str = Query("")):
     client = await ws_manager.connect(websocket)
-    if not token:
-        await websocket.close(code=1008, reason="Authentication required")
+    if not await _authenticate_connection(websocket, client, token):
+        await ws_manager.disconnect(client.client_id)
         return
-    async with async_session_factory() as db:
-        try:
-            user = await get_user_from_token(token, db)
-            await ws_manager.mark_authenticated(client, user.id)
-        except Exception:
-            await websocket.close(code=1008, reason="Invalid authentication token")
-            return
     sym = symbol.replace("-", "/")
     await ws_manager.subscribe(client, "ticker", [sym])
     try:

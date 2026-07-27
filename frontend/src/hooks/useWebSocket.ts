@@ -88,8 +88,7 @@ export function useWebSocketV2(token?: string) {
   const connect = useCallback(() => {
     cleanup()
     intentionalCloseRef.current = false
-    const url = token ? `${WS_URL}/ws/v2?token=${token}` : `${WS_URL}/ws/v2`
-    const ws = new WebSocket(url)
+    const ws = new WebSocket(`${WS_URL}/ws/v2`)
     wsRef.current = ws
     updateQuality({ status: "connecting" })
 
@@ -101,6 +100,9 @@ export function useWebSocketV2(token?: string) {
         connectedAt: connectedAtRef.current,
         reconnects: reconnectCountRef.current,
       })
+      if (token) {
+        ws.send(JSON.stringify({ type: "auth", data: { token } }))
+      }
       flushQueue()
       for (const ch of subscribedRef.current) {
         ws.send(JSON.stringify({ type: "subscribe", data: { channel: ch } }))
@@ -241,12 +243,11 @@ export function useWebSocket(symbol: string) {
     const connect = () => {
       const token = localStorage.getItem("token")
       if (!token) return
-      const ws = new WebSocket(
-        `${WS_URL}/ws/v2/ticker/${symbol.replace("/", "-")}?token=${encodeURIComponent(token)}`,
-      )
+      const ws = new WebSocket(`${WS_URL}/ws/v2/ticker/${symbol.replace("/", "-")}`)
       wsRef.current = ws
 
       ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", data: { token } }))
         setIsConnected(true)
         backoffRef.current = 1000
       }

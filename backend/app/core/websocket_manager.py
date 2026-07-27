@@ -5,8 +5,6 @@ import uuid
 from typing import Dict, Set, Optional, Any, Callable
 from datetime import datetime, timezone
 from fastapi import WebSocket
-from jose import jwt, JWTError
-from app.core.config import settings
 from app.core.redis import redis_client
 from app.core.logging import logger
 from app.core.rate_limiter import InMemoryRateLimiter
@@ -132,27 +130,14 @@ class WebSocketManager:
 
     async def authenticate(self, client: WebSocketClient, token: str) -> bool:
         try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            if payload.get("type") != "access":
-                await client.send_json({"event": "error", "data": {"message": "Invalid token type"}})
-                return False
-            user_id = payload.get("sub")
-            if not user_id:
-                await client.send_json({"event": "error", "data": {"message": "Invalid token"}})
-                return False
-            client.user_id = int(user_id)
-            client.state = ConnectionState.AUTHENTICATED
+            from app.core.database import async_session_factory
+            from app.core.security import get_user_from_token
 
-            if client.user_id not in self.user_clients:
-                self.user_clients[client.user_id] = set()
-            self.user_clients[client.user_id].add(client.client_id)
-
-            await client.send_json({
-                "event": "authenticated",
-                "data": {"user_id": client.user_id},
-            })
+            async with async_session_factory() as db:
+                user = await get_user_from_token(token, db)
+            await self.mark_authenticated(client, user.id)
             return True
-        except JWTError:
+        except Exception:
             await client.send_json({"event": "error", "data": {"message": "Invalid token"}})
             return False
 

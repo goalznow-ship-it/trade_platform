@@ -46,7 +46,7 @@ class MarketService:
             )
 
     def _resolve_exchange(self, symbol: str) -> str:
-        """Auto-detect exchange for a symbol. SKH/SKHY -> bybit, rest -> binance."""
+        """Auto-detect the verified exchange for special symbols."""
         base = symbol.split("/")[0] if "/" in symbol else symbol
         bybit_symbols = {"SKH"}
         return "bybit" if base in bybit_symbols else "binance"
@@ -207,20 +207,25 @@ class MarketService:
         except Exception:
             symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT']
 
-        tickers = await asyncio.gather(*[self.get_ticker(s) for s in symbols])
-        btc = tickers[0] if tickers else {}
+        required = ["BTC/USDT", "ETH/USDT"]
+        overview_symbols = required + [symbol for symbol in symbols if symbol not in required]
+        overview_symbols = overview_symbols[:max(10, len(symbols))]
+        tickers = await asyncio.gather(*[self.get_ticker(s) for s in overview_symbols])
+        ticker_map = {symbol: ticker for symbol, ticker in zip(overview_symbols, tickers)}
+        btc = ticker_map.get("BTC/USDT", {})
+        eth = ticker_map.get("ETH/USDT", {})
 
         total_volume = sum(t.get('volume_24h', 0) or 0 for t in tickers if t)
 
         overview = {
             'btc_price': btc.get('price'),
             'btc_change': btc.get('change_percent'),
-            'eth_price': tickers[1].get('price') if len(tickers) > 1 else None,
+            'eth_price': eth.get('price'),
             'total_market_cap': None,
             'total_volume_24h': total_volume if total_volume > 0 else None,
             'btc_dominance': None,
-            'tickers': {s: t for s, t in zip(symbols, tickers)},
-            'symbols_count': len(symbols),
+            'tickers': ticker_map,
+            'symbols_count': len(overview_symbols),
         }
         await cache_set(cache_key, overview, ttl=15)
         return overview
