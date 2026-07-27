@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth"
 import {
   LayoutDashboard, LineChart, Activity, FileText, Settings,
   List, Bell, Shield, BookOpen, Wallet, Search,
-  PieChart, BarChart3, BellRing,
+  PieChart, BarChart3, BellRing, Zap,
   ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -30,6 +30,7 @@ const PortfolioPanel = dynamic(() => import("@/components/portfolio/PortfolioPan
 const BacktestPanel = dynamic(() => import("@/components/backtest/BacktestPanel").then((m) => ({ default: m.BacktestPanel })), { ssr: false })
 const NotificationsPanel = dynamic(() => import("@/components/notifications/NotificationsPanel").then((m) => ({ default: m.NotificationsPanel })), { ssr: false })
 const AdminDashboard = dynamic(() => import("@/components/admin/AdminDashboard").then((m) => ({ default: m.AdminDashboard })), { ssr: false })
+const AutoScalperPanel = dynamic(() => import("@/components/scalper/AutoScalperPanel").then((m) => ({ default: m.AutoScalperPanel })), { ssr: false })
 
 function PanelFallback() {
   return (
@@ -46,6 +47,7 @@ type Tab = "dashboard" | "chart" | "analysis" | "scanner"
   | "watchlist" | "alerts" | "portfolio" | "journal"
   | "paper" | "risk" | "backtest" | "notifications"
   | "news" | "admin"
+  | "scalper"
 
 export default function DashboardPage() {
   const { user, loadUser } = useAuth()
@@ -71,6 +73,7 @@ export default function DashboardPage() {
     { id: "portfolio" as Tab, label: "Portfolio", icon: PieChart },
     { id: "journal" as Tab, label: "Journal", icon: BookOpen },
     { id: "paper" as Tab, label: "Paper", icon: Wallet },
+    { id: "scalper" as Tab, label: "Auto Scalper", icon: Zap },
     { id: "risk" as Tab, label: "Risk", icon: Shield },
     { id: "backtest" as Tab, label: "Backtest", icon: BarChart3 },
     { id: "notifications" as Tab, label: "Notify", icon: BellRing },
@@ -79,7 +82,7 @@ export default function DashboardPage() {
   ]
 
   const showRight = !["admin", "scanner", "watchlist", "alerts", "portfolio",
-    "journal", "paper", "risk", "backtest", "notifications"].includes(activeTab)
+    "journal", "paper", "scalper", "risk", "backtest", "notifications"].includes(activeTab)
 
   return (
     <WSProvider>
@@ -141,6 +144,7 @@ export default function DashboardPage() {
             {activeTab === "portfolio" && <PortfolioPanel />}
             {activeTab === "journal" && <JournalPanel />}
             {activeTab === "paper" && <PaperTradingPanel />}
+            {activeTab === "scalper" && <AutoScalperPanel />}
             {activeTab === "risk" && <RiskPanel />}
             {activeTab === "backtest" && <BacktestPanel />}
             {activeTab === "notifications" && <NotificationsPanel />}

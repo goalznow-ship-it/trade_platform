@@ -170,6 +170,13 @@ export const api = {
 
   getTradingStatus: () => request<any>("/api/v1/trade/status"),
 
+  getAutoScalperStatus: () => request<any>("/api/v1/auto-scalper/status"),
+  scanAutoScalper: () => request<any>("/api/v1/auto-scalper/scan", { method: "POST" }, false, 90000),
+  armAutoScalper: (data: any) =>
+    request<any>("/api/v1/auto-scalper/arm", { method: "POST", body: JSON.stringify(data) }),
+  disarmAutoScalper: () =>
+    request<any>("/api/v1/auto-scalper/disarm", { method: "POST" }),
+
   getExchangeCredentials: () => request<any[]>("/api/v1/trade/api-keys"),
 
   testAPIKeys: (data: { exchange: string; api_key: string; secret_key: string; passphrase?: string; label?: string }) =>
