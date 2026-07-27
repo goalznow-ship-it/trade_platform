@@ -22,6 +22,52 @@ def _make_candles(count: int) -> list:
 
 
 class TestBacktest:
+    def test_position_executes_at_next_candle_open(self, monkeypatch):
+        data = _make_candles(130)
+        signal_close = data[100]["close"]
+        next_open = data[101]["open"]
+
+        def fixed_signal(*args, **kwargs):
+            return {
+                "action": 1,
+                "direction": "long",
+                "entry_price": signal_close,
+                "stop_loss": min(signal_close, next_open) * 0.5,
+                "take_profit_1": max(signal_close, next_open) * 2,
+                "take_profit_2": max(signal_close, next_open) * 3,
+                "take_profit_3": max(signal_close, next_open) * 4,
+                "score": 80,
+                "reason": "test",
+            }
+
+        monkeypatch.setattr(backtest_service, "_generate_institutional_signal", fixed_signal)
+        result = backtest_service._run_backtest_sync(
+            "BTC/USDT", data, mode="strict", slippage_bps=0,
+        )
+
+        assert result["trades"]
+        assert result["trades"][0]["entry_price"] == pytest.approx(next_open)
+        assert result["trades"][0]["entry_time"].startswith("1970-01-01 00:01:41")
+
+    def test_invalid_gap_entry_is_skipped(self):
+        signal = {
+            "direction": "long",
+            "stop_loss": 90,
+            "take_profit_1": 110,
+        }
+        assert backtest_service._entry_plan_is_valid(signal, 100)
+        assert not backtest_service._entry_plan_is_valid(signal, 111)
+        assert not backtest_service._entry_plan_is_valid(signal, 89)
+
+    def test_atr_uses_most_recent_period(self):
+        data = [
+            {"high": 101, "low": 99, "close": 100},
+            {"high": 102, "low": 100, "close": 101},
+            {"high": 121, "low": 81, "close": 100},
+            {"high": 131, "low": 71, "close": 100},
+        ]
+        assert backtest_service._calc_atr(data, period=2) == pytest.approx(50)
+
     @pytest.mark.asyncio
     async def test_run_backtest_basic(self):
         data = _make_candles(200)

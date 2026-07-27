@@ -23,11 +23,11 @@ class SaveBacktestRequest(BaseModel):
 @router.get("/run")
 async def run_backtest(
     symbol: str = Query(..., description="Symbol (use - instead of /)"),
-    timeframe: str = "1h",
-    limit: int = 500,
-    initial_balance: float = 10000,
-    leverage: int = 1,
-    risk_per_trade: float = 0.02,
+    timeframe: str = Query(default="1h", pattern="^(5m|15m|1h|4h|1d)$"),
+    limit: int = Query(default=500, ge=120, le=1000),
+    initial_balance: float = Query(default=10000, ge=100, le=100_000_000),
+    leverage: int = Query(default=1, ge=1, le=125),
+    risk_per_trade: float = Query(default=0.02, ge=0.001, le=0.1),
     fee_rate: float = Query(default=0.0004, ge=0, le=0.01),
     slippage_bps: float = Query(default=2.0, ge=0, le=100),
     mode: str = Query(default="balanced", pattern="^(strict|balanced|exploratory)$"),
@@ -81,17 +81,28 @@ async def save_backtest(
 ):
     sym = req.symbol.replace("-", "/")
     data = await market_service.get_ohlcv(sym, "binance", req.timeframe, 500)
-    if not data:
+    if len(data) < 2:
         raise HTTPException(400, "No data available")
-    result = await backtest_service.run_backtest(symbol=sym, data=data, timeframe=req.timeframe, leverage=3)
+    parameters = req.parameters or {}
+    result = await backtest_service.run_backtest(
+        symbol=sym,
+        data=data[:-1],
+        timeframe=req.timeframe,
+        initial_balance=float(parameters.get("initial_balance", 10_000)),
+        leverage=int(parameters.get("leverage", 1)),
+        risk_per_trade=float(parameters.get("risk_per_trade", 0.02)),
+        fee_rate=float(parameters.get("fee_rate", 0.0004)),
+        slippage_bps=float(parameters.get("slippage_bps", 2.0)),
+        mode=str(parameters.get("mode", "balanced")),
+    )
     if "error" in result:
         raise HTTPException(400, result["error"])
 
     bt = BacktestResult(
         user_id=user.id, symbol=sym, timeframe=req.timeframe,
-        strategy_name=req.strategy_name, parameters=req.parameters or {},
-        start_date=datetime.now(timezone.utc),
-        end_date=datetime.now(timezone.utc),
+        strategy_name=req.strategy_name, parameters=parameters,
+        start_date=datetime.fromtimestamp(data[0]["time"], tz=timezone.utc).replace(tzinfo=None),
+        end_date=datetime.fromtimestamp(data[-2]["time"], tz=timezone.utc).replace(tzinfo=None),
         total_trades=result.get("total_trades", 0),
         win_rate=result.get("win_rate", 0),
         profit_factor=result.get("profit_factor", 0),

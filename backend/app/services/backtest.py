@@ -36,10 +36,15 @@ class BacktestService:
         from app.core.cache import cache_get, cache_set
 
         last_bar = data[-1].get("time") if data else "none"
+        funding_rows = funding_rates or []
+        funding_fingerprint = (
+            f"{len(funding_rows)}:{funding_rows[-1].get('time', 'none')}"
+            if funding_rows else "none"
+        )
         cache_key = (
             f"backtest:{symbol}:{timeframe}:{len(data)}:{last_bar}:"
             f"{initial_balance:.2f}:{fee_rate:.6f}:{slippage_bps:.2f}:"
-            f"{leverage}:{risk_per_trade:.4f}:{mode}"
+            f"{leverage}:{risk_per_trade:.4f}:{mode}:{funding_fingerprint}"
         )
         cached = await cache_get(cache_key)
         if isinstance(cached, dict):
@@ -48,7 +53,7 @@ class BacktestService:
         result = await asyncio.to_thread(
             self._run_backtest_sync,
             symbol, data, timeframe, initial_balance, fee_rate,
-            slippage_bps, leverage, risk_per_trade, mode, funding_rates or [],
+            slippage_bps, leverage, risk_per_trade, mode, funding_rows,
         )
         await cache_set(cache_key, result, ttl=300)
         return result
@@ -90,6 +95,7 @@ class BacktestService:
         balance = initial_balance
         peak_balance = initial_balance
         position = None
+        pending_signal = None
         trades = []
         equity_curve = [initial_balance]
         monthly_pnl = defaultdict(float)
@@ -97,7 +103,14 @@ class BacktestService:
 
         num_bars = len(df)
         lookback = int(config["min_lookback"])
-        diagnostics = {"evaluated_bars": 0, "neutral_direction": 0, "below_threshold": 0, "signal_errors": 0}
+        diagnostics = {
+            "evaluated_bars": 0,
+            "neutral_direction": 0,
+            "below_threshold": 0,
+            "signal_errors": 0,
+            "signals_generated": 0,
+            "entries_skipped": 0,
+        }
         funding_by_time = {
             int(row["time"]): float(row["rate"])
             for row in (funding_rates or [])
@@ -106,25 +119,19 @@ class BacktestService:
 
         for i in range(lookback, num_bars):
             current = df.iloc[i]
-            signal = None
-            if position is None:
-                start = max(0, i - 249)
-                # The signal is computed at candle i close. Position management
-                # starts on i+1, so no future high/low enters the decision.
-                prev_data = df.iloc[start:i + 1].to_dict("records")
-                signal = self._generate_institutional_signal(
-                    symbol, prev_data, institutional_scorer, smc_engine,
-                    timeframe, float(config["threshold"]), diagnostics,
-                )
+            if pending_signal is not None and position is None:
+                execution_price = float(current["open"])
+                if self._entry_plan_is_valid(pending_signal, execution_price):
+                    position = self._open_position(
+                        pending_signal, current, balance, risk_per_trade, leverage,
+                        i, slippage_bps, execution_price=execution_price,
+                    )
+                else:
+                    diagnostics["entries_skipped"] += 1
+                pending_signal = None
 
-            if signal and signal["action"] != 0 and position is None:
-                position = self._open_position(
-                    signal, current, balance, risk_per_trade, leverage, i,
-                    slippage_bps,
-                )
+            if position:
                 trade_entry_balance = balance
-
-            elif position:
                 exit_price, exit_reason = self._check_exit(
                     position, current, i, num_bars,
                 )
@@ -173,6 +180,19 @@ class BacktestService:
                     monthly_pnl[month_key] += pnl
 
                     position = None
+
+            if position is None and pending_signal is None and i < num_bars - 1:
+                start = max(0, i - 249)
+                # The decision only sees data through candle i close. A valid
+                # signal is executed at candle i+1 open.
+                prev_data = df.iloc[start:i + 1].to_dict("records")
+                signal = self._generate_institutional_signal(
+                    symbol, prev_data, institutional_scorer, smc_engine,
+                    timeframe, float(config["threshold"]), diagnostics,
+                )
+                if signal and signal["action"] != 0:
+                    diagnostics["signals_generated"] += 1
+                    pending_signal = signal
 
             equity_curve.append(balance)
             daily_balances.append(balance)
@@ -250,22 +270,23 @@ class BacktestService:
 
     def _open_position(self, signal: dict, current_row, balance: float,
                        risk_per_trade: float, leverage: int, entry_index: int,
-                       slippage_bps: float) -> dict:
-        entry = signal["entry_price"]
+                       slippage_bps: float,
+                       execution_price: Optional[float] = None) -> dict:
+        entry = float(execution_price if execution_price is not None else signal["entry_price"])
         sl = signal["stop_loss"]
         direction = signal["direction"]
-
-        risk_amount = balance * risk_per_trade
-        risk_per_unit = abs(entry - sl)
-        risk_sized_quantity = risk_amount / risk_per_unit if risk_per_unit > 0 else 0
-        max_quantity = (balance * leverage) / entry if entry > 0 else 0
-        position_size = min(risk_sized_quantity, max_quantity)
 
         if direction == "long":
             side = 1
         else:
             side = -1
         entry *= 1 + (slippage_bps / 10000) * side
+
+        risk_amount = balance * risk_per_trade
+        risk_per_unit = abs(entry - sl)
+        risk_sized_quantity = risk_amount / risk_per_unit if risk_per_unit > 0 else 0
+        max_quantity = (balance * leverage) / entry if entry > 0 else 0
+        position_size = min(risk_sized_quantity, max_quantity)
 
         return {
             "entry_price": entry,
@@ -284,6 +305,17 @@ class BacktestService:
             "classification": signal.get("classification", ""),
             "reason": signal.get("reason"),
         }
+
+    @staticmethod
+    def _entry_plan_is_valid(signal: dict, execution_price: float) -> bool:
+        stop = float(signal["stop_loss"])
+        target = signal.get("take_profit_1")
+        if target is None:
+            return False
+        target = float(target)
+        if signal["direction"] == "long":
+            return stop < execution_price < target
+        return target < execution_price < stop
 
     def _check_exit(self, position: dict, current_row, idx: int, num_bars: int) -> tuple:
         high = current_row["high"]
@@ -412,9 +444,8 @@ class BacktestService:
             prev_close = data[i - 1]["close"]
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_values.append(tr)
-            if len(tr_values) >= period:
-                break
-        return sum(tr_values) / len(tr_values) if tr_values else 0
+        recent_values = tr_values[-period:]
+        return sum(recent_values) / len(recent_values) if recent_values else 0
 
     def _compute_metrics(
         self, trades: list, equity_curve: list, daily_balances: list,
