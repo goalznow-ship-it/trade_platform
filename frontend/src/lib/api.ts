@@ -393,7 +393,12 @@ export const api = {
     request<any>(`/api/v1/institutional/market/trending?count=${count}`),
 
   getMarketMatrix: (count = 30) =>
-    request<any>(`/api/v1/institutional/market/matrix?count=${count}`),
+    request<any>(
+      `/api/v1/institutional/market/matrix?count=${count}`,
+      undefined,
+      false,
+      120000,
+    ),
 
   // SKHY Terminal
   getSkhySnapshot: (timeframe = "1h") => request<any>(`/api/v1/skhy/snapshot?timeframe=${encodeURIComponent(timeframe)}`),

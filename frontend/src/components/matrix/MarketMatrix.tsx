@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { api } from "@/lib/api"
 import { cn, formatPrice, formatPercent, getChangeColor } from "@/lib/utils"
-import { ArrowUpDown, Search, Eye, EyeOff, Pin, Clock, AlertCircle } from "lucide-react"
+import { ArrowUpDown, Search, Eye, Clock, AlertCircle, RefreshCw } from "lucide-react"
 
 interface MatrixRow {
   symbol: string
@@ -88,9 +88,9 @@ export function MarketMatrix() {
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [search, setSearch] = useState("")
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set())
-  const [pinnedCols, setPinnedCols] = useState<Set<string>>(new Set(["symbol", "live_price", "direction", "confidence"]))
 
   const load = useCallback(async () => {
+    setLoading(true)
     try {
       const data = await api.getMarketMatrix(30)
       if (data?.symbols && Array.isArray(data.symbols)) {
@@ -127,10 +127,11 @@ export function MarketMatrix() {
         setError(null)
       } else {
         setRows([])
-        setError("No matrix data")
+        setError("Matrix məlumatı boş qaytarıldı")
       }
-    } catch (e) {
-      setError("Market data unavailable")
+    } catch (cause) {
+      setRows([])
+      setError(cause instanceof Error ? cause.message : "Bazar məlumatı alınmadı")
     } finally {
       setLoading(false)
     }
@@ -339,7 +340,7 @@ export function MarketMatrix() {
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
             <input
-              type="text" placeholder="Search..."
+              type="text" placeholder="Aktiv axtar..."
               value={search} onChange={e => setSearch(e.target.value)}
               className="pl-6 pr-2 py-1 text-[11px] bg-gray-800 border border-gray-700 rounded text-white focus:outline-none focus:border-blue-500 w-32"
             />
@@ -363,6 +364,9 @@ export function MarketMatrix() {
               ))}
             </div>
           </div>
+          <button onClick={load} disabled={loading} className="flex items-center gap-1 rounded bg-gray-800 px-2 py-1.5 text-[10px] text-gray-400 hover:text-white disabled:opacity-50">
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} /> Yenilə
+          </button>
         </div>
       </div>
 
@@ -399,6 +403,9 @@ export function MarketMatrix() {
                 {visibleCols.map(col => cell(row, col))}
               </tr>
             ))}
+            {sorted.length === 0 && (
+              <tr><td colSpan={visibleCols.length} className="px-3 py-10 text-center text-xs text-gray-600">Axtarışa uyğun aktiv yoxdur</td></tr>
+            )}
           </tbody>
         </table>
       </div>

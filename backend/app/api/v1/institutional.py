@@ -245,7 +245,7 @@ async def get_market_matrix(
 ):
     """30-asset Market Matrix with full canonical signals for each symbol"""
     from app.core.cache import cache_get, cache_set
-    cache_key = "institutional:market:matrix"
+    cache_key = "institutional:market:matrix:crypto:v2"
     cached = await cache_get(cache_key)
     if isinstance(cached, dict) and len(cached.get("symbols", [])) == count:
         return cached
@@ -257,18 +257,21 @@ async def get_market_matrix(
         try:
             exchange = market_coverage.get_symbol_exchange(symbol)
             ohlcv = await market_service.get_ohlcv(symbol, exchange, "1h", 200) or []
-            signal, mtf, pattern = await asyncio.gather(
+            signal, pattern = await asyncio.gather(
                 institutional_signal_engine.generate_signal(symbol, "1h"),
-                multi_timeframe.analyze(symbol),
                 pattern_engine.comprehensive_analysis(symbol, "1h", ohlcv) if ohlcv else asyncio.sleep(0),
                 return_exceptions=True,
             )
             if isinstance(pattern, Exception):
                 pattern = None
-            if isinstance(mtf, Exception):
-                mtf = None
             if isinstance(signal, Exception):
                 signal = None
+            mtf = None
+            if isinstance(signal, dict) and signal.get("multi_timeframe"):
+                mtf = {
+                    "aggregated": signal.get("multi_timeframe"),
+                    "alignment": signal.get("alignment"),
+                }
             canonical = canonical_signal.build(
                 symbol=symbol,
                 exchange=exchange,
@@ -292,7 +295,32 @@ async def get_market_matrix(
         async with semaphore:
             return await analyze_one(sym)
 
-    results = await asyncio.gather(*(limited(s) for s in symbols))
+    tasks = {
+        asyncio.create_task(limited(symbol)): symbol
+        for symbol in symbols[:count]
+    }
+    done, pending = await asyncio.wait(tasks, timeout=60)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    completed = {}
+    for task in done:
+        try:
+            completed[tasks[task]] = task.result()
+        except Exception:
+            completed[tasks[task]] = None
+    results = [
+        completed.get(symbol) or {
+            "symbol": symbol,
+            "exchange": market_coverage.get_symbol_exchange(symbol),
+            "error": "analysis_pending",
+            "status": "reject",
+            "direction": "neutral",
+            "confidence": 0,
+        }
+        for symbol in symbols[:count]
+    ]
     response = {"symbols": results, "count": len(results)}
     await cache_set(cache_key, response, ttl=30)
     return response

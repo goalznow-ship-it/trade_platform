@@ -59,7 +59,7 @@ class MultiTimeframeAnalyzer:
             async with semaphore:
                 try:
                     limit = TIMEFRAME_LIMITS.get(tf, 100)
-                    data = await market_service.get_ohlcv(symbol, "binance", tf, limit)
+                    data = await market_service.get_ohlcv(symbol, None, tf, limit)
                     if not data or len(data) < 30:
                         return None, f"{tf}: insufficient data ({len(data) if data else 0} candles)"
 

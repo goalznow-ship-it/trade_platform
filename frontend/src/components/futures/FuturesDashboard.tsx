@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
   TrendingUp, TrendingDown, Activity, Zap,
-  Flame, Clock,
+  Flame, Clock, RefreshCw,
 } from "lucide-react"
 import {
   type UnifiedSignal, normalizeSignal, displayPrice, displayPercent,
@@ -16,15 +16,19 @@ export function FuturesDashboard() {
   const [data, setData] = useState<UnifiedSignal[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<string>("")
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      try {
-        const [scanResponse, marketIntel] = await Promise.all([
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [scanResult, intelResult] = await Promise.allSettled([
           api.institutionalScan(0, 30) as Promise<{ signals?: Record<string, unknown>[] }>,
           api.getMarketIntelligence(),
-        ])
+      ])
+      if (scanResult.status === "rejected") throw scanResult.reason
+      const scanResponse = scanResult.value
+      const marketIntel = intelResult.status === "fulfilled" ? intelResult.value : null
         const rawSignals = Array.isArray(scanResponse?.signals) ? scanResponse.signals : []
         const normalized = rawSignals.map(normalizeSignal)
         const funding = Array.isArray(marketIntel?.futures?.items)
@@ -47,16 +51,22 @@ export function FuturesDashboard() {
           },
         })))
         setLastUpdated(new Date().toISOString())
-      } catch {
+        if (intelResult.status === "rejected") {
+          setError("Derivativ bazar əlavələri müvəqqəti alınmadı; siqnal analizi göstərilir.")
+        }
+      } catch (cause) {
         setData([])
+        setError(cause instanceof Error ? cause.message : "Futures məlumatı alınmadı")
       } finally {
         setLoading(false)
       }
-    }
+  }, [])
+
+  useEffect(() => {
     load()
     const interval = setInterval(load, 60000)
     return () => clearInterval(interval)
-  }, [])
+  }, [load])
 
   if (loading) {
     return (
@@ -98,56 +108,60 @@ export function FuturesDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-white">Futures Intelligence</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Real-time futures market analysis across all assets</p>
+            <p className="text-xs text-gray-500 mt-0.5">Real kripto perpetual bazarları üzrə derivativ və siqnal analizi</p>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-gray-500">
-            <Activity className="w-3 h-3" /> Auto-refresh 60s
+            <Activity className="w-3 h-3" /> 60 saniyədə yenilənir
             {lastUpdated && (
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {displayDate(lastUpdated)}
               </span>
             )}
-            {stale && <span className="text-amber-400">Stale</span>}
+            {stale && <span className="text-amber-400">köhnə məlumat</span>}
+            <button onClick={load} disabled={loading} className="flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-gray-400 hover:text-white disabled:opacity-50">
+              <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} /> Yenilə
+            </button>
           </div>
         </div>
+        {error && <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-300">{error}</div>}
 
         {/* Overview Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="p-4 rounded-xl border border-green-900/30 bg-green-900/10">
             <div className="flex items-center gap-1 text-xs text-green-400 mb-1">
-              <TrendingUp className="w-3.5 h-3.5" /> Bullish Signals
+              <TrendingUp className="w-3.5 h-3.5" /> LONG siqnalları
             </div>
             <div className="text-2xl font-bold text-white">{longSignals.length}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">{longSignals.length > 0 ? `${longSignals.length} trade-ready` : "No setups"}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">{longSignals.length > 0 ? `${longSignals.length} ticarətə hazır` : "Təsdiqlənmiş setup yoxdur"}</div>
           </div>
           <div className="p-4 rounded-xl border border-red-900/30 bg-red-900/10">
             <div className="flex items-center gap-1 text-xs text-red-400 mb-1">
-              <TrendingDown className="w-3.5 h-3.5" /> Bearish Signals
+              <TrendingDown className="w-3.5 h-3.5" /> SHORT siqnalları
             </div>
             <div className="text-2xl font-bold text-white">{shortSignals.length}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">{shortSignals.length > 0 ? `${shortSignals.length} trade-ready` : "No setups"}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">{shortSignals.length > 0 ? `${shortSignals.length} ticarətə hazır` : "Təsdiqlənmiş setup yoxdur"}</div>
           </div>
           <div className="p-4 rounded-xl border border-yellow-900/30 bg-yellow-900/10">
             <div className="flex items-center gap-1 text-xs text-yellow-400 mb-1">
-              <Flame className="w-3.5 h-3.5" /> Funding Extremes
+              <Flame className="w-3.5 h-3.5" /> Funding ekstremumu
             </div>
             <div className="text-2xl font-bold text-white">{fundingExtremes.length}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">Top 8 below</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">Aşağıda maksimum 8 bazar</div>
           </div>
           <div className="p-4 rounded-xl border border-blue-900/30 bg-blue-900/10">
             <div className="flex items-center gap-1 text-xs text-blue-400 mb-1">
-              <Zap className="w-3.5 h-3.5" /> High Confidence
+              <Zap className="w-3.5 h-3.5" /> Yüksək inam
             </div>
             <div className="text-2xl font-bold text-white">{highConf.length}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">80%+ · Watchlist {watchlist.length} · WAIT {waiting.length}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">80%+ · İzləmə {watchlist.length} · Gözlə {waiting.length}</div>
           </div>
         </div>
 
         {/* Funding Extremes */}
         <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-            Funding Rate Extremes
+            Funding dərəcəsi ekstremumları
           </h2>
           <div className="space-y-1.5">
             {sortedByFunding.length === 0 && <div className="text-xs text-gray-600 py-6 text-center">Real ekstremal funding aşkarlanmayıb</div>}
@@ -185,10 +199,10 @@ export function FuturesDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="p-4 rounded-xl border border-green-900/30 bg-gray-900/50">
             <h2 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">
-              Top Bullish Setups
+              Ən güclü LONG namizədləri
             </h2>
             {sortedByConfidence.filter((d) => d.direction === "long").length === 0 ? (
-              <div className="text-center py-4 text-gray-600 text-xs">Hazirda yüksek keyfiyyetli LONG siqnali yoxdur</div>
+              <div className="text-center py-4 text-gray-600 text-xs">Hazırda təsdiqlənmiş LONG siqnalı yoxdur</div>
             ) : (
               <div className="space-y-1.5">
                 {sortedByConfidence.filter((d) => d.direction === "long").slice(0, 5).map((item, i) => (
@@ -214,10 +228,10 @@ export function FuturesDashboard() {
 
           <div className="p-4 rounded-xl border border-red-900/30 bg-gray-900/50">
             <h2 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">
-              Top Bearish Setups
+              Ən güclü SHORT namizədləri
             </h2>
             {sortedByConfidence.filter((d) => d.direction === "short").length === 0 ? (
-              <div className="text-center py-4 text-gray-600 text-xs">Hazirda yüksek keyfiyyetli SHORT siqnali yoxdur</div>
+              <div className="text-center py-4 text-gray-600 text-xs">Hazırda təsdiqlənmiş SHORT siqnalı yoxdur</div>
             ) : (
               <div className="space-y-1.5">
                 {sortedByConfidence.filter((d) => d.direction === "short").slice(0, 5).map((item, i) => (
@@ -245,7 +259,7 @@ export function FuturesDashboard() {
         {/* Full Market Table */}
         <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-            All Markets
+            Bütün analiz edilən bazarlar
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

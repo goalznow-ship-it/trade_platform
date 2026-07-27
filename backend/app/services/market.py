@@ -7,6 +7,8 @@ class MarketService:
     def __init__(self):
         self.logger = logger
         self._exchange_semaphore = asyncio.Semaphore(2)
+        self._market_load_locks: dict[str, asyncio.Lock] = {}
+        self._loaded_exchanges: set[str] = set()
         self.exchanges = {
             'binance': ccxt.binance({
                 'enableRateLimit': True,
@@ -14,12 +16,29 @@ class MarketService:
             }),
             'bybit': ccxt.bybit({
                 'enableRateLimit': True,
-                'options': {'defaultType': 'future'}
+                'options': {'defaultType': 'swap', 'defaultSubType': 'linear'}
             }),
             'coinbase': ccxt.coinbase(),
         }
 
+    async def _ensure_markets_loaded(self, exchange) -> None:
+        exchange_id = str(getattr(exchange, "id", "unknown"))
+        if exchange_id in self._loaded_exchanges:
+            return
+        lock = self._market_load_locks.setdefault(exchange_id, asyncio.Lock())
+        async with lock:
+            if exchange_id in self._loaded_exchanges:
+                return
+            await asyncio.wait_for(
+                asyncio.to_thread(exchange.load_markets),
+                timeout=30,
+            )
+            self._loaded_exchanges.add(exchange_id)
+
     async def _call_exchange(self, method, *args, **kwargs):
+        exchange = getattr(method, "__self__", None)
+        if exchange is not None and getattr(method, "__name__", "") != "load_markets":
+            await self._ensure_markets_loaded(exchange)
         async with self._exchange_semaphore:
             return await asyncio.wait_for(
                 asyncio.to_thread(method, *args, **kwargs),
@@ -29,7 +48,7 @@ class MarketService:
     def _resolve_exchange(self, symbol: str) -> str:
         """Auto-detect exchange for a symbol. SKH/SKHY -> bybit, rest -> binance."""
         base = symbol.split("/")[0] if "/" in symbol else symbol
-        bybit_symbols = {"SKH", "SKHY"}
+        bybit_symbols = {"SKH"}
         return "bybit" if base in bybit_symbols else "binance"
 
     async def get_ohlcv(self, symbol: str, exchange: str = None, timeframe: str = '1h', limit: int = 200) -> list:

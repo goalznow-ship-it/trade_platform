@@ -22,14 +22,16 @@ TOP_30_FALLBACK = [
 # Symbols that require Bybit (not on Binance futures)
 SYMBOL_EXCHANGE_OVERRIDE = {
     "SKH": "bybit",
-    "SKHY": "bybit",
+    "SKHY": "binance",
 }
 
 
 class MarketCoverageService:
     def __init__(self):
-        self._cache_key = "market:top30"
-        self._cache_key_timestamp = "market:top30:updated"
+        # v2 isolates the crypto-only universe from older caches that may contain
+        # Binance TradFi perpetuals (equities, commodities, and indices).
+        self._cache_key = "market:top30:crypto:v2"
+        self._cache_key_timestamp = "market:top30:crypto:v2:updated"
         self._update_interval_hours = 168  # 7 days
         self._fallback = TOP_30_FALLBACK
         self._symbol_exchange_override = SYMBOL_EXCHANGE_OVERRIDE
@@ -41,6 +43,12 @@ class MarketCoverageService:
         # for Binance perpetual contracts.
         aliases = {"PEPE/USDT": "1000PEPE/USDT"}
         return list(dict.fromkeys(aliases.get(symbol, symbol) for symbol in symbols))
+
+    @staticmethod
+    def _with_required_symbols(symbols: List[str], count: int) -> List[str]:
+        required = ["SKH/USDT", "SKHY/USDT"]
+        ranked = [symbol for symbol in symbols if symbol not in required]
+        return ranked[:max(0, count - len(required))] + required[:count]
 
     def get_symbol_exchange(self, symbol: str) -> str:
         """Get the exchange for a symbol. Bybit for SKH/SKHY, Binance otherwise."""
@@ -60,15 +68,7 @@ class MarketCoverageService:
                     normalized,
                     ttl=self._update_interval_hours * 3600,
                 )
-            # Always ensure Bybit-only symbols are in the list
-            forced_symbols = ["SKH/USDT", "SKHY/USDT"]
-            symbols = normalized[:count]
-            for fs in forced_symbols:
-                if fs not in symbols:
-                    symbols.append(fs)
-                    if len(symbols) > count + len(forced_symbols):
-                        break
-            return symbols
+            return self._with_required_symbols(normalized, count)
 
         return await self._fetch_and_cache()
 
@@ -76,16 +76,11 @@ class MarketCoverageService:
         try:
             symbols = self._normalize_symbols(await self._fetch_top_from_exchange())
             if symbols and len(symbols) >= 20:
-                # Always ensure Bybit-only symbols like SKH are in the list
-                forced_symbols = ["SKH/USDT", "SKHY/USDT"]
-                for fs in forced_symbols:
-                    if fs not in symbols:
-                        symbols.append(fs)
                 await cache_set(self._cache_key, symbols, ttl=self._update_interval_hours * 3600)
                 await cache_set(self._cache_key_timestamp, datetime.now(timezone.utc).isoformat(),
                                 ttl=self._update_interval_hours * 3600)
                 self._logger.info(f"Market coverage updated: {len(symbols)} symbols")
-                return symbols
+                return self._with_required_symbols(symbols, 30)
         except Exception as e:
             self._logger.warning(f"Failed to fetch top symbols: {e}")
 
@@ -105,11 +100,14 @@ class MarketCoverageService:
 
             usdt_perps = []
             for symbol, market in markets.items():
+                info = market.get("info") or {}
                 if (
                     market.get("active", True)
                     and market.get("swap")
                     and market.get("linear")
                     and market.get("settle") == "USDT"
+                    and info.get("contractType") == "PERPETUAL"
+                    and info.get("underlyingType") == "COIN"
                 ):
                     ticker = tickers.get(symbol, {})
                     quote_volume = ticker.get("quoteVolume", 0) or 0

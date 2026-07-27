@@ -10,14 +10,15 @@ import {
 } from "lucide-react"
 
 interface PortfolioAnalytics {
+  error?: string;
   win_rate: number;
   profit_factor: number;
   total_trades: number;
-  best_trade: number;
-  worst_trade: number;
+  best_trade: number | { symbol?: string; pnl?: number } | null;
+  worst_trade: number | { symbol?: string; pnl?: number } | null;
   winning_trades: number;
   losing_trades: number;
-  avg_holding_time: string;
+  avg_holding_time: string | number;
   monthly_breakdown?: {
     month?: string;
     label?: string;
@@ -34,31 +35,59 @@ interface DailyPnLEntry {
 export function PortfolioPanel() {
   const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null)
   const [dailyPnl, setDailyPnl] = useState<DailyPnLEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
+      setError(null)
       const [a, d] = await Promise.all([
         api.getPortfolioAnalytics(),
         api.getDailyPnL(),
       ])
-      setAnalytics(a as PortfolioAnalytics)
+      const response = a as PortfolioAnalytics
+      if (response?.error === "No trade history") {
+        setAnalytics(null)
+        setDailyPnl([])
+        return
+      }
+      setAnalytics(response)
       setDailyPnl(Array.isArray(d) ? (d as DailyPnLEntry[]) : [])
-    } catch {}
+    } catch (cause) {
+      setAnalytics(null)
+      setDailyPnl([])
+      setError(cause instanceof Error ? cause.message : "Portfolio məlumatı alınmadı")
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
 
-  if (!analytics) {
-    return <div className="p-4 text-center text-gray-500 text-sm">Loading portfolio...</div>
+  if (loading) {
+    return <div className="p-4 text-center text-gray-500 text-sm">Portfolio yüklənir...</div>
   }
 
+  if (error) {
+    return <div className="p-4 text-center text-red-300 text-sm">{error}</div>
+  }
+
+  if (!analytics) {
+    return <div className="p-8 text-center text-gray-500 text-sm">
+      <PieChart className="mx-auto mb-2 h-8 w-8 text-gray-700" />
+      Hələ bağlanmış real və ya paper trade yoxdur. Analitika ilk bağlanmış mövqedən sonra yaranacaq.
+    </div>
+  }
+
+  const bestTrade = typeof analytics.best_trade === "object" ? analytics.best_trade?.pnl : analytics.best_trade
+  const worstTrade = typeof analytics.worst_trade === "object" ? analytics.worst_trade?.pnl : analytics.worst_trade
   const stats = [
     { label: "Win Rate", value: `${(analytics.win_rate || 0).toFixed(1)}%`, color: (analytics.win_rate || 0) >= 50 ? "green" : "red", icon: Award },
     { label: "Profit Factor", value: (analytics.profit_factor || 0).toFixed(2), color: (analytics.profit_factor || 0) >= 1.5 ? "green" : "yellow", icon: TrendingUp },
     { label: "Total Trades", value: analytics.total_trades || 0, color: "blue", icon: BarChart3 },
-    { label: "Best Trade", value: formatPrice(analytics.best_trade || 0), color: "green", icon: Award },
-    { label: "Worst Trade", value: formatPrice(analytics.worst_trade || 0), color: "red", icon: Award },
+    { label: "Best Trade", value: formatPrice(bestTrade || 0), color: "green", icon: Award },
+    { label: "Worst Trade", value: formatPrice(worstTrade || 0), color: "red", icon: Award },
     { label: "Win Trades", value: analytics.winning_trades || 0, color: "green", icon: TrendingUp },
     { label: "Loss Trades", value: analytics.losing_trades || 0, color: "red", icon: TrendingDown },
     { label: "Avg Hold Time", value: analytics.avg_holding_time || "--", color: "default", icon: Clock },

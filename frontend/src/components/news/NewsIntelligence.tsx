@@ -20,6 +20,7 @@ interface NewsItem {
   score?: number
   impact_score?: number
   category?: string
+  event_type?: string
   type?: string
   summary?: string
   summary_az?: string
@@ -58,14 +59,14 @@ export function NewsIntelligence() {
   }, [load])
 
   const categories = [
-    { id: "all", label: "All News", icon: Newspaper },
-    { id: "macro", label: "Macro/FED", icon: DollarSign },
-    { id: "regulation", label: "Regulation", icon: Building2 },
-    { id: "whale", label: "Whale Activity", icon: Activity },
-    { id: "security", label: "Security", icon: Shield },
+    { id: "all", label: "Bütün xəbərlər", icon: Newspaper },
+    { id: "macro", label: "Makro/FED", icon: DollarSign },
+    { id: "regulation", label: "Tənzimləmə", icon: Building2 },
+    { id: "whale", label: "Böyük transfer", icon: Activity },
+    { id: "security", label: "Təhlükəsizlik", icon: Shield },
   ]
 
-  const filtered = filter === "all" ? news : news.filter((n) => (n.category || n.type) === filter)
+  const filtered = filter === "all" ? news : news.filter((item) => (item.event_type || item.category || item.type) === filter)
 
   function getCategoryIcon(cat: string) {
     switch (cat) {
@@ -83,15 +84,15 @@ export function NewsIntelligence() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-white">News Intelligence</h1>
-            <p className="text-xs text-gray-500 mt-0.5">AI-powered news monitoring with impact analysis</p>
+            <p className="text-xs text-gray-500 mt-0.5">Real RSS xəbərləri, sentiment və təsir analizi</p>
           </div>
           <button onClick={load} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50">
-            <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} /> Refresh
+            <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} /> Yenilə
           </button>
         </div>
         {(error || Object.keys(providerErrors).length > 0) && <div className="p-3 rounded border border-amber-900/40 bg-amber-950/20 text-xs text-amber-300">
           {error && <div>{error}</div>}
-          {Object.entries(providerErrors).map(([provider, reason]) => <div key={provider}>{provider}: {reason}</div>)}
+          {Object.keys(providerErrors).map((provider) => <div key={provider}>{provider}: provider müvəqqəti əlçatan deyil</div>)}
         </div>}
 
         {/* Category Filters */}
@@ -129,7 +130,7 @@ export function NewsIntelligence() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-600">
             <Newspaper className="w-8 h-8 mx-auto mb-2" />
-            <div className="text-sm">No news items match current filter</div>
+            <div className="text-sm">Bu filtrə uyğun real xəbər yoxdur</div>
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -138,7 +139,7 @@ export function NewsIntelligence() {
               const isPositive = impact === "positive" || impact === "bullish"
               const isNegative = impact === "negative" || impact === "bearish"
               const score = item.score || item.impact_score || 0
-              const cat = item.category || item.type || "general"
+              const cat = item.event_type || item.category || item.type || "general"
               const itemTime = item.published_at || item.timestamp
               const assets = item.affected_assets || item.assets || []
 
@@ -156,7 +157,7 @@ export function NewsIntelligence() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h3 className="text-sm font-medium text-white line-clamp-2">{item.title || item.headline || "Untitled"}</h3>
+                          <h3 className="text-sm font-medium text-white line-clamp-2">{item.title || item.headline || "Başlıqsız xəbər"}</h3>
                           {item.source && (
                             <div className="flex items-center gap-1 mt-0.5">
                               <span className="text-[10px] text-gray-600">{item.source}</span>
@@ -181,7 +182,7 @@ export function NewsIntelligence() {
                           )}>
                             {score}
                           </div>
-                          <div className="text-[9px] text-gray-600 uppercase tracking-wider">Impact</div>
+                          <div className="text-[9px] text-gray-600 uppercase tracking-wider">Təsir</div>
                         </div>
                       </div>
 
@@ -219,7 +220,7 @@ export function NewsIntelligence() {
                         {item.url && (
                           <a href={item.url} target="_blank" rel="noopener noreferrer"
                             className="text-[10px] text-gray-500 hover:text-gray-300 flex items-center gap-0.5">
-                            <ExternalLink className="w-3 h-3" /> Source
+                            <ExternalLink className="w-3 h-3" /> Mənbə
                           </a>
                         )}
                       </div>

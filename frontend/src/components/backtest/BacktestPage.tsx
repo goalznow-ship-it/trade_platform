@@ -75,7 +75,7 @@ export function BacktestPage() {
       setResult(res)
     } catch (err) {
       setResult(null)
-      setError(err instanceof Error ? err.message : "Backtest could not be completed")
+      setError(err instanceof Error ? err.message : "Backtest tamamlana bilmədi")
     } finally {
       setLoading(false)
     }
@@ -90,8 +90,8 @@ export function BacktestPage() {
               <BarChart3 className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-white">Backtesting Engine</h1>
-              <p className="text-xs text-gray-500">Test strategies against historical market data</p>
+              <h1 className="text-lg font-semibold text-white">Backtest mühərriki</h1>
+              <p className="text-xs text-gray-500">Strategiyanı real Binance tarixi şamları üzərində sına</p>
             </div>
           </div>
           <div className="flex gap-1 p-0.5 rounded-lg bg-gray-800 border border-gray-700">
@@ -101,7 +101,7 @@ export function BacktestPage() {
                   "px-3 py-1.5 text-xs rounded-md transition-colors",
                   activeTab === tab ? "bg-gray-700 text-white" : "text-gray-400 hover:text-gray-200"
                 )}>
-                {tab === "backtest" ? "Run Backtest" : "History"}
+                {tab === "backtest" ? "Backtest işə sal" : "Tarixçə"}
               </button>
             ))}
           </div>
@@ -157,7 +157,7 @@ export function BacktestPage() {
                   <button onClick={runBacktest} disabled={loading}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                     <Play className="w-3.5 h-3.5" />
-                    {loading ? "Running..." : "Run Backtest"}
+                    {loading ? "Hesablanır..." : "Backtest işə sal"}
                   </button>
                 </div>
               </div>
@@ -225,7 +225,7 @@ export function BacktestPage() {
                 )}
                 {result.provider_errors && Object.keys(result.provider_errors).length > 0 && (
                   <div className="p-3 rounded-lg border border-amber-900/50 bg-amber-950/20 text-xs text-amber-200">
-                    {Object.entries(result.provider_errors).map(([provider, reason]) => <div key={provider}>{provider}: {reason}</div>)}
+                    {Object.keys(result.provider_errors).map((provider) => <div key={provider}>{provider}: provider müvəqqəti əlçatan deyil; nəticə funding xərci olmadan hesablanıb</div>)}
                   </div>
                 )}
 
@@ -290,8 +290,8 @@ export function BacktestPage() {
             {!result && !loading && (
               <div className="text-center py-16 text-gray-600">
                 <BarChart3 className="w-12 h-12 mx-auto mb-3 text-gray-700" />
-                <div className="text-sm">Configure parameters and click <span className="text-blue-400">Run Backtest</span></div>
-                <p className="text-xs text-gray-600 mt-1">Test your strategy on 500 candles of historical data</p>
+                <div className="text-sm">Parametrləri seç və <span className="text-blue-400">Backtest işə sal</span> düyməsinə bas</div>
+                <p className="text-xs text-gray-600 mt-1">Strategiya 500 real, bağlanmış tarixi şam üzərində yoxlanılır</p>
               </div>
             )}
           </>
@@ -299,11 +299,11 @@ export function BacktestPage() {
 
         {activeTab === "history" && (
           <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/40">
-            <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Backtest History</h2>
+            <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">Backtest tarixçəsi</h2>
             {history.length === 0 ? (
               <div className="text-center py-8 text-gray-600">
                 <History className="w-8 h-8 mx-auto mb-2" />
-                <div className="text-xs">No backtest history yet</div>
+                <div className="text-xs">Hələ saxlanmış backtest nəticəsi yoxdur</div>
               </div>
             ) : (
               <div className="overflow-x-auto">

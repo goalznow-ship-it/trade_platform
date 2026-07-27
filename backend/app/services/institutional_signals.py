@@ -43,7 +43,7 @@ class InstitutionalSignalEngine:
         if isinstance(cached, dict):
             return cached
 
-        data = await market_service.get_ohlcv(symbol, "binance", timeframe, 200)
+        data = await market_service.get_ohlcv(symbol, None, timeframe, 200)
         if not data or len(data) < 50:
             result = self._empty_signal(symbol, timeframe, "Insufficient OHLCV data")
             await cache_set(cache_key, result, ttl=10)
@@ -267,9 +267,27 @@ class InstitutionalSignalEngine:
                         logger.debug(f"Scan error {symbol}: {e}")
                 return None
 
-            scanned = await asyncio.gather(
-                *(analyze_symbol(symbol) for symbol in symbols),
-            )
+            tasks = {
+                asyncio.create_task(analyze_symbol(symbol)): symbol
+                for symbol in symbols
+            }
+            done, pending = await asyncio.wait(tasks, timeout=60)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            if pending:
+                logger.warning(
+                    "Institutional scan deadline reached; returning %s/%s completed symbols",
+                    len(done),
+                    len(tasks),
+                )
+            scanned = []
+            for task in done:
+                try:
+                    scanned.append(task.result())
+                except Exception as exc:
+                    logger.debug(f"Scan task error {tasks[task]}: {exc}")
             results = [signal for signal in scanned if signal is not None]
             results.sort(key=lambda r: r.get("confidence", 0), reverse=True)
             enriched = [self._enrich_signal(s) for s in results]
