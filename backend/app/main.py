@@ -138,7 +138,7 @@ async def health():
     ]
     readiness = (
         "degraded"
-        if unhealthy_workers or degraded_providers
+        if unhealthy_workers
         else "ready" if stream_stats.get("running")
         else "not_started"
     )
@@ -154,6 +154,8 @@ async def health():
             "providers": {
                 "registered": len(providers),
                 "degraded": degraded_providers,
+                "status": "warning" if degraded_providers else "healthy",
+                "affects_readiness": False,
             },
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),

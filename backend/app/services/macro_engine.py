@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict
 import yfinance as yf
 from app.core.provider_health import provider_health
+from app.services.data_contract import data_meta
 
 
 class MacroEngine:
@@ -21,13 +22,33 @@ class MacroEngine:
         "vix": "^VIX",
     }
 
+    def __init__(self) -> None:
+        self._last_valid: dict[str, Dict] = {}
+
     def _quote(self, key: str) -> Dict:
         symbol = self.SYMBOLS[key]
         if not provider_health.allow_request("yahoo_finance"):
+            cached = self._last_valid.get(key)
+            if cached:
+                return {
+                    **cached,
+                    "available": True,
+                    **data_meta(
+                        "Yahoo Finance last-valid cache",
+                        last_updated=cached.get("last_updated") or cached.get("timestamp"),
+                        max_age_seconds=900,
+                        fallback_used=True,
+                    ),
+                    "provider_error": "Provider circuit breaker is open",
+                }
             return {
                 "available": False, "source": "yahoo_finance", "symbol": symbol,
                 "reason": "Provider circuit breaker is open",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                **data_meta(
+                    "Yahoo Finance",
+                    error_reason="Provider circuit breaker is open",
+                ),
             }
         try:
             history = yf.Ticker(symbol).history(period="5d", interval="1d")
@@ -45,16 +66,32 @@ class MacroEngine:
                 "trend": "bullish" if change > 0 else "bearish" if change < 0 else "neutral",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+            result.update(data_meta("Yahoo Finance", max_age_seconds=900))
+            self._last_valid[key] = dict(result)
             provider_health.success("yahoo_finance")
             return result
         except Exception as exc:
             provider_health.failure("yahoo_finance", exc)
+            cached = self._last_valid.get(key)
+            if cached:
+                return {
+                    **cached,
+                    "available": True,
+                    **data_meta(
+                        "Yahoo Finance last-valid cache",
+                        last_updated=cached.get("last_updated") or cached.get("timestamp"),
+                        max_age_seconds=900,
+                        fallback_used=True,
+                    ),
+                    "provider_error": str(exc)[:240],
+                }
             return {
                 "available": False,
                 "source": "yahoo_finance",
                 "symbol": symbol,
                 "reason": str(exc),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                **data_meta("Yahoo Finance", error_reason=str(exc)),
             }
 
     def get_dxy(self) -> Dict: return self._quote("dxy")
@@ -101,6 +138,12 @@ class MacroEngine:
             "risk_score": None,
             "crypto_outlook": "unavailable",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            **data_meta(
+                "Yahoo Finance",
+                error_reason=None if available else "No macro quotes available",
+                fallback_used=any(item.get("fallback_used") for item in available),
+                max_age_seconds=900,
+            ),
         }
 
     async def stream_updates(self, interval: int = 300):

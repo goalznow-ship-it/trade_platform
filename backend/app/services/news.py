@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import os
-from datetime import datetime, timezone
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin
 from xml.etree import ElementTree
@@ -11,12 +11,14 @@ from xml.etree import ElementTree
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 from app.core.provider_health import provider_health
 from app.services.data_contract import data_meta, utc_now
 
 
 class NewsService:
+    LAST_VALID_CACHE_KEY = "news:last_valid:v1"
     DEFAULT_RSS_PROVIDERS = {
         "Cointelegraph": "https://cointelegraph.com/rss",
         "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
@@ -27,7 +29,6 @@ class NewsService:
         configured = os.getenv("NEWS_RSS_PROVIDERS", "").strip()
         self.providers = dict(self.DEFAULT_RSS_PROVIDERS)
         if configured:
-            # Format: Provider=https://feed,Provider2=https://feed
             self.providers = {
                 name.strip(): url.strip()
                 for pair in configured.split(",")
@@ -54,8 +55,12 @@ class NewsService:
             raise
 
     async def _fetch_feed(self, source: str, url: str) -> list[dict]:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; TradeAnalystPro/1.0; +https://localhost)",
+            "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        }
         async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
-            response = await client.get(url, headers={"User-Agent": "TradeAnalystPro/1.0"})
+            response = await client.get(url, headers=headers)
             response.raise_for_status()
         root = ElementTree.fromstring(response.content)
         rows = []
@@ -95,28 +100,63 @@ class NewsService:
                 available.append(name)
                 all_news.extend(result)
 
-        # URL and normalized-title deduplication across providers.
         deduped = {}
         for article in all_news:
             key = "".join(ch for ch in article["title"].lower() if ch.isalnum())[:180]
             current = deduped.get(key)
             if not current or article["published_at"] > current["published_at"]:
                 deduped[key] = article
-        articles = sorted(deduped.values(), key=lambda row: row["published_at"], reverse=True)[:limit]
-        reason = None
-        if not articles:
-            reason = "Konfiqurasiya edilmiş xəbər provider-lərindən etibarlı RSS nəticəsi gəlmədi"
+        articles = sorted(
+            deduped.values(),
+            key=lambda row: row["published_at"],
+            reverse=True,
+        )[:limit]
+
+        if articles:
+            saved_at = utc_now()
+            await cache_set(
+                self.LAST_VALID_CACHE_KEY,
+                {"articles": articles, "saved_at": saved_at},
+                ttl=86_400,
+            )
+            return {
+                "articles": articles,
+                "provider_errors": provider_errors,
+                "module_errors": {},
+                "providers": list(self.providers),
+                "available_providers": available,
+                **data_meta(
+                    ", ".join(available),
+                    last_updated=saved_at,
+                    fallback_used=bool(provider_errors),
+                    max_age_seconds=300,
+                ),
+            }
+
+        reason = "Configured RSS providers returned no reliable articles"
+        cached = await cache_get(self.LAST_VALID_CACHE_KEY)
+        if isinstance(cached, dict) and cached.get("articles"):
+            return {
+                "articles": cached["articles"][:limit],
+                "provider_errors": provider_errors,
+                "module_errors": {"news": reason},
+                "providers": list(self.providers),
+                "available_providers": [],
+                **data_meta(
+                    "Last valid real RSS cache",
+                    last_updated=cached.get("saved_at"),
+                    max_age_seconds=900,
+                    fallback_used=True,
+                ),
+            }
+
         return {
-            "articles": articles,
+            "articles": [],
             "provider_errors": provider_errors,
-            "module_errors": {"news": reason} if reason else {},
+            "module_errors": {"news": reason},
             "providers": list(self.providers),
-            "available_providers": available,
-            **data_meta(
-                ", ".join(available) if available else "Configured RSS providers",
-                error_reason=reason,
-                fallback_used=bool(provider_errors) and bool(articles),
-            ),
+            "available_providers": [],
+            **data_meta("Configured RSS providers", error_reason=reason),
         }
 
     async def fetch_all(self) -> list:
