@@ -5,6 +5,8 @@ High-quality signal generation, market coverage,
 multi-timeframe analysis, and risk engine.
 """
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import get_db
 from app.core.security import get_current_user
 from app.services.market_coverage import market_coverage
 from app.services.institutional_signals import institutional_signal_engine
@@ -20,10 +22,17 @@ router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
 
 
 @router.get("/signal-monitor")
-async def get_signal_monitor(user: dict = Depends(get_current_user)):
+async def get_signal_monitor(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Current state of the real-data proactive LONG/SHORT monitor."""
     from app.services.early_signal_monitor import early_signal_monitor
-    return early_signal_monitor.snapshot()
+    from app.services.performance import performance_service
+
+    snapshot = early_signal_monitor.snapshot()
+    snapshot["performance"] = await performance_service.get_stats(db, days=90)
+    return snapshot
 
 
 @router.get("/signal/{symbol}")

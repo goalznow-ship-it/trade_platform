@@ -25,6 +25,13 @@ interface MonitorSnapshot {
   confirmed: MonitorSignal[]
   last_transitions: MonitorSignal[]
   count: number
+  performance?: {
+    completed_signals: number
+    pending_signals: number
+    win_rate: number
+    long_accuracy: number
+    short_accuracy: number
+  }
 }
 
 export function SignalMonitor() {
@@ -50,6 +57,8 @@ export function SignalMonitor() {
   }, [load])
 
   const visible = (data?.signals || []).filter((signal) => signal.stage !== "reject")
+  const performance = data?.performance
+  const hasMeasuredResults = (performance?.completed_signals ?? 0) > 0
 
   return (
     <div className="h-full overflow-y-auto bg-[#0d1117] p-4 lg:p-6">
@@ -74,6 +83,29 @@ export function SignalMonitor() {
           <Metric label="İzlənən bazar" value={data?.count ?? 0} />
           <Metric label="Erkən izləmə" value={data?.watching?.length ?? 0} color="text-yellow-400" />
           <Metric label="Təsdiqlənmiş" value={data?.confirmed?.length ?? 0} color="text-green-400" />
+        </div>
+
+        <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-xs font-semibold uppercase text-gray-300">Ölçülmüş siqnal nəticələri · 90 gün</h2>
+              <p className="mt-1 text-[10px] text-gray-600">
+                Yalnız real bazarda entry-yə toxunmuş və TP/SL ilə bağlanmış siqnallar hesablanır.
+              </p>
+            </div>
+            {!hasMeasuredResults && (
+              <span className="rounded-md border border-yellow-900/60 bg-yellow-950/30 px-2 py-1 text-[9px] font-semibold text-yellow-400">
+                MƏLUMAT TOPLANIR
+              </span>
+            )}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <Metric label="Tamamlanmış" value={performance?.completed_signals ?? 0} />
+            <Metric label="Gözləyən" value={performance?.pending_signals ?? 0} color="text-yellow-400" />
+            <Metric label="Win rate" value={hasMeasuredResults ? `${performance?.win_rate.toFixed(1)}%` : "—"} color="text-green-400" />
+            <Metric label="LONG dəqiqliyi" value={hasMeasuredResults ? `${performance?.long_accuracy.toFixed(1)}%` : "—"} />
+            <Metric label="SHORT dəqiqliyi" value={hasMeasuredResults ? `${performance?.short_accuracy.toFixed(1)}%` : "—"} />
+          </div>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">

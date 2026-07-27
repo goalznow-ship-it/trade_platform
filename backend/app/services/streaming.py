@@ -18,6 +18,7 @@ class StreamingService:
         "fear_greed": 60,
         "breadth": 60,
         "signals": 60,
+        "outcomes": 60,
         "heartbeat": 5,
     }
 
@@ -42,6 +43,7 @@ class StreamingService:
             ("fear_greed", self._stream_fear_greed()),
             ("breadth", self._stream_breadth(symbols)),
             ("signals", self._stream_signals(symbols)),
+            ("outcomes", self._resolve_signal_outcomes()),
             ("heartbeat", self._stream_heartbeat()),
         ]
 
@@ -341,6 +343,17 @@ class StreamingService:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
             self._beat("signals")
+            await asyncio.sleep(60)
+
+    async def _resolve_signal_outcomes(self):
+        from app.services.signal_outcome import signal_outcome_resolver
+
+        while self._running:
+            try:
+                await signal_outcome_resolver.resolve_open_signals()
+            except Exception:
+                logger.exception("Signal outcome resolver failed")
+            self._beat("outcomes")
             await asyncio.sleep(60)
 
 
