@@ -6,7 +6,8 @@ import time
 from datetime import datetime, timezone
 from app.core.websocket_manager import ws_manager, Channel
 from app.core.security import get_current_user
-from app.services.skhy_market_data import skhy_market_data
+from app.services.skhy_market_data import skhy_market_data, normalize_symbol
+from app.services.market_coverage import market_coverage
 from app.services.skhy_analysis_engine import skhy_analysis
 from app.services.skhy_signal_history import skhy_history
 from app.core.logging import logger
@@ -15,8 +16,23 @@ router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
 TF_PATTERN = "^(1m|5m|15m|30m|1h|4h|1d)$"
 
-async def _build_snapshot_payload(timeframe: str) -> dict:
-    snapshot = await skhy_market_data.get_snapshot()
+
+@router.get("/symbols")
+async def get_symbols():
+    symbols = [normalize_symbol(item) for item in await market_coverage.get_top_symbols(30)]
+    return {"symbols": symbols, "count": len(symbols), "source": "Binance USDT perpetual volume ranking"}
+
+async def _allowed_symbol(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    covered = {normalize_symbol(item) for item in await market_coverage.get_top_symbols(30)}
+    if normalized not in covered:
+        raise ValueError(f"{normalized} top-30 SKHY Intelligence siyahısında deyil")
+    return normalized
+
+
+async def _build_snapshot_payload(timeframe: str, symbol: str = "SKHYUSDT") -> dict:
+    symbol = await _allowed_symbol(symbol)
+    snapshot = await skhy_market_data.get_snapshot(symbol)
     ticker = snapshot.get("ticker", {})
     if not ticker:
         raise RuntimeError("Binance Futures API cavab vermir")
@@ -26,11 +42,11 @@ async def _build_snapshot_payload(timeframe: str) -> dict:
     ls = snapshot.get("long_short_ratio", {})
     taker = snapshot.get("taker_buy_sell_ratio", {})
     ob = snapshot.get("orderbook", {})
-    ohlcv = await skhy_market_data.get_ohlcv(timeframe, 5)
+    ohlcv = await skhy_market_data.get_ohlcv(timeframe, 5, symbol=symbol)
     current_candle = ohlcv[-1] if ohlcv else None
 
     return {
-        "symbol": "SKHYUSDT",
+        "symbol": symbol,
         "exchange": "Binance Futures",
         "market": "USDT Perpetual",
         "timeframe": timeframe,
@@ -61,30 +77,32 @@ async def _build_snapshot_payload(timeframe: str) -> dict:
 
 
 @router.get("/ohlcv")
-async def get_ohlcv(timeframe: str = "1h", limit: int = 200):
+async def get_ohlcv(timeframe: str = "1h", limit: int = 200, symbol: str = "SKHYUSDT"):
+    symbol = await _allowed_symbol(symbol)
     try:
-        ohlcv = await skhy_market_data.get_ohlcv(timeframe, limit)
+        ohlcv = await skhy_market_data.get_ohlcv(timeframe, limit, symbol=symbol)
         if not ohlcv:
-            return {"symbol": "SKHYUSDT", "timeframe": timeframe, "data": [], "error": f"SKHYUSDT OHLCV məlumatı yoxdur ({timeframe})"}
-        return {"symbol": "SKHYUSDT", "timeframe": timeframe, "data": ohlcv}
+            return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": f"{symbol} OHLCV məlumatı yoxdur ({timeframe})"}
+        return {"symbol": symbol, "timeframe": timeframe, "data": ohlcv}
     except Exception as e:
-        return {"symbol": "SKHYUSDT", "timeframe": timeframe, "data": [], "error": str(e)}
+        return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": str(e)}
 
 @router.get("/snapshot")
-async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
+async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
-        return await _build_snapshot_payload(timeframe)
+        return await _build_snapshot_payload(timeframe, symbol)
     except Exception as e:
         logger.error(f"SKHY snapshot error: {e}")
         return JSONResponse(
             status_code=503,
-            content={"error": f"SKHYUSDT məlumatı əldə edilə bilmir: {str(e)}", "status": "unavailable"}
+            content={"error": f"{normalize_symbol(symbol)} məlumatı əldə edilə bilmir: {str(e)}", "status": "unavailable"}
         )
 
 @router.get("/analysis")
-async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN)):
+async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
-        result = await skhy_analysis.get_full_analysis(timeframe)
+        symbol = await _allowed_symbol(symbol)
+        result = await skhy_analysis.get_full_analysis(timeframe, symbol)
         if "error" in result:
             return JSONResponse(status_code=503, content=result)
         return result
@@ -96,9 +114,10 @@ async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN))
         )
 
 @router.get("/scenarios")
-async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN)):
+async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
-        return await skhy_analysis.get_scenarios(timeframe)
+        symbol = await _allowed_symbol(symbol)
+        return await skhy_analysis.get_scenarios(timeframe, symbol)
     except Exception as e:
         logger.error(f"SKHY scenarios error: {e}")
         return JSONResponse(
@@ -107,14 +126,16 @@ async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN)
         )
 
 @router.get("/history")
-async def get_history(timeframe: str = Query(default="1h", pattern=TF_PATTERN), limit: int = Query(30, ge=1, le=100)):
+async def get_history(timeframe: str = Query(default="1h", pattern=TF_PATTERN), limit: int = Query(30, ge=1, le=100), symbol: str = "SKHYUSDT"):
     try:
+        symbol = await _allowed_symbol(symbol)
         history = await skhy_history.get_history(limit)
-        performance = await skhy_history.get_performance()
+        history = [item for item in history if normalize_symbol((item.get("signal") or {}).get("symbol")) == symbol]
+        performance = await skhy_history.get_performance(symbol)
         return {
             "signals": history,
             "performance": performance,
-            "symbol": "SKHYUSDT",
+            "symbol": symbol,
             "timeframe": timeframe,
         }
     except Exception as e:
@@ -129,9 +150,11 @@ async def run_backtest(
     timeframe: str = Query("1h", pattern=TF_PATTERN),
     mode: str = Query("balanced", pattern="^(strict|balanced|exploratory)$"),
     limit: int = Query(500, ge=100, le=2000),
+    symbol: str = "SKHYUSDT",
 ):
     try:
-        ohlcv = await skhy_market_data.get_ohlcv(timeframe, limit, skip_cache=True)
+        symbol = await _allowed_symbol(symbol)
+        ohlcv = await skhy_market_data.get_ohlcv(timeframe, limit, skip_cache=True, symbol=symbol)
         if len(ohlcv) < 100:
             return JSONResponse(
                 status_code=503,
@@ -139,7 +162,7 @@ async def run_backtest(
             )
         results = _run_backtest_internal(ohlcv, timeframe, mode)
         return {
-            "symbol": "SKHYUSDT",
+            "symbol": symbol,
             "timeframe": timeframe,
             "mode": mode,
             "candles_analyzed": len(ohlcv),
@@ -153,10 +176,11 @@ async def run_backtest(
         )
 
 @router.get("/diagnostics")
-async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
+async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
-        ohlcv = await skhy_market_data.get_ohlcv(timeframe, 200, skip_cache=True)
-        snapshot = await skhy_market_data.get_snapshot()
+        symbol = await _allowed_symbol(symbol)
+        ohlcv = await skhy_market_data.get_ohlcv(timeframe, 200, skip_cache=True, symbol=symbol)
+        snapshot = await skhy_market_data.get_snapshot(symbol)
         ticker = snapshot.get("ticker", {})
         funding = snapshot.get("funding", {})
         oi = snapshot.get("open_interest", {})
@@ -167,7 +191,7 @@ async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTER
         has_sufficient = candle_count >= min_required
 
         return {
-            "symbol": "SKHYUSDT",
+            "symbol": symbol,
             "exchange": "Binance Futures",
             "market": "USDT Perpetual",
             "timeframe": timeframe,
@@ -325,8 +349,9 @@ def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
     }
 
 @router.websocket("/stream")
-async def skhy_websocket(websocket: WebSocket, timeframe: str = "1h"):
+async def skhy_websocket(websocket: WebSocket, timeframe: str = "1h", symbol: str = "SKHYUSDT"):
     await websocket.accept()
+    symbol = await _allowed_symbol(symbol)
     client_id = f"skhy_ws_{id(websocket)}"
     logger.info(f"SKHY WS connected: {client_id} (timeframe={timeframe})")
 
@@ -334,11 +359,11 @@ async def skhy_websocket(websocket: WebSocket, timeframe: str = "1h"):
         last_analysis_sent = 0.0
         while True:
             try:
-                snapshot = await _build_snapshot_payload(timeframe)
+                snapshot = await _build_snapshot_payload(timeframe, symbol)
                 payload = {"snapshot": snapshot}
                 now = time.monotonic()
                 if now - last_analysis_sent >= 15:
-                    analysis = await skhy_analysis.get_full_analysis(timeframe)
+                    analysis = await skhy_analysis.get_full_analysis(timeframe, symbol)
                     payload["analysis"] = analysis
                     payload["scenarios"] = {
                         "main_scenario": analysis.get("scenario_paths", {}).get("main_scenario", {}),

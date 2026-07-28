@@ -29,8 +29,8 @@ class MarketCoverageService:
     def __init__(self):
         # v2 isolates the crypto-only universe from older caches that may contain
         # Binance TradFi perpetuals (equities, commodities, and indices).
-        self._cache_key = "market:top30:crypto:v2"
-        self._cache_key_timestamp = "market:top30:crypto:v2:updated"
+        self._cache_key = "market:top30:crypto:v3"
+        self._cache_key_timestamp = "market:top30:crypto:v3:updated"
         self._update_interval_hours = 168  # 7 days
         self._fallback = TOP_30_FALLBACK
         self._symbol_exchange_override = SYMBOL_EXCHANGE_OVERRIDE
@@ -122,6 +122,12 @@ class MarketCoverageService:
                 ):
                     ticker = tickers.get(symbol, {})
                     quote_volume = ticker.get("quoteVolume", 0) or 0
+                    bid = ticker.get("bid")
+                    ask = ticker.get("ask")
+                    if quote_volume < 1_000_000:
+                        continue
+                    if bid and ask and bid > 0 and ((ask - bid) / bid) > 0.01:
+                        continue
                     api_symbol = f"{market.get('base')}/USDT"
                     usdt_perps.append((api_symbol, quote_volume))
 

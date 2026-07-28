@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
+from app.services.skhy_market_data import normalize_symbol
 
 HISTORY_KEY = "skhy:signal_history"
 MAX_HISTORY = 100
@@ -35,8 +36,14 @@ class SkhySignalHistory:
                 break
         await cache_set(HISTORY_KEY, history, ttl=86400 * 7)
 
-    async def get_performance(self) -> dict:
+    async def get_performance(self, symbol: str | None = None) -> dict:
         history = await self._get_all()
+        if symbol:
+            normalized = normalize_symbol(symbol)
+            history = [
+                item for item in history
+                if normalize_symbol((item.get("signal") or {}).get("symbol")) == normalized
+            ]
         completed = [h for h in history if h.get("result") and h["result"].get("exit_price")]
         if not completed:
             return {"status": "no_trades_yet"}

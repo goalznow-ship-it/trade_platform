@@ -1,7 +1,7 @@
 import asyncio
 import numpy as np
 from datetime import datetime, timezone
-from app.services.skhy_market_data import skhy_market_data
+from app.services.skhy_market_data import skhy_market_data, normalize_symbol
 from app.services.skhy_indicators import skhy_indicators
 from app.services.skhy_structure import skhy_structure
 from app.core.cache import cache_get, cache_set
@@ -10,16 +10,17 @@ from app.core.logging import logger
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 class SkhyAnalysisEngine:
-    async def get_full_analysis(self, timeframe: str | None = None) -> dict:
+    async def get_full_analysis(self, timeframe: str | None = None, symbol: str = "SKHYUSDT") -> dict:
+        symbol = normalize_symbol(symbol)
         active_tf = timeframe or "1h"
-        cache_key = f"skhy:analysis:{active_tf}"
+        cache_key = f"skhy:analysis:{symbol}:{active_tf}"
         cached = await cache_get(cache_key)
         if isinstance(cached, dict) and cached.get("scores"):
             return cached
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        snapshot = await skhy_market_data.get_snapshot()
-        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200) for tf in TIMEFRAMES}
+        snapshot = await skhy_market_data.get_snapshot(symbol)
+        ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200, symbol=symbol) for tf in TIMEFRAMES}
         ohlcv_results = await asyncio.gather(*ohlcv_tasks.values(), return_exceptions=True)
         ohlcv_data = {}
         for tf, result in zip(ohlcv_tasks.keys(), ohlcv_results):
@@ -32,7 +33,7 @@ class SkhyAnalysisEngine:
         active_data = ohlcv_data.get(active_tf, [])
         if len(active_data) < 30:
             return {
-                "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
+                "symbol": symbol, "exchange": "Binance Futures", "market": "USDT Perpetual",
                 "timestamp": now_iso, "last_updated": now_iso, "active_timeframe": active_tf,
                 "snapshot": snapshot, "timeframes": {active_tf: {"error": f"Insufficient data ({len(active_data)} candles)", "signal": "WAIT"}},
                 "alignment": {"primary_direction": "neutral", "confidence": 0, "status": "NO_DATA"},
@@ -91,7 +92,7 @@ class SkhyAnalysisEngine:
         res_zone = {"top": detected_structure.get("resistance_zone_top"), "bottom": detected_structure.get("resistance_zone_bottom")}
 
         result = {
-            "symbol": "SKHYUSDT", "exchange": "Binance Futures", "market": "USDT Perpetual",
+            "symbol": symbol, "exchange": "Binance Futures", "market": "USDT Perpetual",
             "timestamp": now_iso, "last_updated": now_iso,
             "active_timeframe": active_tf,
             "snapshot": snapshot, "timeframes": tf_analysis, "alignment": alignment, "scores": scores,
@@ -243,19 +244,31 @@ class SkhyAnalysisEngine:
         overall = round((trend_score*0.15 + structure_score*0.12 + momentum_score*0.12 + volume_score*0.10 +
                          liquidity_score*0.10 + pattern_score*0.08 + futures_score*0.10 + orderflow_score*0.08 +
                          multitimeframe_score*0.10 + risk_score*0.05))
-        status = "STRONG_TRADE_READY" if overall >= 80 else "TRADE_READY" if overall >= 70 else "WATCHLIST" if overall >= 50 else "WAIT"
-        long_weight = sum(1.5 if v.get("signal") == "STRONG_LONG" else 1 for v in valid if v.get("signal") in ("LONG", "STRONG_LONG"))
-        short_weight = sum(1.5 if v.get("signal") == "STRONG_SHORT" else 1 for v in valid if v.get("signal") in ("SHORT", "STRONG_SHORT"))
-        directional_weight = long_weight + short_weight
-        long_prob = round(long_weight / directional_weight * 100) if directional_weight else 50
+        timeframe_weights = {"1d": 2.0, "4h": 1.8, "1h": 1.5, "30m": 1.0, "15m": 0.8, "5m": 0.6, "1m": 0.4}
+        evidence = [
+            (timeframe_weights.get(tf, 1.0), data)
+            for tf, data in tf_analysis.items()
+            if "bullish_score" in data and "bearish_score" in data
+        ]
+        bullish_evidence = sum(weight * float(data.get("bullish_score", 50)) for weight, data in evidence)
+        bearish_evidence = sum(weight * float(data.get("bearish_score", 50)) for weight, data in evidence)
+        evidence_total = bullish_evidence + bearish_evidence
+        long_prob = round(bullish_evidence / evidence_total * 100) if evidence_total else 50
         short_prob = 100 - long_prob
+        directional_edge = abs(long_prob - short_prob)
+        signal_confidence = round(overall * (0.70 + min(directional_edge, 50) * 0.006))
+        if alignment.get("status") == "CONFLICTING":
+            signal_confidence = min(signal_confidence, 65)
+        signal_confidence = min(max(signal_confidence, 0), 100)
+        status = "STRONG_TRADE_READY" if signal_confidence >= 80 else "TRADE_READY" if signal_confidence >= 70 else "WATCHLIST" if signal_confidence >= 50 else "WAIT"
         return {
             "trend_score": trend_score, "structure_score": structure_score, "momentum_score": momentum_score,
             "volume_score": volume_score, "liquidity_score": liquidity_score, "pattern_score": pattern_score,
             "futures_score": futures_score, "orderflow_score": orderflow_score,
             "multitimeframe_score": multitimeframe_score, "risk_score": risk_score,
             "overall": overall, "status": status, "long_probability": min(max(long_prob,0),100),
-            "short_probability": min(max(short_prob,0),100), "signal_confidence": overall,
+            "short_probability": min(max(short_prob,0),100), "signal_confidence": signal_confidence,
+            "directional_edge": directional_edge,
         }
 
     def _compute_triggers(self, tf_analysis, alignment, scores, snapshot):
@@ -855,9 +868,13 @@ class SkhyAnalysisEngine:
         price = snapshot.get("ticker", {}).get("price", 0) or 155
         long_prob = scores.get("long_probability", 50)
         short_prob = scores.get("short_probability", 50)
-        direction = "LONG" if long_prob >= short_prob else "SHORT"
+        primary = str((tf_analysis and self._compute_alignment(tf_analysis).get("primary_direction")) or "neutral")
+        edge = abs(long_prob - short_prob)
+        direction = "LONG" if long_prob > short_prob and primary == "long" and edge >= 10 else (
+            "SHORT" if short_prob > long_prob and primary == "short" and edge >= 10 else "WAIT"
+        )
 
-        if confidence < 70:
+        if confidence < 70 or direction == "WAIT":
             return {
                 "status": "gözləmə",
                 "status_az": "Təsdiq gözlənilir — inam yetərsiz",
@@ -1476,8 +1493,8 @@ class SkhyAnalysisEngine:
         return "\n".join(lines) if lines else "Məlumat yoxdur."
 
     # ─── SCENARIOS ENDPOINT ───
-    async def get_scenarios(self, timeframe: str | None = None) -> dict:
-        analysis = await self.get_full_analysis(timeframe)
+    async def get_scenarios(self, timeframe: str | None = None, symbol: str = "SKHYUSDT") -> dict:
+        analysis = await self.get_full_analysis(timeframe, symbol)
         return {
             "main_scenario": analysis.get("scenario_paths",{}).get("main_scenario",{}),
             "alternative_scenario": analysis.get("scenario_paths",{}).get("alternative_scenario",{}),

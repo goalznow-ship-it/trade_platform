@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, memo, useCallback } from "react"
 import { useWS } from "@/components/WSProvider"
 import { api } from "@/lib/api"
 import { cn, formatPrice, confidenceColor } from "@/lib/utils"
+import { directionLabel, normalizeSignalDirection } from "@/lib/signalDirection"
 import { Zap, AlertCircle, Target, Send } from "lucide-react"
 
 interface SignalData {
@@ -28,6 +29,7 @@ interface SignalData {
 }
 
 const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
+  const direction = normalizeSignalDirection(s.direction)
   const entryZone: unknown = s.entry_zone ?? s.entry_price
   const isObj = entryZone != null && typeof entryZone === "object" && !Array.isArray(entryZone)
   const isArr = Array.isArray(entryZone)
@@ -57,13 +59,13 @@ const SignalCard = memo(function SignalCard({ s }: { s: SignalData }) {
       confidence >= 50 ? "bg-yellow-900/10 border-yellow-800/20" :
       "bg-gray-800/20 border-gray-800")}>
       <div className="flex items-center gap-3 mb-2">
-        <div className={cn("w-1 h-12 rounded-full", s.direction === "long" ? "bg-green-500" : "bg-red-500")} />
+        <div className={cn("w-1 h-12 rounded-full", direction === "long" ? "bg-green-500" : direction === "short" ? "bg-red-500" : "bg-yellow-500")} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-semibold text-white font-mono">{s.symbol}</span>
             <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded",
-              s.direction === "long" ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400")}>
-              {s.direction?.toUpperCase()}
+              direction === "long" ? "bg-green-900/50 text-green-400" : direction === "short" ? "bg-red-900/50 text-red-400" : "bg-yellow-900/50 text-yellow-400")}>
+              {directionLabel(direction)}
             </span>
           </div>
           <div className="flex items-center gap-3 mt-0.5">

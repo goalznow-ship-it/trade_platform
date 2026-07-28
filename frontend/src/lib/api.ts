@@ -449,26 +449,29 @@ export const api = {
     ),
 
   // SKHY Terminal
-  getSkhySnapshot: (timeframe = "1h") => request<any>(`/api/v1/skhy/snapshot?timeframe=${encodeURIComponent(timeframe)}`),
+  getSkhySymbols: () => request<any>("/api/v1/skhy/symbols"),
 
-  getSkhyAnalysis: (timeframe?: string) =>
-    request<any>(`/api/v1/skhy/analysis${timeframe ? `?timeframe=${encodeURIComponent(timeframe)}` : ""}`),
+  getSkhySnapshot: (timeframe = "1h", symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/snapshot?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`),
 
-  getSkhyScenarios: (timeframe?: string) =>
-    request<any>(`/api/v1/skhy/scenarios${timeframe ? `?timeframe=${encodeURIComponent(timeframe)}` : ""}`),
+  getSkhyAnalysis: (timeframe = "1h", symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/analysis?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`),
 
-  getSkhyHistory: (timeframe = "1h", limit = 30) =>
-    request<any>(`/api/v1/skhy/history?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
+  getSkhyScenarios: (timeframe = "1h", symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/scenarios?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`),
 
-  getSkhyOHLCV: (timeframe = "1h", limit = 200) =>
-    request<any>(`/api/v1/skhy/ohlcv?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
+  getSkhyHistory: (timeframe = "1h", limit = 30, symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/history?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}&symbol=${encodeURIComponent(symbol)}`),
 
-  getSkhyDiagnostics: (timeframe = "1h") =>
-    request<any>(`/api/v1/skhy/diagnostics?timeframe=${encodeURIComponent(timeframe)}`),
+  getSkhyOHLCV: (timeframe = "1h", limit = 200, symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/ohlcv?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}&symbol=${encodeURIComponent(symbol)}`),
 
-  runSkhyBacktest: (timeframe = "1h", mode = "balanced", limit = 500) =>
+  getSkhyDiagnostics: (timeframe = "1h", symbol = "SKHYUSDT") =>
+    request<any>(`/api/v1/skhy/diagnostics?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`),
+
+  runSkhyBacktest: (timeframe = "1h", mode = "balanced", limit = 500, symbol = "SKHYUSDT") =>
     request<any>(
-      `/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}`,
+      `/api/v1/skhy/backtest?timeframe=${encodeURIComponent(timeframe)}&mode=${mode}&limit=${limit}&symbol=${encodeURIComponent(symbol)}`,
       undefined,
       false,
       45000,

@@ -8,6 +8,7 @@ from app.core.database import async_session_factory
 from app.core.logging import logger
 from app.models.analysis import Signal
 from app.services.market import market_service
+from app.services.signal_direction import normalize_signal_direction
 
 
 class SignalOutcomeResolver:
@@ -41,7 +42,10 @@ class SignalOutcomeResolver:
         if not signal.is_triggered:
             return None
 
-        if str(signal.direction).lower() == "long":
+        direction = normalize_signal_direction(signal.direction)
+        if direction == "neutral":
+            return None
+        if direction == "long":
             stop_hit = low <= stop
             target_hit = high >= target
         else:

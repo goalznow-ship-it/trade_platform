@@ -6,6 +6,7 @@ import {
   type IChartApi, type ISeriesApi, type Logical, type Time,
 } from "lightweight-charts"
 import { api } from "@/lib/api"
+import { directionLabel } from "@/lib/signalDirection"
 import { cn } from "@/lib/utils"
 import { normalizeSkhyAnalysis, type NormalizedAnalysis } from "@/lib/skhyChartNormalizer"
 
@@ -142,9 +143,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   const fib = activeAnalysis?.fibonacci as Record<string, unknown> | undefined
   const ew = activeAnalysis?.elliott_wave as Record<string, unknown> | undefined
   const mainSc = sp?.main_scenario as Record<string, unknown> | undefined
-  const mainDir = s(mainSc?.direction_az || mainSc?.direction || "")
+  const mainDir = directionLabel(mainSc?.direction || mainSc?.direction_az)
   const activeDirection: "LONG" | "SHORT" =
-    mainDir.includes("LONG") || mainDir.includes("ALIŞ") || mainDir.includes("UP") ? "LONG" : "SHORT"
+    mainDir === "LONG" ? "LONG" : mainDir === "SHORT" ? "SHORT" : longProb >= shortProb ? "LONG" : "SHORT"
   const mainProb = n(mainSc?.probability)
   const invalLevel = n(activeAnalysis?.invalidation_level)
   const tradePlan = activeAnalysis?.trade_plan as Record<string, unknown> | undefined
@@ -314,9 +315,12 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
   useEffect(() => {
     let cancelled = false
     fitDoneRef.current = false
+    setOhlcv([])
+    lastValidOhlcvRef.current = []
+    setEmaValues({ ema20: 0, ema50: 0, ema100: 0 })
     const loadOhlcv = async () => {
       try {
-        const res = await api.getSkhyOHLCV(activeTimeframe, 240)
+        const res = await api.getSkhyOHLCV(activeTimeframe, 240, symbol)
         if (cancelled) return
         if (res?.data && Array.isArray(res.data) && (res.data as Candle[]).length > 0) {
           const candles = res.data as Candle[]
@@ -333,7 +337,7 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     loadOhlcv()
     const interval = setInterval(loadOhlcv, 15000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [activeTimeframe])
+  }, [activeTimeframe, symbol])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -428,13 +432,13 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
     }
     mainForecastRef.current?.applyOptions({
       color: activeDirection === "LONG" ? "#22c55e" : "#ef4444",
-      lineStyle: confidence >= 50 ? LineStyle.Solid : LineStyle.Dashed,
+      lineStyle: showEntrySLTP ? LineStyle.Solid : LineStyle.Dashed,
     })
     mainForecastRef.current?.setData(overlays.aiOverlay && overlays.mainScenario ? toSeriesData(norm.scenarios.main) : [])
     altForecastRef.current?.setData([])
     fakeoutForecastRef.current?.setData(overlays.aiOverlay && overlays.fakeout ? toSeriesData(norm.scenarios.fakeout) : [])
     markDirty()
-  }, [activeDirection, activeTimeframe, chartReady, confidence, norm.scenarios, ohlcv, overlays.aiOverlay, overlays.fakeout, overlays.mainScenario, markDirty])
+  }, [activeDirection, activeTimeframe, chartReady, norm.scenarios, ohlcv, overlays.aiOverlay, overlays.fakeout, overlays.mainScenario, showEntrySLTP, markDirty])
 
   useEffect(() => { markDirty() }, [markDirty, analysis, triggersProp, sr, confidence, price])
 
@@ -548,9 +552,9 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
             {tooltip.text.map((line, i) => <div key={i}>{line}</div>)}
           </div>
         )}
-        {status === "WAIT" && confidence < 70 && (
+        {!showEntrySLTP && (
           <div className="absolute top-14 right-20 z-[8] text-right pointer-events-none rounded border border-yellow-500/20 bg-gray-950/80 px-2 py-1 shadow-lg">
-            <div className="text-[10px] font-bold text-yellow-500">⏳ GÖZLƏYİN · {confidence}%</div>
+            <div className="text-[10px] font-bold text-yellow-500">⏳ {status === "WATCHLIST" ? "İZLƏMƏ" : "GÖZLƏYİN"} · {confidence}%</div>
             <div className="text-[8px] text-gray-500">Təsdiq üçün trigger bağlanışı gözlənilir</div>
           </div>
         )}
@@ -562,8 +566,8 @@ export function SKHYChart({ symbol, snapshot, analysis, triggers: triggersProp, 
                 Əsas {activeDirection} · {n(norm.scenarios.main.probability)}%
               </span>
             )}
-            <span className={cn("text-[7px] font-bold", confidence >= 50 ? "text-cyan-400" : "text-yellow-500")}>
-              {confidence >= 50 ? "AKTİV" : "ŞƏRTİ"}
+            <span className={cn("text-[7px] font-bold", showEntrySLTP ? "text-cyan-400" : "text-yellow-500")}>
+              {showEntrySLTP ? "AKTİV" : "ŞƏRTLİ"}
             </span>
           </div>
         )}

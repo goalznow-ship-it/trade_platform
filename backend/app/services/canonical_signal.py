@@ -12,10 +12,10 @@ Ensures the same symbol+timeframe produces identical data everywhere.
 """
 from datetime import datetime, timezone
 from typing import Optional
+from app.services.signal_direction import normalize_signal_direction
 
 
 class CanonicalSignalEngine:
-
     def build(self,
               symbol: str,
               exchange: str = "Binance",
@@ -28,7 +28,7 @@ class CanonicalSignalEngine:
               risk_data: Optional[dict] = None) -> dict:
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        direction = signal_data.get("direction", "neutral") if signal_data else "neutral"
+        direction = normalize_signal_direction(signal_data.get("direction")) if signal_data else "neutral"
         confidence = signal_data.get("confidence", 0) if signal_data else 0
         current_price = signal_data.get("current_price", 0) if signal_data else 0
 
@@ -107,8 +107,14 @@ class CanonicalSignalEngine:
             data_sources.append(exchange)
 
         # Determine long/short scores
-        long_score = max(0, min(100, 50 + (confidence if direction == "long" else -confidence) * 0.5))
-        short_score = 100 - long_score
+        if direction == "long":
+            long_score = max(50, min(100, 50 + confidence * 0.5))
+            short_score = 100 - long_score
+        elif direction == "short":
+            short_score = max(50, min(100, 50 + confidence * 0.5))
+            long_score = 100 - short_score
+        else:
+            long_score = short_score = 50
 
         # Risk profile
         risk_level = inst_score.get("risk_level", "medium")

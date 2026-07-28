@@ -135,7 +135,7 @@ export function normalizeSignal(raw: Record<string, unknown>): UnifiedSignal {
     last_updated: (raw.last_updated as string) || (raw.generated_at as string) || "",
     current_price: (raw.current_price as number) || 0,
     live_price: (raw.live_price as number) || (raw.current_price as number) || 0,
-    direction: (raw.direction as "long" | "short" | "neutral") || "neutral",
+    direction: normalizeSignalDirection(raw.direction),
     confidence: (raw.confidence as number) || 0,
     composite_score: (raw.composite_score as number) || (raw.confidence as number) || 0,
     opportunity_score: (raw.opportunity_score as number) || Math.round(((raw.confidence as number) || 0) * 0.5),
@@ -187,3 +187,4 @@ export function normalizeSignal(raw: Record<string, unknown>): UnifiedSignal {
     alignment: align ? { major_aligned: !!(align as Record<string, unknown>).major_aligned } : null,
   }
 }
+import { normalizeSignalDirection } from "@/lib/signalDirection"

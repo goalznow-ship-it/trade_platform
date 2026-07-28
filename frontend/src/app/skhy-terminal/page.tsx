@@ -68,6 +68,8 @@ function parseLastUpdated(v: unknown): Date | null {
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 export default function SkhyTerminalPage() {
+  const [symbol, setSymbol] = useState("SKHYUSDT")
+  const [symbols, setSymbols] = useState<string[]>(["SKHYUSDT"])
   const [timeframe, setTimeframe] = useState("1h")
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null)
@@ -137,10 +139,10 @@ export default function SkhyTerminalPage() {
     setTfLoading(true)
     try {
       const [snap, an, sc, hist] = await Promise.all([
-        api.getSkhySnapshot(tf).catch(() => null),
-        api.getSkhyAnalysis(tf).catch(() => null),
-        api.getSkhyScenarios(tf).catch(() => null),
-        api.getSkhyHistory(tf).catch(() => null),
+        api.getSkhySnapshot(tf, symbol).catch(() => null),
+        api.getSkhyAnalysis(tf, symbol).catch(() => null),
+        api.getSkhyScenarios(tf, symbol).catch(() => null),
+        api.getSkhyHistory(tf, 30, symbol).catch(() => null),
       ])
       if (reqId !== requestIdRef.current) { logDebug("FETCH_STALE", { reqId, current: requestIdRef.current, tf }); return }
       if (snap) setSnapshot(snap)
@@ -155,15 +157,32 @@ export default function SkhyTerminalPage() {
     } finally {
       if (reqId === requestIdRef.current) { setLoading(false); setTfLoading(false) }
     }
+  }, [symbol])
+
+  useEffect(() => {
+    api.getSkhySymbols().then((result) => {
+      const available = Array.isArray(result?.symbols) ? result.symbols.filter((item: unknown): item is string => typeof item === "string") : []
+      if (available.length) setSymbols(available)
+    }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    lastValidAnalysisRef.current = null
+    lastValidScenariosRef.current = null
+    setSnapshot(null)
+    setAnalysis(null)
+    setScenarios(null)
+    setHistory(null)
+    setBacktestResult(null)
+  }, [symbol])
 
   useEffect(() => {
     logDebug("TIMEFRAME_CHANGE", { timeframe })
     fetchData(timeframe)
-    api.getSkhyDiagnostics(timeframe).then(d => {
+    api.getSkhyDiagnostics(timeframe, symbol).then(d => {
       if (!d?.timeframe || d.timeframe === timeframe) setDiagnostics(d)
     }).catch(() => {})
-  }, [timeframe, fetchData])
+  }, [timeframe, symbol, fetchData])
 
   useEffect(() => {
     const interval = setInterval(() => fetchData(timeframe), 15000)
@@ -175,7 +194,7 @@ export default function SkhyTerminalPage() {
     wsCleanupRef.current?.()
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const wsBase = (process.env.NEXT_PUBLIC_WS_URL || `${protocol}//${window.location.hostname}:8000`).replace(/\/$/, "")
-    const wsUrl = `${wsBase}/api/v1/skhy/stream?timeframe=${timeframe}`
+    const wsUrl = `${wsBase}/api/v1/skhy/stream?timeframe=${timeframe}&symbol=${encodeURIComponent(symbol)}`
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
     let pingInterval: ReturnType<typeof setInterval>
@@ -243,7 +262,7 @@ export default function SkhyTerminalPage() {
     wsCleanupRef.current = cleanup
 
     return cleanup
-  }, [timeframe])
+  }, [timeframe, symbol])
 
   const scores = (analysis?.scores || {}) as Record<string, unknown>
   const triggers = (analysis?.triggers || {}) as Record<string, unknown>
@@ -269,7 +288,7 @@ export default function SkhyTerminalPage() {
   const runBacktest = async () => {
     setBacktestRunning(true)
     try {
-      const result = await api.runSkhyBacktest(timeframe, "balanced", 500)
+      const result = await api.runSkhyBacktest(timeframe, "balanced", 500, symbol)
       setBacktestResult(result)
     } catch {
       setBacktestResult({ error: "Backtest uğursuz oldu" })
@@ -287,7 +306,14 @@ export default function SkhyTerminalPage() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-purple-400" />
-              <span className="text-sm font-bold text-white">SKHYUSDT</span>
+              <select
+                value={symbol}
+                onChange={(event) => setSymbol(event.target.value)}
+                aria-label="SKHY Intelligence bazarı"
+                className="h-7 min-w-32 rounded border border-purple-500/40 bg-gray-900 px-2 text-sm font-bold text-white outline-none hover:border-purple-400"
+              >
+                {symbols.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
               <span className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">Binance Futures</span>
             </div>
             {(loading || tfLoading) && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
@@ -336,7 +362,7 @@ export default function SkhyTerminalPage() {
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex-1 min-h-0">
-              <SKHYChart symbol="SKHYUSDT" snapshot={snapshot} analysis={analysis} triggers={triggers} sr={sr}
+              <SKHYChart symbol={symbol} snapshot={snapshot} analysis={analysis} triggers={triggers} sr={sr}
                 activeTimeframe={timeframe} onTimeframeChange={setTimeframe}
                 normalizedAnalysis={normalizedAnalysis} />
             </div>

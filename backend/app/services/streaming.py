@@ -27,6 +27,7 @@ class StreamingService:
         self._running = False
         self._heartbeats: dict[str, float] = {}
         self._watchdog_task: Optional[asyncio.Task] = None
+        self._stale_workers: set[str] = set()
 
     async def start(self):
         self._running = True
@@ -87,7 +88,12 @@ class StreamingService:
             now = datetime.now(timezone.utc).timestamp()
             for name, last in list(self._heartbeats.items()):
                 if now - last > self._stale_after(name):
-                    logger.warning("Streaming worker %s is stale", name)
+                    if name not in self._stale_workers:
+                        self._stale_workers.add(name)
+                        logger.warning("Streaming worker %s is stale", name)
+                elif name in self._stale_workers:
+                    self._stale_workers.remove(name)
+                    logger.info("Streaming worker %s recovered", name)
             await ws_manager.broadcast(Channel.MARKET, "streaming_heartbeat", {
                 "workers": {k: round(now - v, 1) for k, v in self._heartbeats.items()},
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -103,6 +109,7 @@ class StreamingService:
         from app.services.market import market_service
         while self._running:
             for sym in symbols:
+                self._beat("orderflow")
                 try:
                     orderbook, trades = await asyncio.gather(
                         market_service.get_orderbook(sym, limit=50),
@@ -136,6 +143,7 @@ class StreamingService:
         from app.services.market import market_service
         while self._running:
             for sym in symbols:
+                self._beat("derivatives")
                 try:
                     funding, oi, ticker = await asyncio.gather(
                         market_service.get_funding_rate(sym),
@@ -178,8 +186,12 @@ class StreamingService:
     async def _stream_news(self):
         from app.services.news_intelligence_v2 import news_intelligence_engine
         while self._running:
+            self._beat("news")
             try:
-                articles = await news_intelligence_engine.scan_all_news(10)
+                articles = await asyncio.wait_for(
+                    news_intelligence_engine.scan_all_news(10),
+                    timeout=30,
+                )
                 for article in articles[:5]:
                     await ws_manager.broadcast(Channel.NEWS, "news_article", {
                         "data": article,
@@ -194,6 +206,7 @@ class StreamingService:
         from app.services.social_sentiment import social_sentiment
         while self._running:
             for sym in symbols:
+                self._beat("sentiment")
                 try:
                     snapshot = social_sentiment.get_social_sentiment_snapshot(sym)
                     await ws_manager.broadcast(Channel.SENTIMENT, "sentiment_update", {
@@ -233,8 +246,12 @@ class StreamingService:
     async def _stream_macro(self):
         from app.services.macro_engine import macro_engine
         while self._running:
+            self._beat("macro")
             try:
-                snapshot = await asyncio.to_thread(macro_engine.get_macro_snapshot)
+                snapshot = await asyncio.wait_for(
+                    asyncio.to_thread(macro_engine.get_macro_snapshot),
+                    timeout=60,
+                )
                 await ws_manager.broadcast(Channel.MACRO, "macro_update", {
                     "data": snapshot,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -248,6 +265,7 @@ class StreamingService:
         from app.services.brain import ai_brain
         while self._running:
             for sym in symbols:
+                self._beat("brain")
                 try:
                     assessment = await ai_brain.assess_market(sym)
                     await ws_manager.broadcast(Channel.BRAIN, "brain_assessment", {
@@ -321,8 +339,12 @@ class StreamingService:
         from app.services.institutional_signals import institutional_signal_engine
         from app.services.early_signal_monitor import early_signal_monitor
         while self._running:
+            self._beat("signals")
             try:
-                results = await institutional_signal_engine.scan_all(min_score=0, limit=30)
+                results = await asyncio.wait_for(
+                    institutional_signal_engine.scan_all(min_score=0, limit=30),
+                    timeout=100,
+                )
             except Exception:
                 logger.exception("Institutional signal stream scan failed")
                 results = []
