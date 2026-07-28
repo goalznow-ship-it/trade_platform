@@ -105,6 +105,8 @@ class PaperTradingService:
         quantity = float(data.get("quantity", 0))
         price = data.get("price")
         stop_price = data.get("stop_price")
+        explicit_stop_loss = data.get("stop_loss")
+        explicit_take_profit = data.get("take_profit")
         leverage = int(data.get("leverage", 1))
         reduce_only = data.get("reduce_only", False)
         time_in_force = data.get("time_in_force", "GTC")
@@ -134,8 +136,12 @@ class PaperTradingService:
                 "symbol": symbol,
                 "direction": direction,
                 "entry_price": price or live_price,
-                "stop_loss": stop_price if side == "sell" else (price * 0.97 if price else live_price * 0.97),
-                "take_profit": price if direction == "long" else stop_price,
+                "stop_loss": explicit_stop_loss or (
+                    stop_price if side == "sell" else (price * 0.97 if price else live_price * 0.97)
+                ),
+                "take_profit": explicit_take_profit or (
+                    price if direction == "long" else stop_price
+                ),
                 "leverage": leverage,
                 "balance": account.balance,
                 "quantity": quantity,

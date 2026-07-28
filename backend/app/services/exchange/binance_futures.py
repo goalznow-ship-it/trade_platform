@@ -119,18 +119,22 @@ class BinanceFuturesExchange(BaseExchange):
                     symbol, request.side, request.quantity, request.price, params=params,
                 )
             elif request.order_type == "stop_market" or request.order_type == "stop":
-                params["stopPrice"] = request.stop_price
-                params["closePosition"] = request.reduce_only
+                params = {"stopPrice": request.stop_price}
+                if request.reduce_only:
+                    params["closePosition"] = True
                 ccxt_order = self._ccxt.create_order(
-                    symbol, "market", request.side, request.quantity,
+                    symbol, "STOP_MARKET", request.side,
+                    None if request.reduce_only else request.quantity,
                     None, params=params,
                 )
             elif request.order_type == "take_profit_market" or request.order_type == "tp_market":
-                params["stopPrice"] = request.stop_price
-                params["closePosition"] = request.reduce_only
+                params = {"stopPrice": request.stop_price}
+                if request.reduce_only:
+                    params["closePosition"] = True
                 ccxt_order = self._ccxt.create_order(
-                    symbol, "market", request.side, request.quantity,
-                    None, params={"stopPrice": request.stop_price, "reduceOnly": request.reduce_only},
+                    symbol, "TAKE_PROFIT_MARKET", request.side,
+                    None if request.reduce_only else request.quantity,
+                    None, params=params,
                 )
             else:
                 raise ValueError(f"Unsupported order type: {request.order_type}")
@@ -156,8 +160,8 @@ class BinanceFuturesExchange(BaseExchange):
             symbol=ccxt_order.get("symbol", req.symbol),
             side=ccxt_order.get("side", req.side),
             order_type=ccxt_order.get("type", req.order_type),
-            quantity=float(ccxt_order.get("amount", req.quantity)),
-            filled_quantity=float(ccxt_order.get("filled", 0)),
+            quantity=float(ccxt_order.get("amount") or req.quantity),
+            filled_quantity=float(ccxt_order.get("filled") or 0),
             price=ccxt_order.get("price") or ccxt_order.get("stopPrice"),
             avg_price=ccxt_order.get("average"),
             status=ccxt_order.get("status", "unknown"),

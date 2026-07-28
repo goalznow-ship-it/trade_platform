@@ -21,3 +21,24 @@ def test_safe_default_config_is_paper_and_single_position():
     assert config.max_positions == 1
     assert config.max_leverage == 3
     assert config.risk_per_trade_pct <= 0.5
+
+
+def test_position_size_is_capped_by_allocated_capital_and_leverage():
+    quantity = AutoScalperService._position_size(
+        {"entry": 100, "stop_loss": 99},
+        {
+            "capital_usdt": 10,
+            "risk_per_trade_pct": 0.5,
+            "max_leverage": 3,
+        },
+    )
+    assert quantity == 0.05
+    assert quantity * 100 <= 30
+
+
+def test_live_mode_requires_explicit_model_value():
+    config = AutoScalperConfig(
+        mode="live",
+        live_confirmation="REAL PULLA AUTO TRADE",
+    )
+    assert config.mode == "live"

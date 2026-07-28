@@ -6,8 +6,11 @@ from typing import Any
 
 from app.core.logging import logger
 from app.core.redis import redis_client
+from app.core.database import async_session_factory
+from app.models.paper_trading import PaperPosition
 from app.services.institutional_signals import institutional_signal_engine
 from app.services.market import market_service
+from sqlalchemy import func, select
 
 
 class AutoScalperService:
@@ -48,10 +51,8 @@ class AutoScalperService:
         await redis_client.set(f"auto_scalper:{user_id}:state", json.dumps(state))
 
     async def arm(self, user_id: int, config: dict) -> dict:
-        if config.get("mode") != "paper":
-            raise ValueError("Live Auto Scalper is locked until paper validation is complete")
         state = await self.get_state(user_id)
-        state.update({"armed": True, "mode": "paper", "config": config, "error": None})
+        state.update({"armed": True, "mode": config["mode"], "config": config, "error": None})
         await self._save_state(user_id, state)
         if user_id not in self._tasks or self._tasks[user_id].done():
             self._tasks[user_id] = asyncio.create_task(self._monitor(user_id))
@@ -197,7 +198,158 @@ class AutoScalperService:
             "error": None,
         })
         await self._save_state(user_id, state)
+        if state.get("armed"):
+            eligible = next((item for item in candidates if item["eligible"]), None)
+            if eligible:
+                await self._execute_candidate(user_id, eligible, config, state)
         return state
+
+    @staticmethod
+    def _position_size(candidate: dict, config: dict) -> float:
+        entry = float(candidate.get("entry") or 0)
+        stop = float(candidate.get("stop_loss") or 0)
+        if entry <= 0 or stop <= 0 or entry == stop:
+            return 0
+        capital = float(config["capital_usdt"])
+        risk_budget = capital * float(config["risk_per_trade_pct"]) / 100
+        risk_quantity = risk_budget / abs(entry - stop)
+        leverage_cap = capital * int(config["max_leverage"]) / entry
+        return max(0, min(risk_quantity, leverage_cap))
+
+    async def _execute_candidate(
+        self, user_id: int, candidate: dict, config: dict, state: dict,
+    ) -> None:
+        lock_key = f"auto_scalper:{user_id}:execution_lock"
+        if not await redis_client.set(lock_key, "1", ex=60, nx=True):
+            return
+        quantity = self._position_size(candidate, config)
+        if quantity <= 0:
+            return
+        try:
+            if config["mode"] == "paper":
+                result = await self._execute_paper(user_id, candidate, config, quantity)
+            else:
+                result = await self._execute_live(user_id, candidate, config, quantity)
+            state["last_execution"] = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "symbol": candidate["symbol"],
+                "direction": candidate["direction"],
+                "quantity": quantity,
+                "mode": config["mode"],
+                "result": result,
+            }
+            await self._save_state(user_id, state)
+        except Exception as exc:
+            state["error"] = f"Execution blocked: {exc}"
+            await self._save_state(user_id, state)
+
+    async def _execute_paper(
+        self, user_id: int, candidate: dict, config: dict, quantity: float,
+    ) -> dict:
+        from app.services.paper_trading import paper_trading_service
+
+        async with async_session_factory() as db:
+            account = await paper_trading_service.get_or_create_account(user_id, db)
+            loss_limit = (
+                float(config["capital_usdt"])
+                * float(config["daily_loss_limit_pct"]) / 100
+            )
+            if account.total_pnl <= -loss_limit:
+                return {"status": "skipped", "reason": "daily_loss_limit reached"}
+            count_result = await db.execute(
+                select(func.count(PaperPosition.id)).where(
+                    PaperPosition.account_id == account.id,
+                    PaperPosition.is_open == True,
+                )
+            )
+            if int(count_result.scalar_one()) >= int(config["max_positions"]):
+                return {"status": "skipped", "reason": "max_positions reached"}
+            result = await paper_trading_service.create_order(user_id, {
+                "symbol": candidate["symbol"],
+                "side": "buy" if candidate["direction"] == "long" else "sell",
+                "order_type": "market",
+                "quantity": quantity,
+                "leverage": config["max_leverage"],
+                "stop_loss": candidate["stop_loss"],
+                "take_profit": candidate["take_profit"],
+            }, db)
+            if result.get("error"):
+                return {"status": "rejected", "reason": result["error"]}
+            position = result.get("position")
+            if position:
+                position.stop_loss = candidate["stop_loss"]
+                position.take_profit = candidate["take_profit"]
+                await db.commit()
+            return {
+                "status": "opened" if position else "pending",
+                "position_id": getattr(position, "id", None),
+            }
+
+    async def _execute_live(
+        self, user_id: int, candidate: dict, config: dict, quantity: float,
+    ) -> dict:
+        from app.api.v1.trading import OrderRequest, create_order
+        from app.models.user import User
+
+        async with async_session_factory() as db:
+            user = await db.get(User, user_id)
+            if not user:
+                raise ValueError("User not found")
+            request = OrderRequest(
+                exchange="binance",
+                symbol=candidate["symbol"],
+                side="buy" if candidate["direction"] == "long" else "sell",
+                amount=quantity,
+                order_type="market",
+                stop_loss=candidate["stop_loss"],
+                take_profit=candidate["take_profit"],
+                leverage=config["max_leverage"],
+                margin_mode="isolated",
+                client_order_id=f"scalp_{user_id}_{int(datetime.now(timezone.utc).timestamp())}",
+            )
+            entry = await create_order(request, None, user, db)
+            close_side = "sell" if candidate["direction"] == "long" else "buy"
+            base_id = f"scalp_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+            stop = None
+            try:
+                stop = await create_order(OrderRequest(
+                    exchange="binance", symbol=candidate["symbol"],
+                    side=close_side, amount=quantity, order_type="stop_market",
+                    stop_price=candidate["stop_loss"], reduce_only=True,
+                    leverage=config["max_leverage"],
+                    client_order_id=f"{base_id}_sl",
+                ), None, user, db)
+                target = await create_order(OrderRequest(
+                    exchange="binance", symbol=candidate["symbol"],
+                    side=close_side, amount=quantity, order_type="take_profit_market",
+                    stop_price=candidate["take_profit"], reduce_only=True,
+                    leverage=config["max_leverage"],
+                    client_order_id=f"{base_id}_tp",
+                ), None, user, db)
+            except Exception as bracket_error:
+                if stop and stop.get("order_id"):
+                    try:
+                        from app.services.exchange.manager import exchange_manager
+                        exchange = await exchange_manager.get_user_exchange(
+                            user_id, "binance", db,
+                        )
+                        if exchange:
+                            await exchange.cancel_order(
+                                candidate["symbol"], stop["order_id"],
+                            )
+                    except Exception:
+                        pass
+                emergency = await create_order(OrderRequest(
+                    exchange="binance", symbol=candidate["symbol"],
+                    side=close_side, amount=quantity, order_type="market",
+                    reduce_only=True, leverage=config["max_leverage"],
+                    client_order_id=f"{base_id}_emergency",
+                ), None, user, db)
+                raise RuntimeError(
+                    f"Protective bracket failed; emergency close status: "
+                    f"{emergency.get('status', 'unknown')}; cause: {bracket_error}"
+                )
+            return {"entry": entry, "stop_loss": stop, "take_profit": target}
 
 
 auto_scalper_service = AutoScalperService()

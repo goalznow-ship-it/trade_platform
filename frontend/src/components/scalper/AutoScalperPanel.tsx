@@ -22,7 +22,7 @@ interface Candidate {
 
 interface ScalperState {
   armed: boolean
-  mode: "paper"
+  mode: "paper" | "live"
   last_scan?: string | null
   market_count?: number
   deep_analyzed?: number
@@ -47,14 +47,36 @@ export function AutoScalperPanel() {
   const [capital, setCapital] = useState(10)
   const [minScore, setMinScore] = useState(82)
   const [risk, setRisk] = useState(0.5)
+  const [mode, setMode] = useState<"paper" | "live">("paper")
+  const [liveConfirmation, setLiveConfirmation] = useState("")
+  const [liveReady, setLiveReady] = useState(false)
+  const [liveReason, setLiveReason] = useState("Binance API və server icazəsi tələb olunur")
 
   async function load() {
     try {
-      const data = await api.getAutoScalperStatus()
+      const [data, trading] = await Promise.all([
+        api.getAutoScalperStatus(),
+        api.getTradingStatus().catch(() => null),
+      ])
       setState(data)
+      if (!data.armed) setMode(data.mode ?? "paper")
       setCapital(data.config?.capital_usdt ?? 10)
       setMinScore(data.config?.min_score ?? 82)
       setRisk(data.config?.risk_per_trade_pct ?? 0.5)
+      const ready = Boolean(
+        trading?.accepting_live_orders
+        && trading?.configured_exchanges?.includes("binance"),
+      )
+      setLiveReady(ready)
+      setLiveReason(
+        !trading?.configured_exchanges?.includes("binance")
+          ? "Binance API qoşulmayıb"
+          : trading?.kill_switch_active
+            ? "Emergency kill-switch aktivdir"
+            : !trading?.live_trading_enabled
+              ? "Serverdə live trading bağlıdır"
+              : ready ? "Live execution hazırdır" : "Live execution hazır deyil",
+      )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Auto Scalper statusu alınmadı")
     }
@@ -74,7 +96,7 @@ export function AutoScalperPanel() {
   }
 
   const config = {
-    mode: "paper",
+    mode,
     capital_usdt: capital,
     risk_per_trade_pct: risk,
     daily_loss_limit_pct: 3,
@@ -82,17 +104,22 @@ export function AutoScalperPanel() {
     min_score: minScore,
     max_leverage: 3,
     scan_interval_seconds: 20,
+    live_confirmation: mode === "live" ? liveConfirmation : undefined,
   }
 
   return (
     <div className="h-full overflow-auto bg-[#0d1117] p-4">
       <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h1 className="flex items-center gap-2 text-xl font-bold text-white"><Radar className="text-cyan-400" /> Auto Scalper</h1><p className="text-xs text-gray-500">Bütün Binance USDT perpetual bazarı · real data · Paper execution lock</p></div>
-          <div className="flex items-center gap-2"><Badge variant={state?.armed ? "success" : "default"}>{state?.armed ? "ARMED · PAPER" : "DISARMED"}</Badge>{state?.armed ? <Button variant="danger" disabled={busy} onClick={() => action(api.disarmAutoScalper)}><Power className="mr-1 h-4 w-4" /> STOP</Button> : <Button disabled={busy} onClick={() => action(() => api.armAutoScalper(config))}><Power className="mr-1 h-4 w-4" /> PAPER ARM</Button>}</div>
+          <div><h1 className="flex items-center gap-2 text-xl font-bold text-white"><Radar className="text-cyan-400" /> Auto Scalper</h1><p className="text-xs text-gray-500">Bütün Binance USDT perpetual bazarı · real data · iki ayrı execution rejimi</p></div>
+          <div className="flex items-center gap-2"><Badge variant={state?.armed ? state.mode === "live" ? "danger" : "success" : "default"}>{state?.armed ? `ARMED · ${state.mode.toUpperCase()}` : "DISARMED"}</Badge>{state?.armed ? <Button variant="danger" disabled={busy} onClick={() => action(api.disarmAutoScalper)}><Power className="mr-1 h-4 w-4" /> STOP</Button> : <Button variant={mode === "live" ? "danger" : "primary"} disabled={busy || (mode === "live" && (!liveReady || liveConfirmation !== "REAL PULLA AUTO TRADE"))} onClick={() => action(() => api.armAutoScalper(config))}><Power className="mr-1 h-4 w-4" /> {mode.toUpperCase()} ARM</Button>}</div>
         </div>
 
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200"><AlertTriangle className="mr-2 inline h-4 w-4" />Live order icrası kilidlidir. Bu mərhələ real bazarı skan edir və paper üçün uyğun namizədləri müəyyənləşdirir.</div>
+        <div className="grid grid-cols-2 rounded-lg bg-gray-900 p-1">
+          {(["paper", "live"] as const).map((item) => <button key={item} disabled={state?.armed} onClick={() => { setMode(item); setLiveConfirmation("") }} className={cn("rounded py-2 text-xs font-bold", mode === item ? item === "live" ? "bg-red-600 text-white" : "bg-blue-600 text-white" : "text-gray-500", state?.armed && "opacity-50")}>{item === "paper" ? "PAPER AUTO" : "LIVE AUTO"}</button>)}
+        </div>
+
+        {mode === "paper" ? <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-blue-200"><Shield className="mr-2 inline h-4 w-4" />Real Binance məlumatı, virtual kapital. Uyğun namizəd yarananda avtomatik paper mövqe açılır və SL/TP ilə idarə olunur.</div> : <div className="space-y-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-200"><div><AlertTriangle className="mr-2 inline h-4 w-4" /><b>REAL PUL REJİMİ.</b> {liveReason}</div><p>Aktivləşdirmək üçün aşağıya <b>REAL PULLA AUTO TRADE</b> yaz:</p><input value={liveConfirmation} onChange={(event) => setLiveConfirmation(event.target.value)} disabled={state?.armed || !liveReady} placeholder="REAL PULLA AUTO TRADE" className="w-full rounded border border-red-500/30 bg-black/30 p-2 font-mono text-white outline-none" /></div>}
 
         <div className="grid gap-3 md:grid-cols-3">
           <label className="text-xs text-gray-400">Scalper kapitalı (USDT)<input type="number" min={5} value={capital} onChange={(e) => setCapital(Number(e.target.value))} disabled={state?.armed} className="mt-1 w-full rounded border border-gray-700 bg-gray-900 p-2 text-white" /></label>
