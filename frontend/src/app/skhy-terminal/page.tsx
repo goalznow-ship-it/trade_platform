@@ -172,8 +172,12 @@ export default function SkhyTerminalPage() {
 
   useEffect(() => {
     api.getSkhySymbols().then((result) => {
-      const available = Array.isArray(result?.symbols) ? result.symbols.filter((item: unknown): item is string => typeof item === "string") : []
-      if (available.length) setSymbols(available)
+      const available: string[] = Array.isArray(result?.symbols) ? result.symbols.filter((item: unknown): item is string => typeof item === "string") : []
+      if (available.length) {
+        setSymbols(available)
+        const requested = compactSymbol(new URLSearchParams(window.location.search).get("symbol") || "")
+        if (requested && available.some((item) => compactSymbol(item) === requested)) setSymbol(requested)
+      }
     }).catch(() => {})
   }, [])
 

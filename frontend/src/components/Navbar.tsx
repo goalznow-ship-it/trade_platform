@@ -253,6 +253,7 @@ export function Navbar() {
 }
 
 function NotificationBell() {
+  const router = useRouter()
   const [unread, setUnread] = useState(0)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
@@ -269,11 +270,24 @@ function NotificationBell() {
     return () => clearInterval(interval)
   }, [])
 
-  async function markRead(notification: Notification) {
+  function notificationSymbol(notification: Notification): string | null {
+    if (notification.type !== "signal" && notification.type !== "signal_watch") return null
+    const match = `${notification.title} ${notification.message || ""}`.match(/([A-Z0-9]{2,15})\s*\/?\s*(USDT)/i)
+    return match ? `${match[1]}${match[2]}`.toUpperCase() : null
+  }
+
+  async function openNotification(notification: Notification) {
+    const symbol = notificationSymbol(notification)
     if (!notification.is_read) {
-      await api.markNotificationRead(notification.id)
-      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, is_read: true } : item))
-      setUnread((current) => Math.max(0, current - 1))
+      try {
+        await api.markNotificationRead(notification.id)
+        setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, is_read: true } : item))
+        setUnread((current) => Math.max(0, current - 1))
+      } catch { /* navigation must still work when read receipt fails */ }
+    }
+    if (symbol) {
+      setOpen(false)
+      router.push(`/skhy-terminal?symbol=${encodeURIComponent(symbol)}`)
     }
   }
 
@@ -297,7 +311,7 @@ function NotificationBell() {
             {notifications.length === 0 ? (
               <div className="px-3 py-8 text-center text-xs text-gray-600">Hələ bildiriş yoxdur</div>
             ) : notifications.map((notification) => (
-              <button key={notification.id} onClick={() => markRead(notification)}
+              <button key={notification.id} onClick={() => openNotification(notification)}
                 className={cn("block w-full border-b border-gray-800 px-3 py-2 text-left hover:bg-gray-900", !notification.is_read && "bg-blue-950/20")}>
                 <div className="flex items-center gap-2">
                   <span className={cn("text-[10px] font-medium", notification.type === "signal" ? "text-green-400" : notification.type === "signal_watch" ? "text-yellow-400" : "text-gray-300")}>
@@ -306,6 +320,9 @@ function NotificationBell() {
                   {!notification.is_read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
                 </div>
                 {notification.message && <div className="mt-1 line-clamp-2 text-[9px] text-gray-500">{notification.message}</div>}
+                {(notification.type === "signal" || notification.type === "signal_watch") && (
+                  <div className="mt-1 text-[9px] font-medium text-blue-400">Ətraflı analizi aç →</div>
+                )}
               </button>
             ))}
           </div>

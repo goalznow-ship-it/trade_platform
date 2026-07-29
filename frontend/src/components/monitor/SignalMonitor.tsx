@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Activity, BellRing, Clock, RefreshCw, TrendingDown, TrendingUp } from "lucide-react"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -35,6 +36,7 @@ interface MonitorSnapshot {
 }
 
 export function SignalMonitor() {
+  const router = useRouter()
   const [data, setData] = useState<MonitorSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -156,7 +158,7 @@ export function SignalMonitor() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {visible.map((signal) => <SignalRow key={signal.symbol} signal={signal} />)}
+                {visible.map((signal) => <SignalRow key={signal.symbol} signal={signal} onOpen={() => router.push(`/skhy-terminal?symbol=${encodeURIComponent(signal.symbol.replace(/[^A-Za-z0-9]/g, ""))}`)} />)}
               </div>
             )}
           </div>
@@ -185,9 +187,9 @@ function Metric({ label, value, color = "text-white" }: { label: string; value: 
   </div>
 }
 
-function SignalRow({ signal }: { signal: MonitorSignal }) {
+function SignalRow({ signal, onOpen }: { signal: MonitorSignal; onOpen: () => void }) {
   const long = signal.direction === "long"
-  return <div className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+  return <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 rounded-lg border border-gray-800 bg-gray-950/40 p-3 text-left transition-colors hover:border-blue-500/40 hover:bg-blue-950/10">
     <div className={cn("rounded-lg p-2", long ? "bg-green-950 text-green-400" : "bg-red-950 text-red-400")}>
       {long ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
     </div>
@@ -203,8 +205,9 @@ function SignalRow({ signal }: { signal: MonitorSignal }) {
     <div className="text-right">
       <div className="font-mono text-xs font-bold text-white">Q{signal.quality_score.toFixed(0)}</div>
       <div className="text-[9px] text-gray-500">{signal.confidence.toFixed(0)}% inam</div>
+      <div className="mt-1 text-[9px] font-medium text-blue-400">Ətraflı bax →</div>
     </div>
-  </div>
+  </button>
 }
 
 function Rule({ color, title, text }: { color: string; title: string; text: string }) {
