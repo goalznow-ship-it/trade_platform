@@ -195,7 +195,7 @@ export default function SkhyTerminalPage() {
         if (!active) return
         const ranked = (Array.isArray(result?.signals) ? result.signals : [])
           .map(normalizeSignal)
-          .sort((a, b) => b.quality_score - a.quality_score || b.confidence - a.confidence)
+          .sort((a, b) => b.confidence - a.confidence || b.quality_score - a.quality_score)
         const next: Record<string, SignalRank> = {}
         ranked.forEach((item, index) => {
           next[compactSymbol(item.symbol)] = {
@@ -367,7 +367,7 @@ export default function SkhyTerminalPage() {
                 {symbols.map((item) => {
                   const rank = signalRanks[compactSymbol(item)]
                   const direction = rank?.direction === "long" ? "LONG" : rank?.direction === "short" ? "SHORT" : "WAIT"
-                  return <option key={item} value={item}>{rank ? `#${rank.rank} ${item} · Q${rank.quality.toFixed(0)} · ${direction}` : item}</option>
+                  return <option key={item} value={item}>{rank ? `#${rank.rank} ${item} · ${rank.confidence.toFixed(0)}% · Q${rank.quality.toFixed(0)} · ${direction}` : item}</option>
                 })}
               </select>
               <span className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">Binance Futures</span>

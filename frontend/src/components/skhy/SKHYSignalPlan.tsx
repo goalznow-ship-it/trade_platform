@@ -47,7 +47,7 @@ export function SKHYSignalPlan({ symbol, analysis, normalizedAnalysis, ranking }
           <div className="text-[9px] uppercase tracking-wider text-gray-500">Seçilmiş bazar</div>
           <div className="flex items-center gap-2">
             <div className="font-mono text-sm font-bold text-white">{symbol}</div>
-            {ranking && <span className="rounded bg-purple-500/10 px-1.5 py-0.5 font-mono text-[9px] text-purple-300">#{ranking.rank} · Q{ranking.quality.toFixed(0)}</span>}
+            {ranking && <span className="rounded bg-purple-500/10 px-1.5 py-0.5 font-mono text-[9px] text-purple-300">#{ranking.rank} · {ranking.confidence.toFixed(0)}% · Q{ranking.quality.toFixed(0)}</span>}
           </div>
         </div>
         <span className={cn("rounded border px-2 py-1 text-[9px] font-bold", ready
