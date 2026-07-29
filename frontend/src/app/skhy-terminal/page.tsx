@@ -192,6 +192,11 @@ export default function SkhyTerminalPage() {
 
   useEffect(() => {
     let active = true
+    const storageKey = `skhy-confidence-rankings:v2:${timeframe}`
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || "null") as Record<string, SignalRank> | null
+      if (stored && Object.keys(stored).length) setSignalRanks(stored)
+    } catch { /* ignore invalid local cache */ }
     const loadRanking = async () => {
       try {
         const result = await api.getSkhyRankings(timeframe) as { rankings?: Record<string, unknown>[] }
@@ -214,6 +219,7 @@ export default function SkhyTerminalPage() {
           }
         })
         setSignalRanks(next)
+        localStorage.setItem(storageKey, JSON.stringify(next))
         setSymbols((current) => [...current].sort((a, b) => {
           const ar = next[compactSymbol(a)]?.rank ?? Number.MAX_SAFE_INTEGER
           const br = next[compactSymbol(b)]?.rank ?? Number.MAX_SAFE_INTEGER

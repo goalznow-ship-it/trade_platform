@@ -16,6 +16,7 @@ from app.core.cache import cache_get, cache_set
 router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
 TF_PATTERN = "^(1m|5m|15m|30m|1h|4h|1d)$"
+_ranking_refresh_tasks: dict[str, asyncio.Task] = {}
 
 
 @router.get("/symbols")
@@ -24,15 +25,9 @@ async def get_symbols():
     return {"symbols": symbols, "count": len(symbols), "source": "Binance USDT perpetual volume ranking"}
 
 
-@router.get("/rankings")
-async def get_rankings(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
-    cache_key = f"skhy:rankings:{timeframe}"
-    cached = await cache_get(cache_key)
-    if isinstance(cached, dict) and cached.get("rankings"):
-        return cached
-
+async def _compute_rankings(timeframe: str) -> dict:
     symbols = [normalize_symbol(item) for item in await market_coverage.get_top_symbols(30)]
-    semaphore = asyncio.Semaphore(4)
+    semaphore = asyncio.Semaphore(10)
 
     async def analyze(symbol: str) -> dict:
         async with semaphore:
@@ -72,9 +67,36 @@ async def get_rankings(timeframe: str = Query(default="1h", pattern=TF_PATTERN))
         "sort": "signal_confidence_desc",
         "source": "SKHY analysis engine",
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "stale": False,
     }
-    await cache_set(cache_key, response, ttl=45)
+    await cache_set(f"skhy:rankings:{timeframe}", response, ttl=45)
+    await cache_set(f"skhy:rankings:last_valid:{timeframe}", response, ttl=86400)
     return response
+
+
+async def _refresh_rankings(timeframe: str) -> None:
+    try:
+        await _compute_rankings(timeframe)
+    except Exception as exc:
+        logger.error(f"SKHY ranking refresh failed for {timeframe}: {exc}")
+    finally:
+        _ranking_refresh_tasks.pop(timeframe, None)
+
+
+@router.get("/rankings")
+async def get_rankings(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
+    cached = await cache_get(f"skhy:rankings:{timeframe}")
+    if isinstance(cached, dict) and cached.get("rankings"):
+        return cached
+
+    last_valid = await cache_get(f"skhy:rankings:last_valid:{timeframe}")
+    if isinstance(last_valid, dict) and last_valid.get("rankings"):
+        task = _ranking_refresh_tasks.get(timeframe)
+        if task is None or task.done():
+            _ranking_refresh_tasks[timeframe] = asyncio.create_task(_refresh_rankings(timeframe))
+        return {**last_valid, "stale": True, "refreshing": True}
+
+    return await _compute_rankings(timeframe)
 
 async def _allowed_symbol(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
