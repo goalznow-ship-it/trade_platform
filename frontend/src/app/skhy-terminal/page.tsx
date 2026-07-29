@@ -10,7 +10,6 @@ import { SKHYScenarioPanel } from "@/components/skhy/SKHYScenarioPanel"
 import { SKHYTriggerPanel } from "@/components/skhy/SKHYTriggerPanel"
 import { SKHYHistoryPanel } from "@/components/skhy/SKHYHistoryPanel"
 import { SKHYSignalPlan } from "@/components/skhy/SKHYSignalPlan"
-import { normalizeSignal } from "@/lib/unified-signal"
 import { cn } from "@/lib/utils"
 import { Activity, AlertTriangle, BarChart3, Brain, Clock, RefreshCw, TrendingDown, TrendingUp, Play, Terminal } from "lucide-react"
 
@@ -191,10 +190,15 @@ export default function SkhyTerminalPage() {
     let active = true
     const loadRanking = async () => {
       try {
-        const result = await api.institutionalScan(0, 30) as { signals?: Record<string, unknown>[] }
+        const result = await api.getSkhyRankings(timeframe) as { rankings?: Record<string, unknown>[] }
         if (!active) return
-        const ranked = (Array.isArray(result?.signals) ? result.signals : [])
-          .map(normalizeSignal)
+        const ranked = (Array.isArray(result?.rankings) ? result.rankings : [])
+          .map((item) => ({
+            symbol: String(item.symbol || ""),
+            confidence: numOrZero(item.confidence),
+            quality_score: numOrZero(item.quality_score),
+            direction: (item.direction === "long" || item.direction === "short" ? item.direction : "neutral") as SignalRank["direction"],
+          }))
           .sort((a, b) => b.confidence - a.confidence || b.quality_score - a.quality_score)
         const next: Record<string, SignalRank> = {}
         ranked.forEach((item, index) => {
@@ -216,7 +220,7 @@ export default function SkhyTerminalPage() {
     loadRanking()
     const interval = setInterval(loadRanking, 60000)
     return () => { active = false; clearInterval(interval) }
-  }, [])
+  }, [timeframe])
 
   useEffect(() => {
     lastValidAnalysisRef.current = null

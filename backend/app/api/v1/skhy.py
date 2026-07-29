@@ -11,6 +11,7 @@ from app.services.market_coverage import market_coverage
 from app.services.skhy_analysis_engine import skhy_analysis
 from app.services.skhy_signal_history import skhy_history
 from app.core.logging import logger
+from app.core.cache import cache_get, cache_set
 
 router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
@@ -21,6 +22,59 @@ TF_PATTERN = "^(1m|5m|15m|30m|1h|4h|1d)$"
 async def get_symbols():
     symbols = [normalize_symbol(item) for item in await market_coverage.get_top_symbols(30)]
     return {"symbols": symbols, "count": len(symbols), "source": "Binance USDT perpetual volume ranking"}
+
+
+@router.get("/rankings")
+async def get_rankings(timeframe: str = Query(default="1h", pattern=TF_PATTERN)):
+    cache_key = f"skhy:rankings:{timeframe}"
+    cached = await cache_get(cache_key)
+    if isinstance(cached, dict) and cached.get("rankings"):
+        return cached
+
+    symbols = [normalize_symbol(item) for item in await market_coverage.get_top_symbols(30)]
+    semaphore = asyncio.Semaphore(4)
+
+    async def analyze(symbol: str) -> dict:
+        async with semaphore:
+            try:
+                analysis = await skhy_analysis.get_full_analysis(timeframe, symbol)
+                scores = analysis.get("scores") or {}
+                confidence = float(scores.get("signal_confidence") or 0)
+                long_probability = float(scores.get("long_probability") or 0)
+                short_probability = float(scores.get("short_probability") or 0)
+                direction = "long" if long_probability > short_probability else "short" if short_probability > long_probability else "neutral"
+                return {
+                    "symbol": symbol,
+                    "confidence": confidence,
+                    "quality_score": float(scores.get("overall") or 0),
+                    "direction": direction,
+                    "status": str(scores.get("status") or "WAIT"),
+                }
+            except Exception as exc:
+                logger.warning(f"SKHY ranking analysis failed for {symbol}: {exc}")
+                return {
+                    "symbol": symbol, "confidence": 0, "quality_score": 0,
+                    "direction": "neutral", "status": "NO_DATA",
+                }
+
+    rankings = await asyncio.gather(*(analyze(symbol) for symbol in symbols))
+    rankings.sort(
+        key=lambda item: (item["confidence"], item["quality_score"]),
+        reverse=True,
+    )
+    for index, item in enumerate(rankings, start=1):
+        item["rank"] = index
+
+    response = {
+        "rankings": rankings,
+        "count": len(rankings),
+        "timeframe": timeframe,
+        "sort": "signal_confidence_desc",
+        "source": "SKHY analysis engine",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await cache_set(cache_key, response, ttl=45)
+    return response
 
 async def _allowed_symbol(symbol: str) -> str:
     normalized = normalize_symbol(symbol)

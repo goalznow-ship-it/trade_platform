@@ -458,6 +458,8 @@ export const api = {
 
   // SKHY Terminal
   getSkhySymbols: () => request<any>("/api/v1/skhy/symbols"),
+  getSkhyRankings: (timeframe = "1h") =>
+    request<any>(`/api/v1/skhy/rankings?timeframe=${encodeURIComponent(timeframe)}`, undefined, false, 180000),
 
   getSkhySnapshot: (timeframe = "1h", symbol = "SKHYUSDT") =>
     request<any>(`/api/v1/skhy/snapshot?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`),
