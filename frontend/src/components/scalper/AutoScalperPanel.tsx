@@ -51,14 +51,17 @@ export function AutoScalperPanel() {
   const [liveConfirmation, setLiveConfirmation] = useState("")
   const [liveReady, setLiveReady] = useState(false)
   const [liveReason, setLiveReason] = useState("Binance API və server icazəsi tələb olunur")
+  const [soak, setSoak] = useState<any>(null)
 
   async function load() {
     try {
-      const [data, trading] = await Promise.all([
+      const [data, trading, soakStatus] = await Promise.all([
         api.getAutoScalperStatus(),
         api.getTradingStatus().catch(() => null),
+        api.getAutoScalperSoakStatus().catch(() => null),
       ])
       setState(data)
+      setSoak(soakStatus)
       if (!data.armed) setMode(data.mode ?? "paper")
       setCapital(data.config?.capital_usdt ?? 10)
       setMinScore(data.config?.min_score ?? 82)
@@ -107,6 +110,16 @@ export function AutoScalperPanel() {
     live_confirmation: mode === "live" ? liveConfirmation : undefined,
   }
 
+  async function soakAction(fn: () => Promise<any>) {
+    setBusy(true); setError(null)
+    try {
+      setSoak(await fn())
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Soak-test əməliyyatı tamamlanmadı")
+    } finally { setBusy(false) }
+  }
+
   return (
     <div className="h-full overflow-auto bg-[#0d1117] p-4">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -125,6 +138,25 @@ export function AutoScalperPanel() {
           <label className="text-xs text-gray-400">Scalper kapitalı (USDT)<input type="number" min={5} value={capital} onChange={(e) => setCapital(Number(e.target.value))} disabled={state?.armed} className="mt-1 w-full rounded border border-gray-700 bg-gray-900 p-2 text-white" /></label>
           <label className="text-xs text-gray-400">Trade riski (%)<input type="number" min={0.1} max={2} step={0.1} value={risk} onChange={(e) => setRisk(Number(e.target.value))} disabled={state?.armed} className="mt-1 w-full rounded border border-gray-700 bg-gray-900 p-2 text-white" /></label>
           <label className="text-xs text-gray-400">Minimum score<input type="number" min={70} max={99} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} disabled={state?.armed} className="mt-1 w-full rounded border border-gray-700 bg-gray-900 p-2 text-white" /></label>
+        </div>
+
+        <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-white">72 saatlıq PAPER soak-test</h2>
+              <p className="mt-1 text-[10px] text-gray-500">Real Binance datası, virtual kapital, avtomatik bitmə və ölçülmüş nəticə.</p>
+            </div>
+            {soak?.status === "running" ? (
+              <Button variant="danger" disabled={busy} onClick={() => soakAction(api.stopAutoScalperSoak)}>Testi dayandır</Button>
+            ) : (
+              <Button variant="primary" disabled={busy || Boolean(state?.mode === "live" && state?.armed)} onClick={() => soakAction(() => api.startAutoScalperSoak({ duration_hours: 72, capital_usdt: capital, risk_per_trade_pct: risk, min_score: minScore }))}>72 saat başlat</Button>
+            )}
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-800"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${soak?.progress_pct ?? 0}%` }} /></div>
+          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-6">
+            {[["Status", soak?.status ?? "başlamayıb"], ["İrəliləyiş", `${soak?.progress_pct ?? 0}%`], ["Bağlı trade", soak?.closed_trades ?? 0], ["Net PnL", `${soak?.net_pnl ?? 0} USDT`], ["Max DD", `${soak?.max_drawdown_usdt ?? 0} USDT`], ["Nəticə", soak?.verdict ?? "collecting"]].map(([label, value]) => <div key={String(label)} className="rounded border border-gray-800 bg-gray-950/50 p-2"><div className="text-[9px] uppercase text-gray-600">{label}</div><div className="mt-1 font-mono text-xs font-semibold text-white">{value}</div></div>)}
+          </div>
+          <p className="mt-2 text-[9px] text-gray-600">Yekun qərar üçün minimum {soak?.minimum_trades_for_verdict ?? 20} bağlanmış trade tələb olunur. Bu test LIVE order aça bilməz.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-5">

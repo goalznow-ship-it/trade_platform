@@ -1,13 +1,13 @@
 import asyncio
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.logging import logger
 from app.core.redis import redis_client
 from app.core.database import async_session_factory
-from app.models.paper_trading import PaperPosition
+from app.models.paper_trading import PaperAccount, PaperPosition
 from app.services.institutional_signals import institutional_signal_engine
 from app.services.market import market_service
 from sqlalchemy import func, select
@@ -62,6 +62,11 @@ class AutoScalperService:
         state = await self.get_state(user_id)
         state["armed"] = False
         await self._save_state(user_id, state)
+        soak = await self._get_soak(user_id)
+        if soak and soak.get("status") == "running":
+            soak["status"] = "stopped"
+            soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+            await self._save_soak(user_id, soak)
         task = self._tasks.pop(user_id, None)
         if task:
             task.cancel()
@@ -73,6 +78,15 @@ class AutoScalperService:
                 state = await self.get_state(user_id)
                 if not state.get("armed"):
                     return
+                soak = await self._get_soak(user_id)
+                if soak and soak.get("status") == "running":
+                    if datetime.now(timezone.utc) >= datetime.fromisoformat(soak["ends_at"]):
+                        soak["status"] = "completed"
+                        soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+                        await self._save_soak(user_id, soak)
+                        state["armed"] = False
+                        await self._save_state(user_id, state)
+                        return
                 await self.scan(user_id)
             except asyncio.CancelledError:
                 return
@@ -82,6 +96,128 @@ class AutoScalperService:
                 state["error"] = str(exc)
                 await self._save_state(user_id, state)
             await asyncio.sleep(self.SCAN_INTERVAL)
+
+    @staticmethod
+    def _soak_key(user_id: int) -> str:
+        return f"auto_scalper:{user_id}:soak"
+
+    async def _get_soak(self, user_id: int) -> dict | None:
+        raw = await redis_client.get(self._soak_key(user_id))
+        return json.loads(raw) if raw else None
+
+    async def _save_soak(self, user_id: int, soak: dict) -> None:
+        await redis_client.set(self._soak_key(user_id), json.dumps(soak))
+
+    async def start_soak(
+        self, user_id: int, duration_hours: int, config: dict, db,
+    ) -> dict:
+        current = await self.get_state(user_id)
+        if current.get("armed") and current.get("mode") == "live":
+            raise ValueError("Live Auto Scalper aktiv ikən paper soak-test başlada bilməz")
+        account_result = await db.execute(
+            select(PaperAccount).where(PaperAccount.user_id == user_id)
+        )
+        account = account_result.scalar_one_or_none()
+        if account is None:
+            from app.services.paper_trading import paper_trading_service
+            account = await paper_trading_service.get_or_create_account(user_id, db)
+        now = datetime.now(timezone.utc)
+        soak = {
+            "status": "running",
+            "duration_hours": duration_hours,
+            "started_at": now.isoformat(),
+            "ends_at": (now + timedelta(hours=duration_hours)).isoformat(),
+            "stopped_at": None,
+            "baseline": {
+                "total_pnl": float(account.total_pnl or 0),
+                "total_trades": int(account.total_trades or 0),
+            },
+        }
+        await self._save_soak(user_id, soak)
+        paper_config = {**self.default_config(), **config, "mode": "paper"}
+        await self.arm(user_id, paper_config)
+        return await self.get_soak_status(user_id, db)
+
+    async def stop_soak(self, user_id: int, db) -> dict:
+        soak = await self._get_soak(user_id)
+        if not soak:
+            return {"status": "not_started"}
+        if soak.get("status") == "running":
+            soak["status"] = "stopped"
+            soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+            await self._save_soak(user_id, soak)
+        await self.disarm(user_id)
+        return await self.get_soak_status(user_id, db)
+
+    async def get_soak_status(self, user_id: int, db) -> dict:
+        soak = await self._get_soak(user_id)
+        if not soak:
+            return {"status": "not_started", "mode": "paper", "data_source": "paper_orders_real_market_data"}
+        now = datetime.now(timezone.utc)
+        started_at = datetime.fromisoformat(soak["started_at"])
+        ends_at = datetime.fromisoformat(soak["ends_at"])
+        if soak.get("status") == "running" and now >= ends_at:
+            soak["status"] = "completed"
+            soak["stopped_at"] = now.isoformat()
+            await self._save_soak(user_id, soak)
+            state = await self.get_state(user_id)
+            if state.get("mode") == "paper":
+                await self.disarm(user_id)
+
+        account_result = await db.execute(
+            select(PaperAccount).where(PaperAccount.user_id == user_id)
+        )
+        account = account_result.scalar_one_or_none()
+        positions_result = await db.execute(
+            select(PaperPosition).where(
+                PaperPosition.account_id == account.id,
+                PaperPosition.opened_at >= started_at,
+            ).order_by(PaperPosition.closed_at, PaperPosition.opened_at)
+        ) if account else None
+        positions = list(positions_result.scalars().all()) if positions_result is not None else []
+        closed = [position for position in positions if not position.is_open]
+        open_positions = [position for position in positions if position.is_open]
+        realized_pnl = sum(float(position.realized_pnl or 0) for position in closed)
+        unrealized_pnl = sum(float(position.unrealized_pnl or 0) for position in open_positions)
+        curve = 0.0
+        peak = 0.0
+        max_drawdown = 0.0
+        for position in closed:
+            curve += float(position.realized_pnl or 0)
+            peak = max(peak, curve)
+            max_drawdown = max(max_drawdown, peak - curve)
+        net_pnl = realized_pnl + unrealized_pnl
+        max_drawdown = max(max_drawdown, peak - net_pnl)
+        elapsed = max(0.0, (min(now, ends_at) - started_at).total_seconds())
+        duration = max(1.0, (ends_at - started_at).total_seconds())
+        completed = soak["status"] == "completed"
+        minimum_trades = 20
+        loss_budget = float((await self.get_state(user_id)).get("config", {}).get("capital_usdt", 10)) * 0.03
+        verdict = "collecting"
+        if completed:
+            verdict = (
+                "passed" if len(closed) >= minimum_trades and net_pnl > 0
+                and max_drawdown <= loss_budget else
+                "insufficient_data" if len(closed) < minimum_trades else "failed"
+            )
+        return {
+            **soak,
+            "mode": "paper",
+            "data_source": "paper_orders_real_market_data",
+            "progress_pct": round(min(100, elapsed / duration * 100), 1),
+            "remaining_seconds": max(0, int((ends_at - now).total_seconds())),
+            "opened_trades": len(positions),
+            "closed_trades": len(closed),
+            "winning_trades": sum(float(position.realized_pnl or 0) > 0 for position in closed),
+            "losing_trades": sum(float(position.realized_pnl or 0) < 0 for position in closed),
+            "open_positions": len(open_positions),
+            "realized_pnl": round(realized_pnl, 4),
+            "unrealized_pnl": round(unrealized_pnl, 4),
+            "net_pnl": round(net_pnl, 4),
+            "max_drawdown_usdt": round(max_drawdown, 4),
+            "minimum_trades_for_verdict": minimum_trades,
+            "verdict": verdict,
+        }
 
     @staticmethod
     def _pre_score(ticker: dict) -> float:

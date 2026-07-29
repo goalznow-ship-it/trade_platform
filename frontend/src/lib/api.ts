@@ -176,6 +176,12 @@ export const api = {
     request<any>("/api/v1/auto-scalper/arm", { method: "POST", body: JSON.stringify(data) }),
   disarmAutoScalper: () =>
     request<any>("/api/v1/auto-scalper/disarm", { method: "POST" }),
+  getAutoScalperSoakStatus: () =>
+    request<any>("/api/v1/auto-scalper/soak/status"),
+  startAutoScalperSoak: (data: { duration_hours: number; capital_usdt: number; risk_per_trade_pct: number; min_score: number }) =>
+    request<any>("/api/v1/auto-scalper/soak/start", { method: "POST", body: JSON.stringify(data) }),
+  stopAutoScalperSoak: () =>
+    request<any>("/api/v1/auto-scalper/soak/stop", { method: "POST" }),
 
   getExchangeCredentials: () => request<any[]>("/api/v1/trade/api-keys"),
 
@@ -397,6 +403,8 @@ export const api = {
 
   getSignalMonitor: () =>
     request<any>("/api/v1/institutional/signal-monitor"),
+  getSignalCalibration: (days = 90) =>
+    request<any>(`/api/v1/performance/calibration?days=${days}`),
 
   getMultiTimeframe: (symbol: string) =>
     request<any>(`/api/v1/institutional/multi-timeframe/${symbol}`),

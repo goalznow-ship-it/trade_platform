@@ -8,6 +8,8 @@ from sqlalchemy import select
 from app.models.analysis import Signal
 
 class PerformanceService:
+    MIN_CALIBRATION_SAMPLES = 30
+
     async def get_stats(self, db: AsyncSession, days: int = 30) -> dict:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         result = await db.execute(
@@ -88,7 +90,8 @@ class PerformanceService:
             rows = [
                 signal for signal in signals
                 if signal.confidence is not None
-                and lower <= float(signal.confidence) < upper
+                and lower <= float(signal.confidence)
+                and (float(signal.confidence) < upper or upper == 100 and float(signal.confidence) <= 100)
             ]
             wins = sum(signal.result == "tp_hit" for signal in rows)
             buckets.append({
@@ -123,5 +126,68 @@ class PerformanceService:
              'accuracy': round(v['wins'] / v['total'] * 100, 1) if v['total'] > 0 else 0}
             for d, v in sorted(daily.items())
         ]
+
+    async def calibration_report(self, db: AsyncSession, days: int = 90) -> dict:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        result = await db.execute(
+            select(Signal).where(
+                Signal.created_at >= cutoff,
+                Signal.result.in_(("tp_hit", "sl_hit")),
+                Signal.confidence.is_not(None),
+                Signal.confidence >= 50,
+            )
+        )
+        signals = list(result.scalars().all())
+        sample_size = len(signals)
+
+        def group(rows: list, key) -> list[dict]:
+            grouped: dict[str, list] = {}
+            for row in rows:
+                grouped.setdefault(str(key(row) or "unknown"), []).append(row)
+            output = []
+            for label, members in grouped.items():
+                wins = sum(item.result == "tp_hit" for item in members)
+                avg_confidence = sum(float(item.confidence) for item in members) / len(members)
+                win_rate = wins / len(members) * 100
+                output.append({
+                    "name": label,
+                    "sample_size": len(members),
+                    "win_rate": round(win_rate, 1),
+                    "average_confidence": round(avg_confidence, 1),
+                    "calibration_gap": round(win_rate - avg_confidence, 1),
+                })
+            return sorted(output, key=lambda item: item["sample_size"], reverse=True)
+
+        buckets = self._calibration(signals)
+        populated = [bucket for bucket in buckets if bucket["sample_size"]]
+        if signals:
+            probabilities = [min(1.0, max(0.0, float(row.confidence) / 100)) for row in signals]
+            outcomes = [1.0 if row.result == "tp_hit" else 0.0 for row in signals]
+            brier_score = sum((p - outcome) ** 2 for p, outcome in zip(probabilities, outcomes)) / sample_size
+            expected = sum(probabilities) / sample_size * 100
+            observed = sum(outcomes) / sample_size * 100
+            calibration_error = sum(
+                bucket["sample_size"] / sample_size
+                * abs(float(bucket["win_rate"]) - float(bucket["average_confidence"]))
+                for bucket in populated
+            )
+        else:
+            brier_score = expected = observed = calibration_error = None
+
+        return {
+            "period_days": days,
+            "data_source": "resolved_real_market_signals",
+            "status": "measured" if sample_size >= self.MIN_CALIBRATION_SAMPLES else "collecting",
+            "minimum_samples": self.MIN_CALIBRATION_SAMPLES,
+            "sample_size": sample_size,
+            "expected_win_rate": round(expected, 1) if expected is not None else None,
+            "observed_win_rate": round(observed, 1) if observed is not None else None,
+            "calibration_error": round(calibration_error, 2) if calibration_error is not None else None,
+            "brier_score": round(brier_score, 4) if brier_score is not None else None,
+            "buckets": buckets,
+            "by_direction": group(signals, lambda row: str(row.direction).lower()),
+            "by_timeframe": group(signals, lambda row: row.timeframe),
+            "by_symbol": group(signals, lambda row: row.symbol)[:10],
+        }
 
 performance_service = PerformanceService()

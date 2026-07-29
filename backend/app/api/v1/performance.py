@@ -22,3 +22,10 @@ async def accuracy_over_time(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     return await performance_service.accuracy_over_time(db, days)
+
+@router.get("/calibration")
+async def calibration_report(
+    days: int = Query(90, ge=7, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    return await performance_service.calibration_report(db, days)

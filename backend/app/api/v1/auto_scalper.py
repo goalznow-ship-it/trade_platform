@@ -25,6 +25,12 @@ class AutoScalperConfig(BaseModel):
     scan_interval_seconds: int = Field(default=20, ge=10, le=300)
     live_confirmation: str | None = Field(default=None, max_length=40)
 
+class SoakTestRequest(BaseModel):
+    duration_hours: int = Field(default=72, ge=24, le=168)
+    capital_usdt: float = Field(default=10, ge=5, le=10000)
+    risk_per_trade_pct: float = Field(default=0.5, ge=0.1, le=2)
+    min_score: float = Field(default=82, ge=70, le=99)
+
 
 @router.get("/status")
 async def status(user: User = Depends(get_current_user)):
@@ -69,3 +75,37 @@ async def arm(
 @router.post("/disarm")
 async def disarm(user: User = Depends(get_current_user)):
     return await auto_scalper_service.disarm(user.id)
+
+@router.get("/soak/status")
+async def soak_status(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await auto_scalper_service.get_soak_status(user.id, db)
+
+@router.post("/soak/start")
+async def start_soak(
+    request: SoakTestRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await auto_scalper_service.start_soak(
+            user.id,
+            request.duration_hours,
+            {
+                "capital_usdt": request.capital_usdt,
+                "risk_per_trade_pct": request.risk_per_trade_pct,
+                "min_score": request.min_score,
+            },
+            db,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+@router.post("/soak/stop")
+async def stop_soak(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await auto_scalper_service.stop_soak(user.id, db)

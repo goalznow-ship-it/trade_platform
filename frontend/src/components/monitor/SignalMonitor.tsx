@@ -38,11 +38,17 @@ export function SignalMonitor() {
   const [data, setData] = useState<MonitorSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [calibration, setCalibration] = useState<any>(null)
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      setData(await api.getSignalMonitor())
+      const [monitor, report] = await Promise.all([
+        api.getSignalMonitor(),
+        api.getSignalCalibration(90).catch(() => null),
+      ])
+      setData(monitor)
+      setCalibration(report)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Monitor məlumatı alınmadı")
     } finally {
@@ -105,6 +111,32 @@ export function SignalMonitor() {
             <Metric label="Win rate" value={hasMeasuredResults ? `${performance?.win_rate.toFixed(1)}%` : "—"} color="text-green-400" />
             <Metric label="LONG dəqiqliyi" value={hasMeasuredResults ? `${performance?.long_accuracy.toFixed(1)}%` : "—"} />
             <Metric label="SHORT dəqiqliyi" value={hasMeasuredResults ? `${performance?.short_accuracy.toFixed(1)}%` : "—"} />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-xs font-semibold uppercase text-gray-300">İnam kalibrasiyası · 90 gün</h2>
+              <p className="mt-1 text-[10px] text-gray-600">AI inamı ilə real TP/SL nəticəsinin uyğunluğu ölçülür.</p>
+            </div>
+            <span className={cn("rounded px-2 py-1 text-[9px] font-semibold", calibration?.status === "measured" ? "bg-green-950 text-green-400" : "bg-yellow-950 text-yellow-400")}>
+              {calibration?.status === "measured" ? "ÖLÇÜLÜB" : "MƏLUMAT TOPLANIR"} · {calibration?.sample_size ?? 0}/{calibration?.minimum_samples ?? 30}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Metric label="Gözlənən win rate" value={calibration?.expected_win_rate != null ? `${calibration.expected_win_rate}%` : "—"} />
+            <Metric label="Real win rate" value={calibration?.observed_win_rate != null ? `${calibration.observed_win_rate}%` : "—"} color="text-green-400" />
+            <Metric label="Kalibrasiya xətası" value={calibration?.calibration_error != null ? `${calibration.calibration_error} p.p.` : "—"} color="text-yellow-400" />
+            <Metric label="Brier score" value={calibration?.brier_score ?? "—"} />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+            {(calibration?.buckets ?? []).map((bucket: any) => (
+              <div key={bucket.range} className="rounded border border-gray-800 bg-gray-950/50 p-2">
+                <div className="text-[9px] text-gray-500">{bucket.range}% inam · n={bucket.sample_size}</div>
+                <div className="mt-1 font-mono text-xs text-white">{bucket.win_rate == null ? "—" : `${bucket.win_rate}% nəticə`}</div>
+              </div>
+            ))}
           </div>
         </div>
 
