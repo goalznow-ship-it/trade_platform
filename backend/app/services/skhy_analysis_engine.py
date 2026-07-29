@@ -115,7 +115,7 @@ class SkhyAnalysisEngine:
             "recalculation_timestamp": now_iso,
             "invalidation_level": round(invalidation_level, 2) if invalidation_level else 0,
             "module_errors": module_errors, "data_freshness": data_freshness,
-            "explanation_az": self._generate_explanation(tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
+            "explanation_az": self._generate_explanation(symbol, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone),
         }
         await cache_set(cache_key, result, ttl=10)
         return result
@@ -1468,11 +1468,11 @@ class SkhyAnalysisEngine:
         }
 
     # ─── EXPLANATION ───
-    def _generate_explanation(self, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone):
+    def _generate_explanation(self, symbol, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone):
         h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{}); d1 = tf_analysis.get("1d",{})
         h4_trend = h4.get("trend","məlum deyil"); h1_trend = h1.get("trend","məlum deyil"); d1_trend = d1.get("trend","məlum deyil")
         trend_az = {"bullish": "yüksələn", "bearish": "enən", "neutral": "neytral"}
-        lines = [f"SKHYUSDT analizi:"]
+        lines = [f"{normalize_symbol(symbol)} analizi:"]
         struct_label = detected_structure.get("label_az","")
         if struct_label: lines.append(f"Aşkarlanan struktur: {struct_label}.")
         if d1_trend in trend_az: lines.append(f"Günlük trend {trend_az[d1_trend]} istiqamətdədir.")

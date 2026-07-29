@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, Minus, Activity, BarChart3, Volume2, Zap, Shi
 import { type NormalizedAnalysis } from "@/lib/skhyChartNormalizer"
 
 interface Props {
+  symbol: string
   timeframes: Record<string, unknown>
   scores: Record<string, unknown>
   alignment: Record<string, unknown>
@@ -35,7 +36,7 @@ function parseLastUpdated(v: unknown): Date | null {
   return null
 }
 
-export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis, normalizedAnalysis }: Props) {
+export function SKHYAnalysisPanel({ symbol, timeframes, scores, alignment, sr, analysis, normalizedAnalysis }: Props) {
   const tfList = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
   const hasAnalysis = analysis !== null && Object.keys(scores).length > 0
 
@@ -115,7 +116,7 @@ export function SKHYAnalysisPanel({ timeframes, scores, alignment, sr, analysis,
       {/* 1. Hazırda nə baş verir? */}
       <div className="p-3 border-b border-gray-800/40">
         <div className="flex items-center gap-1.5 text-[11px] text-blue-400 font-semibold uppercase tracking-wider mb-2">
-          <Eye className="w-3 h-3" /> Hazırda nə baş verir?
+          <Eye className="w-3 h-3" /> {symbol} · Hazırda nə baş verir?
         </div>
         <div className="text-[10px] text-gray-400 leading-relaxed">
           {hasAnalysis ? explanation : "Məlumat hazırlanır..."}

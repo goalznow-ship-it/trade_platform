@@ -9,6 +9,7 @@ import { normalizeSkhyAnalysis as clientNormalize, type NormalizedAnalysis } fro
 import { SKHYScenarioPanel } from "@/components/skhy/SKHYScenarioPanel"
 import { SKHYTriggerPanel } from "@/components/skhy/SKHYTriggerPanel"
 import { SKHYHistoryPanel } from "@/components/skhy/SKHYHistoryPanel"
+import { SKHYSignalPlan } from "@/components/skhy/SKHYSignalPlan"
 import { cn } from "@/lib/utils"
 import { Activity, AlertTriangle, BarChart3, Brain, Clock, RefreshCw, TrendingDown, TrendingUp, Play, Terminal } from "lucide-react"
 
@@ -408,8 +409,9 @@ export default function SkhyTerminalPage() {
           {/* Right Panel */}
           <div className="w-96 border-l border-gray-800/60 flex flex-col overflow-hidden bg-gray-950/30">
             <div className="flex-1 overflow-y-auto">
+              <SKHYSignalPlan symbol={symbol} analysis={analysis} normalizedAnalysis={normalizedAnalysis} />
               <SKHYTriggerPanel triggers={triggers} scores={scores} />
-              <SKHYAnalysisPanel timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis}
+              <SKHYAnalysisPanel symbol={symbol} timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis}
                 normalizedAnalysis={normalizedAnalysis} />
               <SKHYScenarioPanel scenarios={hasValidAnalysis ? scenarios : null} />
               <SKHYHistoryPanel history={history} />
