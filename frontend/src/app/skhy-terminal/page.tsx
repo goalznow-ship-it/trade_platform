@@ -10,6 +10,7 @@ import { SKHYScenarioPanel } from "@/components/skhy/SKHYScenarioPanel"
 import { SKHYTriggerPanel } from "@/components/skhy/SKHYTriggerPanel"
 import { SKHYHistoryPanel } from "@/components/skhy/SKHYHistoryPanel"
 import { SKHYSignalPlan } from "@/components/skhy/SKHYSignalPlan"
+import { normalizeSignal } from "@/lib/unified-signal"
 import { cn } from "@/lib/utils"
 import { Activity, AlertTriangle, BarChart3, Brain, Clock, RefreshCw, TrendingDown, TrendingUp, Play, Terminal } from "lucide-react"
 
@@ -68,9 +69,19 @@ function parseLastUpdated(v: unknown): Date | null {
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
+interface SignalRank {
+  rank: number
+  quality: number
+  confidence: number
+  direction: "long" | "short" | "neutral"
+}
+
+const compactSymbol = (value: string) => value.replace("/", "").replace("-", "").toUpperCase()
+
 export default function SkhyTerminalPage() {
   const [symbol, setSymbol] = useState("SKHYUSDT")
   const [symbols, setSymbols] = useState<string[]>(["SKHYUSDT"])
+  const [signalRanks, setSignalRanks] = useState<Record<string, SignalRank>>({})
   const [timeframe, setTimeframe] = useState("1h")
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null)
@@ -165,6 +176,46 @@ export default function SkhyTerminalPage() {
       const available = Array.isArray(result?.symbols) ? result.symbols.filter((item: unknown): item is string => typeof item === "string") : []
       if (available.length) setSymbols(available)
     }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!Object.keys(signalRanks).length) return
+    setSymbols((current) => [...current].sort((a, b) => {
+      const ar = signalRanks[compactSymbol(a)]?.rank ?? Number.MAX_SAFE_INTEGER
+      const br = signalRanks[compactSymbol(b)]?.rank ?? Number.MAX_SAFE_INTEGER
+      return ar - br
+    }))
+  }, [signalRanks])
+
+  useEffect(() => {
+    let active = true
+    const loadRanking = async () => {
+      try {
+        const result = await api.institutionalScan(0, 30) as { signals?: Record<string, unknown>[] }
+        if (!active) return
+        const ranked = (Array.isArray(result?.signals) ? result.signals : [])
+          .map(normalizeSignal)
+          .sort((a, b) => b.quality_score - a.quality_score || b.confidence - a.confidence)
+        const next: Record<string, SignalRank> = {}
+        ranked.forEach((item, index) => {
+          next[compactSymbol(item.symbol)] = {
+            rank: index + 1,
+            quality: item.quality_score,
+            confidence: item.confidence,
+            direction: item.direction,
+          }
+        })
+        setSignalRanks(next)
+        setSymbols((current) => [...current].sort((a, b) => {
+          const ar = next[compactSymbol(a)]?.rank ?? Number.MAX_SAFE_INTEGER
+          const br = next[compactSymbol(b)]?.rank ?? Number.MAX_SAFE_INTEGER
+          return ar - br
+        }))
+      } catch { /* keep Binance volume order until the next scan */ }
+    }
+    loadRanking()
+    const interval = setInterval(loadRanking, 60000)
+    return () => { active = false; clearInterval(interval) }
   }, [])
 
   useEffect(() => {
@@ -313,7 +364,11 @@ export default function SkhyTerminalPage() {
                 aria-label="SKHY Intelligence bazarı"
                 className="h-7 min-w-32 rounded border border-purple-500/40 bg-gray-900 px-2 text-sm font-bold text-white outline-none hover:border-purple-400"
               >
-                {symbols.map((item) => <option key={item} value={item}>{item}</option>)}
+                {symbols.map((item) => {
+                  const rank = signalRanks[compactSymbol(item)]
+                  const direction = rank?.direction === "long" ? "LONG" : rank?.direction === "short" ? "SHORT" : "WAIT"
+                  return <option key={item} value={item}>{rank ? `#${rank.rank} ${item} · Q${rank.quality.toFixed(0)} · ${direction}` : item}</option>
+                })}
               </select>
               <span className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">Binance Futures</span>
             </div>
@@ -409,7 +464,7 @@ export default function SkhyTerminalPage() {
           {/* Right Panel */}
           <div className="w-96 border-l border-gray-800/60 flex flex-col overflow-hidden bg-gray-950/30">
             <div className="flex-1 overflow-y-auto">
-              <SKHYSignalPlan symbol={symbol} analysis={analysis} normalizedAnalysis={normalizedAnalysis} />
+              <SKHYSignalPlan symbol={symbol} analysis={analysis} normalizedAnalysis={normalizedAnalysis} ranking={signalRanks[compactSymbol(symbol)]} />
               <SKHYTriggerPanel triggers={triggers} scores={scores} />
               <SKHYAnalysisPanel symbol={symbol} timeframes={tfData} scores={scores} alignment={alignment} sr={sr} analysis={analysis}
                 normalizedAnalysis={normalizedAnalysis} />

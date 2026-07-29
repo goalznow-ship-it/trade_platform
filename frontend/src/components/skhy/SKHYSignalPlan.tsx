@@ -8,6 +8,12 @@ interface Props {
   symbol: string
   analysis: Record<string, unknown> | null
   normalizedAnalysis: NormalizedAnalysis
+  ranking?: {
+    rank: number
+    quality: number
+    confidence: number
+    direction: "long" | "short" | "neutral"
+  }
 }
 
 const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0
@@ -18,7 +24,7 @@ function price(value: number): string {
   return value.toFixed(6)
 }
 
-export function SKHYSignalPlan({ symbol, analysis, normalizedAnalysis }: Props) {
+export function SKHYSignalPlan({ symbol, analysis, normalizedAnalysis, ranking }: Props) {
   const tradePlan = (analysis?.trade_plan || normalizedAnalysis.tradePlan || {}) as Record<string, unknown>
   const ready = tradePlan.trade_ready === true
   const rawDirection = String(tradePlan.direction || "").toUpperCase()
@@ -39,7 +45,10 @@ export function SKHYSignalPlan({ symbol, analysis, normalizedAnalysis }: Props) 
       <div className="mb-2 flex items-center justify-between">
         <div>
           <div className="text-[9px] uppercase tracking-wider text-gray-500">Seçilmiş bazar</div>
-          <div className="font-mono text-sm font-bold text-white">{symbol}</div>
+          <div className="flex items-center gap-2">
+            <div className="font-mono text-sm font-bold text-white">{symbol}</div>
+            {ranking && <span className="rounded bg-purple-500/10 px-1.5 py-0.5 font-mono text-[9px] text-purple-300">#{ranking.rank} · Q{ranking.quality.toFixed(0)}</span>}
+          </div>
         </div>
         <span className={cn("rounded border px-2 py-1 text-[9px] font-bold", ready
           ? isLong ? "border-green-500/40 bg-green-500/10 text-green-400" : "border-red-500/40 bg-red-500/10 text-red-400"
