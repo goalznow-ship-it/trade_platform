@@ -46,12 +46,7 @@ Transform TradeAnalyst Pro into an institutional-grade AI crypto trading platfor
 - **Execution Engine → Paper Trading**: Pre-trade validation gate wired into paper trading — every market/limit order validated through 10-check execution engine before fill, rejected orders include validation_failures + risk_score, Redis counters track approval/rejection rates
 - **Bybit Exchange Connector**: Full BybitFuturesExchange class with all 17 abstract methods implemented using ccxt.bybit (linear USDT perpetual), registered in ExchangeManager alongside Binance
 - **Admin Execution Stats**: New /api/v1/admin/execution/stats endpoint + frontend card showing validations/approved/rejected/approval_rate/max_leverage/checks_available
-
-### Active
-- (none)
-
-### Blocked
-- (none)
+- **Phase 21 — ML Signal Engine** (`app/services/ml/`): end-to-end ML pipeline — feature engineering (100+ features across technical, microstructure, cross-asset, sentiment), XGBoost + LightGBM + Transformer ensemble with weighted soft-voting, walk-forward validation, trading-specific metrics (Sharpe, max DD, profit factor), real-time inference, retraining via CLI or `/api/v1/ml/retrain`. Integrates with 100-point scoring via `augment_institutional_score()` (ML adjusts ±10 based on confidence × agreement). New `/ml` frontend route with status panel, live predictions, feature importance. Models persisted to `app/models_store/`. `signal_engine.py` is the entry point; `RealTimePredictor` handles inference; `TrainingDataPipeline` builds datasets from live ccxt data.
 
 ## Next Move
 1. Test backtest engine with real historical data (already using real Binance data — tests use synthetic candles for isolated unit tests)

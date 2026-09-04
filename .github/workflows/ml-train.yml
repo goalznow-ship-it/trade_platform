@@ -1,0 +1,58 @@
+name: Train ML Models
+
+on:
+  schedule:
+    # Run every Sunday at 02:00 UTC
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      timeframe:
+        description: "Kline timeframe"
+        required: false
+        default: "15m"
+      skip_transformer:
+        description: "Skip transformer (faster)"
+        type: boolean
+        default: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run training
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: |
+          cd backend
+          if [ "${{ github.event.inputs.skip_transformer }}" = "true" ]; then
+            python -m app.services.ml.training.train_script \
+              --tf ${{ github.event.inputs.timeframe || '15m' }} \
+              --no-transformer
+          else
+            python -m app.services.ml.training.train_script \
+              --tf ${{ github.event.inputs.timeframe || '15m' }}
+          fi
+
+      - name: Upload trained models
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-models
+          path: backend/app/models_store/
+          if-no-files-found: warn
+          retention-days: 14

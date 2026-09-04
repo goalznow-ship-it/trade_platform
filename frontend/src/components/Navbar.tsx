@@ -12,6 +12,7 @@ import {
   Brain, Radio, BarChart3, Newspaper,
   LayoutDashboard, TrendingUp, Activity,
   Scan, Shield, ChevronDown, History,
+  Cpu, Sparkles,
 } from "lucide-react"
 import { cn, formatPrice, formatPercent } from "@/lib/utils"
 import type { Overview, Notification } from "@/lib/types"
@@ -19,6 +20,7 @@ import type { Overview, Notification } from "@/lib/types"
 const MODULES = [
   { href: "/terminal", label: "AI Terminal", icon: Brain, color: "text-blue-400" },
   { href: "/signals", label: "AI Signals", icon: Radio, color: "text-green-400" },
+  { href: "/ml", label: "ML Engine", icon: Cpu, color: "text-cyan-400", isNew: true },
   { href: "/monitor", label: "Siqnal Monitoru", icon: BellRing, color: "text-yellow-400", isNew: true },
   { href: "/radar", label: "Market Radar", icon: Activity, color: "text-purple-400" },
   { href: "/scanner", label: "Scanner", icon: Scan, color: "text-cyan-400" },
@@ -40,7 +42,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/monitor" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal" || pathname === "/exchanges"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/monitor" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal" || pathname === "/exchanges" || pathname === "/ml"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})
@@ -189,7 +191,7 @@ export function Navbar() {
               const isActive = pathname === mod.href || (
                   mod.href === "/dashboard" && (
                     pathname === "/dashboard" ||
-                    (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/monitor" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner" && pathname !== "/matrix")
+                    (pathname !== "/terminal" && pathname !== "/signals" && pathname !== "/monitor" && pathname !== "/futures" && pathname !== "/news" && pathname !== "/scanner" && pathname !== "/matrix" && pathname !== "/ml")
                   )
               )
               return (
