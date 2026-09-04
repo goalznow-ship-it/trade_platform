@@ -401,6 +401,34 @@ export const api = {
       120000,
     ),
 
+  // ML Signal Engine (Phase 21)
+  mlPredict: (symbol: string, timeframe = "15m") =>
+    request<any>(`/api/v1/ml/predict/${encodeURIComponent(symbol)}?timeframe=${timeframe}`),
+
+  mlPredictBatch: (symbols: string[], timeframe = "15m") =>
+    request<any>("/api/v1/ml/predict-batch", {
+      method: "POST",
+      body: JSON.stringify({ symbols, timeframe }),
+    }),
+
+  mlFeatureImportance: () =>
+    request<any>("/api/v1/ml/feature-importance"),
+
+  mlStatus: () =>
+    request<any>("/api/v1/ml/status"),
+
+  mlAugmentScore: (symbol: string, baseScore: number) =>
+    request<any>("/api/v1/ml/augment-score", {
+      method: "POST",
+      body: JSON.stringify({ symbol, base_score: baseScore }),
+    }),
+
+  mlRetrain: (symbols?: string[], timeframe = "15m", includeTransformer = true) =>
+    request<any>(
+      `/api/v1/ml/retrain?timeframe=${timeframe}&include_transformer=${includeTransformer}`,
+      symbols ? { method: "POST", body: JSON.stringify({ symbols }) } : { method: "POST" },
+    ),
+
   getSignalMonitor: () =>
     request<any>("/api/v1/institutional/signal-monitor"),
   getSignalCalibration: (days = 90) =>

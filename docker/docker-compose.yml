@@ -58,6 +58,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ml_models:/app/app/models_store
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -147,3 +149,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  ml_models:

@@ -23,6 +23,7 @@ from app.api.v1 import institutional as institutional_router
 from app.api.v1 import skhy as skhy_router
 from app.api.v1 import auto_scalper as auto_scalper_router
 from app.api.v1.websocket_v2 import router as ws_v2_router
+from app.api.v1.ml import router as ml_router
 from app.services.alert import alert_service
 from app.services.binance_ws import binance_ws
 from app.services.market_coverage import market_coverage
@@ -35,6 +36,7 @@ from app.services.skhy_market_data import skhy_market_data
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.redis import redis_client
+    from app.services.ml import init_ml_engine
     if settings.ENVIRONMENT.lower() != "production":
         await init_db()
     async with async_session_factory() as db:
@@ -58,6 +60,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Redis not available")
     logger.info("Database initialized")
     logger.info(f"Server starting on port {settings.PORT}")
+
+    # ML engine (loads from disk if models exist, non-fatal otherwise)
+    try:
+        ml_engine = init_ml_engine()
+        if ml_engine.predictor.is_ready():
+            logger.info("ML signal engine ready")
+        else:
+            logger.info("ML signal engine not loaded — train via POST /api/v1/ml/retrain")
+    except Exception as e:
+        logger.warning(f"ML engine init skipped: {e}")
+
     yield
     if settings.ENABLE_BACKGROUND_SERVICES:
         await alert_service.stop()
@@ -115,6 +128,7 @@ app.include_router(institutional_router.router, prefix="")
 app.include_router(skhy_router.router)
 app.include_router(auto_scalper_router.router, prefix="/api/v1")
 app.include_router(ws_v2_router)
+app.include_router(ml_router.router, prefix="/api/v1")
 
 
 @app.get("/")
