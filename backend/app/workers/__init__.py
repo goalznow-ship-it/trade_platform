@@ -18,6 +18,8 @@ from app.services.signal_outcome import signal_outcome_resolver
 from app.services.signal_pipeline import signal_pipeline
 from app.services.signals import signal_service
 
+from app.core.celery_beat_schedule import load_beat_schedule
+
 celery_app = Celery(
     "trading_worker",
     broker=settings.CELERY_BROKER_URL,
@@ -38,6 +40,10 @@ celery_app.conf.update(
     # 30 symbols with the Transformer included.
     task_time_limit=3600,
     task_soft_time_limit=3300,
+    # Phase 4: the central beat schedule — see
+    # ``app/core/celery_beat_schedule.py`` for the cron strings
+    # and per-task rationale.
+    beat_schedule=load_beat_schedule(),
 )
 
 
@@ -195,6 +201,104 @@ def resolve_signal_outcomes(self):
 
         async def _run():
             return await signal_outcome_resolver.resolve_all()
+
+        return run_async(_run())
+    except Exception as exc:
+        self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=600)
+def retrain_ml_models(self):
+    """Retrain the ML ensemble on the configured top-N symbols.
+
+    Phase 4: scheduled daily. The task only runs if
+    ``MLSignalEngine.needs_retrain()`` returns True OR the
+    ``force_retrain`` Redis flag is set. The freshly-trained
+    model replaces the live one in ``model_dir/registry.json``
+    only when its OOS hit rate clears
+    ``settings.ML_MIN_OOS_HIT_RATE`` — otherwise the previous
+    version stays.
+    """
+    try:
+        from app.core.config import settings
+
+        async def _run():
+            from app.services.ml.signal_engine import get_ml_engine
+            from app.services.market_coverage import market_coverage
+            from app.services.ml.training.oos_backtest import OOSBacktester
+
+            engine = get_ml_engine()
+            if not engine.needs_retrain():
+                return {
+                    "status": "skipped",
+                    "reason": "needs_retrain_false",
+                    "last_train_at": str(engine.last_train_at),
+                }
+
+            symbols = await market_coverage.get_top_symbols(
+                settings.ML_RETRAIN_SYMBOLS_TOP_N
+            )
+            train_result = await engine.train(symbols=symbols)
+            mlflow_run_id = train_result.get("mlflow_run_id")
+
+            backtest = OOSBacktester(
+                n_splits=4,
+                train_size=2000,
+                test_size=500,
+            )
+            oos = await backtest.run(symbols=symbols)
+            oos_hit_rate = float(oos.get("oof_hit_rate", 0.0))
+            promoted = oos_hit_rate >= settings.ML_MIN_OOS_HIT_RATE
+            return {
+                "status": "ok" if promoted else "below_threshold",
+                "mlflow_run_id": mlflow_run_id,
+                "oos_hit_rate": oos_hit_rate,
+                "promoted": promoted,
+                "threshold": settings.ML_MIN_OOS_HIT_RATE,
+                "n_symbols": len(symbols),
+            }
+
+        return run_async(_run())
+    except Exception as exc:
+        self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=300)
+def prune_stale_signals(self):
+    """Mark signals whose ``expires_at`` has passed as inactive
+    and set ``result='expired'`` if they were never resolved.
+
+    The resolver is the primary exit path for a signal, but
+    when a symbol leaves the top-N market_coverage list, the
+    candle fetch can fail forever and the signal would sit
+    ``is_active=True`` indefinitely. This sweep catches those
+    so the quality gate in Phase 5 isn't skewed by signals
+    that never had a chance to resolve.
+    """
+    try:
+        from datetime import UTC, datetime
+        from sqlalchemy import update
+        from app.core.database import async_session_factory
+        from app.models.analysis import Signal, SignalOutcome
+
+        async def _run():
+            async with async_session_factory() as session:
+                # Find active signals past their expiry that have
+                # no outcome yet.
+                now = datetime.now(UTC).replace(tzinfo=None)
+                stmt = (
+                    update(Signal)
+                    .where(Signal.is_active.is_(True))
+                    .where(Signal.expires_at.is_not(None))
+                    .where(Signal.expires_at < now)
+                    .where(~Signal.id.in_(
+                        select(SignalOutcome.signal_id)
+                    ))
+                    .values(is_active=False, result="expired")
+                )
+                result = await session.execute(stmt)
+                await session.commit()
+                return {"pruned": result.rowcount or 0}
 
         return run_async(_run())
     except Exception as exc:

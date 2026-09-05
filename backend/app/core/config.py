@@ -44,6 +44,31 @@ class Settings(BaseSettings):
     SSL_CERT_PATH: str | None = None
     SSL_KEY_PATH: str | None = None
 
+    # ── ML / backtest / retrain (Phase 4) ──────────────────────
+    # Where MLflow writes runs. Default is the local ./mlruns
+    # directory so a single-host dev install Just Works; in
+    # production, set this to the MLflow tracking server URI.
+    MLFLOW_TRACKING_URI: str = "file:./mlruns"
+    MLFLOW_EXPERIMENT_NAME: str = "ml-signal-engine"
+    # How often the celery beat schedule wants a fresh model.
+    # ``MLSignalEngine.needs_retrain`` reads this and also
+    # honours the ``force_retrain`` Redis flag.
+    ML_RETRAIN_HOURS: int = 24
+    # Minimum out-of-sample hit rate a freshly-trained model must
+    # reach to be promoted into ``model_dir/registry.json`` and
+    # become the live ensemble. Below this, the registry keeps
+    # the previous version.
+    ML_MIN_OOS_HIT_RATE: float = 0.45
+    # Top-N symbols the scheduled retrain pulls historical data
+    # for. Smaller = faster retrain, larger = more robust.
+    ML_RETRAIN_SYMBOLS_TOP_N: int = 15
+    # OHLCV bars per symbol to fetch for training. 5000 15m bars
+    # is ~52 days, enough for walk-forward splits to make sense.
+    ML_RETRAIN_BARS_PER_SYMBOL: int = 5000
+    # Cache TTL for the ML-mode backtest endpoint. The backtest
+    # is expensive (OOS walk-forward) so we cache for an hour.
+    BACKTEST_ML_CACHE_TTL: int = 3600
+
     @model_validator(mode="after")
     def validate_production_settings(self):
         # Use exact comparison for production gating — previous

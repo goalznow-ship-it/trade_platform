@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.portfolio import BacktestResult
@@ -72,6 +73,78 @@ async def run_backtest(
     result["module_errors"] = dict(provider_errors)
     result["funding_accounted"] = bool(funding_rates)
     return result
+
+
+# Cache for the expensive OOS walk-forward ML backtest. The
+# walk-forward is deterministic given the data + hyperparameters,
+# so caching for an hour across users is safe — they all see the
+# same metrics for the same symbol set within the TTL window.
+# Redis is the natural place for it (we already have a client);
+# we keep the dict here so the import stays local and the test
+# suite can monkeypatch it without touching the live cache.
+_ml_backtest_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _ml_backtest_cache_get(key: str) -> dict | None:
+    import time
+    entry = _ml_backtest_cache.get(key)
+    if not entry:
+        return None
+    expires_at, payload = entry
+    if expires_at < time.time():
+        _ml_backtest_cache.pop(key, None)
+        return None
+    return payload
+
+
+def _ml_backtest_cache_set(key: str, payload: dict) -> None:
+    import time
+    _ml_backtest_cache[key] = (time.time() + settings.BACKTEST_ML_CACHE_TTL, payload)
+
+
+@router.get("/ml")
+async def run_ml_backtest(
+    symbols: str = Query(
+        default="BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT",
+        description="Comma-separated list of symbols (use - instead of /).",
+    ),
+    timeframe: str = Query(default="15m", pattern="^(5m|15m|1h|4h|1d)$"),
+    n_splits: int = Query(default=4, ge=2, le=8),
+    train_size: int = Query(default=2000, ge=500, le=10_000),
+    test_size: int = Query(default=500, ge=100, le=5_000),
+    user: User = Depends(get_current_user),
+):
+    """Out-of-sample walk-forward backtest for the ML ensemble.
+
+    Phase 4 endpoint. Returns the OOS hit rate, in-sample hit
+    rate, train/test gap, per-fold breakdown, cumulative
+    return, and max drawdown for the configured symbol list.
+    Cached for ``settings.BACKTEST_ML_CACHE_TTL`` seconds
+    because a single walk-forward on 15 symbols can take a
+    few minutes.
+    """
+    sym_list = [s.strip().replace("-", "/") for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        raise HTTPException(400, "symbols parameter must contain at least one symbol")
+
+    cache_key = f"{','.join(sorted(sym_list))}|{timeframe}|{n_splits}|{train_size}|{test_size}"
+    cached = _ml_backtest_cache_get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True, "cache_key": cache_key}
+
+    from app.services.ml.training.oos_backtest import OOSBacktester
+
+    backtester = OOSBacktester(
+        n_splits=n_splits,
+        train_size=train_size,
+        test_size=test_size,
+    )
+    result = await backtester.run(symbols=sym_list, timeframe=timeframe)
+    result["symbols"] = sym_list
+    result["timeframe"] = timeframe
+    if "error" not in result:
+        _ml_backtest_cache_set(cache_key, result)
+    return {**result, "cached": False, "cache_key": cache_key}
 
 
 @router.post("/save")

@@ -17,6 +17,35 @@ from .inference.predictor import RealTimePredictor
 from .models.xgboost_model import XGBoostSignalModel
 
 
+def _force_retrain_flag_set() -> bool:
+    """Return True if the operator-pinned ``force_retrain``
+    Redis flag is present, and clear it atomically.
+
+    The flag is set by an ops command
+    (``redis-cli set ml:force_retrain 1``) when a manual
+    retrain is required outside the cron window. The flag is
+    read-and-deleted in one call so a retried task can't
+    re-trigger itself after a failure.
+    """
+    try:
+        from app.core.config import settings
+        import redis
+        client = redis.Redis.from_url(settings.REDIS_URL)
+        # ``GETDEL`` is atomic — if it's not available, fall
+        # back to a get + delete pair (best-effort).
+        try:
+            val = client.getdel("ml:force_retrain")
+        except Exception:
+            val = client.get("ml:force_retrain")
+            if val:
+                client.delete("ml:force_retrain")
+        return val is not None
+    except Exception:
+        # If Redis is unreachable, treat the flag as absent —
+        # the time-based gate will still work.
+        return False
+
+
 class MLSignalEngine:
     """
     Top-level orchestrator for ML-powered signal generation.
@@ -333,10 +362,65 @@ class MLSignalEngine:
 
     # ── SCHEDULED RETRAINING ────────────────────────────────────────
     def needs_retrain(self) -> bool:
-        if self.last_train_at is None:
+        """Decide whether a scheduled retrain should run.
+
+        The retrain is gated by two signals:
+
+        1. **Time-based** — more than
+           ``self.retrain_interval_hours`` hours have passed since
+           the last successful train. The source of truth is
+           ``models_store/registry.json`` so a process restart
+           doesn't forget the previous run; ``self.last_train_at``
+           is a hot in-memory cache of the same value.
+        2. **Manual** — operators can force a retrain by setting
+           the ``force_retrain`` key in Redis. The flag is read
+           and cleared atomically: if the retrain itself fails
+           and is retried, the flag won't re-trigger an extra
+           run.
+        """
+        if _force_retrain_flag_set():
             return True
-        elapsed = (datetime.now(UTC) - self.last_train_at).total_seconds() / 3600
+        last = self._read_last_train_from_registry()
+        if last is None:
+            # Either registry doesn't exist yet (fresh install)
+            # or it's empty. Fall back to the in-memory marker.
+            if self.last_train_at is None:
+                return True
+            last = self.last_train_at
+        elapsed = (datetime.now(UTC) - last).total_seconds() / 3600
         return elapsed > self.retrain_interval_hours
+
+    def _read_last_train_from_registry(self) -> datetime | None:
+        """Read the most-recent ``last_train_at`` from
+        ``models_store/registry.json``.
+
+        The registry is the durable record of when the model
+        was last trained. ``self.last_train_at`` only reflects
+        the in-process state — if the worker was restarted, it
+        would look stale and re-train every cron tick until
+        the file was read.
+        """
+        import json
+        from pathlib import Path
+        registry = Path(self.model_dir) / "registry.json"
+        if not registry.exists():
+            return None
+        try:
+            entries = json.loads(registry.read_text())
+        except Exception:
+            return None
+        if not entries:
+            return None
+        ts = entries[0].get("metrics", {}).get("last_train_at")
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(UTC).replace(tzinfo=None)
+            return dt
+        except Exception:
+            return None
 
 
 # Global singleton — initialised on first use

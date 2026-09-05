@@ -45,3 +45,8 @@ nginx/letsencrypt/
 coverage.xml
 .pytest_cache/
 htmlcov/
+
+# ML runtime artefacts (created by training jobs and tests)
+mlruns/
+models_store/
+
