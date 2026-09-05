@@ -1,6 +1,11 @@
 """
 ML Training Script — run as standalone job to (re)train the ensemble.
 
+This script is intended to be executed in the `ml_trainer` profile
+(see docker-compose.yml) or any environment that can reach the public
+Binance API. It builds a fresh, self-contained exchange client and
+does not touch the global exchange_manager used by the live server.
+
 Usage:
     python -m app.services.ml.training.train_script
     python -m app.services.ml.training.train_script --symbols BTC ETH SOL --tf 15m
@@ -14,13 +19,15 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import List, Optional
 
 # Add project root
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+
+import ccxt.async_support as ccxt
 
 from app.core.logging import logger
-from app.services.exchange.manager import exchange_manager
 from app.services.ml import MLSignalEngine
 
 
@@ -35,28 +42,56 @@ DEFAULT_SYMBOLS = [
 ]
 
 
+class _CcxtClient:
+    """
+    Minimal adapter that exposes `fetch_ohlcv` to the training pipeline.
+
+    The pipeline only calls `await client.fetch_ohlcv(symbol, tf, limit=...)`,
+    so we wrap the ccxt async client and do not share any state with the
+    live server's exchange_manager.
+    """
+
+    def __init__(self, client):
+        self._client = client
+        # Public Binance market data — no auth needed.
+        self.api_key: Optional[str] = None
+        self.secret: Optional[str] = None
+
+    async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 500):
+        return await self._client.fetch_ohlcv(symbol, timeframe, limit=limit)
+
+    async def close(self):
+        await self._client.close()
+
+
+async def _build_public_exchange() -> _CcxtClient:
+    """
+    Create a fresh ccxt Binance futures client using only public endpoints.
+    No API key is needed for OHLCV reads.
+    """
+    client = ccxt.binanceusdm({
+        "enableRateLimit": True,
+        "options": {"defaultType": "future"},
+    })
+    return _CcxtClient(client)
+
+
 async def run_training(
-    symbols: list[str],
+    symbols: List[str],
     timeframe: str = "15m",
     include_transformer: bool = True,
     save: bool = True,
-):
-    """Async training entry point."""
+) -> dict:
+    """Async training entry point. Returns the training-results dict."""
     print(f"🚀 Starting ML training")
     print(f"   Symbols: {len(symbols)}")
     print(f"   Timeframe: {timeframe}")
     print(f"   Transformer: {include_transformer}")
-    print(f"   Timestamp: {datetime.utcnow().isoformat()}Z")
+    print(f"   Timestamp: {datetime.now(timezone.utc).isoformat()}")
     print()
 
     engine = MLSignalEngine()
-
-    # Use the existing exchange manager
-    exchange = await exchange_manager.get_primary()
-    if exchange is None:
-        print("❌ No exchange client available. Start the platform first to connect Binance.")
-        return
-
+    exchange = await _build_public_exchange()
     try:
         results = await engine.train(
             symbols=symbols,
@@ -65,24 +100,23 @@ async def run_training(
             include_transformer=include_transformer,
             save=save,
         )
-
-        print()
-        print("=" * 60)
-        print("✅ Training complete")
-        print("=" * 60)
-        print(json.dumps(results, indent=2, default=str))
-
-        if "error" not in results:
-            print()
-            print("Models saved to app/models_store/")
-            print("Restart the platform to load the new models.")
-
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        print(f"❌ Training failed: {e}")
-        raise
     finally:
-        await exchange_manager.shutdown()
+        try:
+            await exchange.close()
+        except Exception as e:
+            logger.warning(f"Exchange close error: {e}")
+
+    print()
+    print("=" * 60)
+    print("✅ Training complete")
+    print("=" * 60)
+    print(json.dumps(results, indent=2, default=str))
+
+    if "error" not in results:
+        print()
+        print("Models saved to app/models_store/")
+        print("Restart the platform to load the new models.")
+    return results
 
 
 def main():
