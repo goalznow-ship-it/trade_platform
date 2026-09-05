@@ -31,7 +31,8 @@ class BybitFuturesExchange(BaseExchange):
                     "adjustForTimeDifference": True,
                 },
             })
-            self._ccxt.load_markets()
+            # load_markets is a heavy blocking network call; do it on a thread.
+            await self._call(self._ccxt.load_markets)
             self._connected = True
             self._last_heartbeat = time_module.time()
             self._reconnect_attempts = 0
@@ -73,6 +74,15 @@ class BybitFuturesExchange(BaseExchange):
             if not await self.reconnect():
                 raise ConnectionError("Bybit exchange not connected")
 
+    async def _call(self, method, *args, **kwargs):
+        """
+        Run a blocking ccxt call on a worker thread so the event loop
+        stays responsive. Every sync ccxt call must go through here.
+        """
+        if method is None:
+            raise RuntimeError("Bybit exchange not connected")
+        return await asyncio.to_thread(method, *args, **kwargs)
+
     def _normalize_symbol(self, symbol: str) -> str:
         return symbol.replace("/", "").upper()
 
@@ -90,7 +100,7 @@ class BybitFuturesExchange(BaseExchange):
 
             if request.leverage > 1:
                 try:
-                    self._ccxt.set_leverage(request.leverage, symbol)
+                    await self._call(self._ccxt.set_leverage, request.leverage, symbol)
                 except Exception:
                     pass
 
@@ -104,32 +114,36 @@ class BybitFuturesExchange(BaseExchange):
             if request.margin_mode:
                 try:
                     mode = "ISOLATED" if request.margin_mode == "isolated" else "CROSSED"
-                    self._ccxt.set_margin_mode(mode, symbol)
+                    await self._call(self._ccxt.set_margin_mode, mode, symbol)
                 except Exception:
                     pass
 
             ccxt_order = None
             if request.order_type == "market":
-                ccxt_order = self._ccxt.create_market_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_market_order,
                     symbol, request.side, request.quantity, params=params,
                 )
             elif request.order_type == "limit":
                 if not request.price:
                     raise ValueError("Price required for limit orders")
-                ccxt_order = self._ccxt.create_limit_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_limit_order,
                     symbol, request.side, request.quantity, request.price, params=params,
                 )
             elif request.order_type in ("stop_market", "stop"):
                 params["stopPrice"] = request.stop_price
                 params["closeOnTrigger"] = request.reduce_only
-                ccxt_order = self._ccxt.create_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_order,
                     symbol, "market", request.side, request.quantity,
                     None, params=params,
                 )
             elif request.order_type in ("take_profit_market", "tp_market"):
                 params["stopPrice"] = request.stop_price
                 params["closeOnTrigger"] = request.reduce_only
-                ccxt_order = self._ccxt.create_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_order,
                     symbol, "market", request.side, request.quantity,
                     None, params=params,
                 )
@@ -174,7 +188,7 @@ class BybitFuturesExchange(BaseExchange):
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         await self._ensure_connected()
         try:
-            self._ccxt.cancel_order(order_id, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.cancel_order, order_id, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Bybit cancel_order error: {e}")
@@ -190,8 +204,11 @@ class BybitFuturesExchange(BaseExchange):
             params: Dict = {}
             if stop_price:
                 params["stopPrice"] = stop_price
-            self._ccxt.edit_order(order_id, sym, "limit" if price else "market",
-                                  None, quantity, price, params=params)
+            await self._call(
+                self._ccxt.edit_order, order_id, sym,
+                "limit" if price else "market",
+                None, quantity, price, params=params,
+            )
             return await self.get_order(symbol, order_id)
         except Exception as e:
             logger.error(f"Bybit modify_order error: {e}")
@@ -208,7 +225,9 @@ class BybitFuturesExchange(BaseExchange):
     async def get_order(self, symbol: str, order_id: str) -> Optional[OrderResult]:
         await self._ensure_connected()
         try:
-            order = self._ccxt.fetch_order(order_id, self._normalize_symbol(symbol))
+            order = await self._call(
+                self._ccxt.fetch_order, order_id, self._normalize_symbol(symbol),
+            )
             if not order:
                 return None
             return OrderResult(
@@ -235,7 +254,7 @@ class BybitFuturesExchange(BaseExchange):
         await self._ensure_connected()
         try:
             sym = self._normalize_symbol(symbol) if symbol else None
-            orders = self._ccxt.fetch_open_orders(sym)
+            orders = await self._call(self._ccxt.fetch_open_orders, sym)
             results = []
             for o in orders:
                 results.append(OrderResult(
@@ -262,7 +281,10 @@ class BybitFuturesExchange(BaseExchange):
     async def get_positions(self, symbol: Optional[str] = None) -> List[PositionResult]:
         await self._ensure_connected()
         try:
-            positions = self._ccxt.fetch_positions([self._normalize_symbol(symbol)] if symbol else None)
+            positions = await self._call(
+                self._ccxt.fetch_positions,
+                [self._normalize_symbol(symbol)] if symbol else None,
+            )
             results = []
             for p in positions:
                 size = float(p.get("contracts", 0) or p.get("size", 0))
@@ -289,7 +311,7 @@ class BybitFuturesExchange(BaseExchange):
     async def get_balance(self) -> BalanceResult:
         await self._ensure_connected()
         try:
-            bal = self._ccxt.fetch_balance()
+            bal = await self._call(self._ccxt.fetch_balance)
             usdt = bal.get("USDT", {})
             return BalanceResult(
                 total=float(usdt.get("total", 0)),
@@ -304,7 +326,7 @@ class BybitFuturesExchange(BaseExchange):
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         await self._ensure_connected()
         try:
-            self._ccxt.set_leverage(leverage, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.set_leverage, leverage, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Bybit set_leverage error: {e}")
@@ -314,7 +336,7 @@ class BybitFuturesExchange(BaseExchange):
         await self._ensure_connected()
         try:
             ccxt_mode = "ISOLATED" if mode == "isolated" else "CROSSED"
-            self._ccxt.set_margin_mode(ccxt_mode, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.set_margin_mode, ccxt_mode, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Bybit set_margin_mode error: {e}")
@@ -323,7 +345,7 @@ class BybitFuturesExchange(BaseExchange):
     async def get_funding_rate(self, symbol: str) -> Optional[Dict]:
         await self._ensure_connected()
         try:
-            funding = self._ccxt.fetch_funding_rate(self._normalize_symbol(symbol))
+            funding = await self._call(self._ccxt.fetch_funding_rate, self._normalize_symbol(symbol))
             if funding:
                 return {
                     "symbol": funding.get("symbol", symbol),
@@ -340,7 +362,7 @@ class BybitFuturesExchange(BaseExchange):
     async def get_open_interest(self, symbol: str) -> Optional[Dict]:
         await self._ensure_connected()
         try:
-            oi = self._ccxt.fetch_open_interest(self._normalize_symbol(symbol))
+            oi = await self._call(self._ccxt.fetch_open_interest, self._normalize_symbol(symbol))
             if oi:
                 return {
                     "symbol": oi.get("symbol", symbol),
@@ -356,7 +378,7 @@ class BybitFuturesExchange(BaseExchange):
     async def get_ticker(self, symbol: str) -> Optional[Dict]:
         await self._ensure_connected()
         try:
-            t = self._ccxt.fetch_ticker(self._normalize_symbol(symbol))
+            t = await self._call(self._ccxt.fetch_ticker, self._normalize_symbol(symbol))
             if t:
                 return {
                     "symbol": t.get("symbol", symbol),
@@ -378,7 +400,9 @@ class BybitFuturesExchange(BaseExchange):
     async def get_orderbook(self, symbol: str, limit: int = 50) -> Optional[Dict]:
         await self._ensure_connected()
         try:
-            ob = self._ccxt.fetch_order_book(self._normalize_symbol(symbol), limit)
+            ob = await self._call(
+                self._ccxt.fetch_order_book, self._normalize_symbol(symbol), limit,
+            )
             if ob:
                 return {
                     "bids": ob.get("bids", [])[:10],
@@ -393,7 +417,9 @@ class BybitFuturesExchange(BaseExchange):
     async def get_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> List[Dict]:
         await self._ensure_connected()
         try:
-            ohlcvs = self._ccxt.fetch_ohlcv(self._normalize_symbol(symbol), timeframe, limit=limit)
+            ohlcvs = await self._call(
+                self._ccxt.fetch_ohlcv, self._normalize_symbol(symbol), timeframe, limit=limit,
+            )
             results = []
             for o in ohlcvs:
                 results.append({
@@ -412,7 +438,9 @@ class BybitFuturesExchange(BaseExchange):
     async def get_leverage_brackets(self, symbol: str) -> Optional[List[Dict]]:
         await self._ensure_connected()
         try:
-            return self._ccxt.fetch_leverage_tiers([self._normalize_symbol(symbol)])
+            return await self._call(
+                self._ccxt.fetch_leverage_tiers, [self._normalize_symbol(symbol)],
+            )
         except Exception as e:
             logger.error(f"Bybit get_leverage_brackets error: {e}")
             return None
