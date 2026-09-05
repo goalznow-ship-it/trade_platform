@@ -167,6 +167,22 @@ export function useWebSocketV2(token?: string) {
     connectRef.current = connect
   }, [connect])
 
+  // Auto-connect on mount, disconnect on unmount. The previous code
+  // never wired a cleanup that called disconnect(), so every component
+  // that mounted useWebSocketV2() (and the page-level WSProvider that
+  // wraps the whole dashboard) left an open WebSocket behind when the
+  // user navigated away. After a few page transitions there were a
+  // dozen live connections all holding handler closures and a backoff
+  // schedule, and the server saw the clients as 'connected' long after
+  // the UI was gone.
+  useEffect(() => {
+    connect()
+    return () => {
+      disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
   const send = useCallback((message: Record<string, unknown>, priority = 0) => {
     const ws = wsRef.current
     if (ws?.readyState === WebSocket.OPEN) {
