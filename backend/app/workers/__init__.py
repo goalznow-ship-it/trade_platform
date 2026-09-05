@@ -14,6 +14,7 @@ from app.services.indicators import indicator_service  # noqa: F401
 from app.services.market import market_service
 from app.services.news import news_service
 from app.services.notifications import notifications_service
+from app.services.signal_pipeline import signal_pipeline
 from app.services.signals import signal_service
 
 celery_app = Celery(
@@ -71,7 +72,7 @@ def analyze_market_data(self, symbol: str, timeframe: str = "1h"):
 
         async def save_results():
             async with async_session_factory() as session:
-                from app.models.analysis import AIAnalysis, Signal
+                from app.models.analysis import AIAnalysis
                 from app.models.market import Symbol as SymbolModel
                 result = await session.execute(select(SymbolModel).where(SymbolModel.name == symbol))
                 sym = result.scalar_one_or_none()
@@ -98,20 +99,14 @@ def analyze_market_data(self, symbol: str, timeframe: str = "1h"):
                 )
                 session.add(ai_record)
 
+                # Phase 1: every emitted signal goes through the
+                # canonical pipeline so the rows written here carry
+                # the same factor_payload / weights_used / ml_boost
+                # provenance as the API endpoints.
                 for sig in signals.get("signals", []):
-                    signal_record = Signal(
-                        symbol_id=sym_id, symbol=symbol, timeframe=timeframe,
-                        direction=sig.get("direction"), confidence=sig.get("confidence"),
-                        risk_score=sig.get("risk_score"), probability=sig.get("probability"),
-                        entry_price=sig.get("entry_price"), stop_loss=sig.get("stop_loss"),
-                        take_profit_1=sig.get("take_profit_1"),
-                        take_profit_2=sig.get("take_profit_2"),
-                        take_profit_3=sig.get("take_profit_3"),
-                        risk_reward=sig.get("risk_reward"), leverage=sig.get("leverage", 1),
-                        reason=sig.get("reason"), ai_summary=sig.get("ai_summary"),
-                        signal_type=sig.get("signal_type"), is_active=True,
-                    )
-                    session.add(signal_record)
+                    sig.setdefault("symbol", symbol)
+                    sig.setdefault("timeframe", timeframe)
+                    await signal_pipeline.persist_composed(sig, db=session)
                 await session.commit()
 
         run_async(save_results())

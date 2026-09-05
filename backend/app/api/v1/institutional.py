@@ -17,6 +17,7 @@ from app.services.market_coverage import market_coverage
 from app.services.multi_timeframe import multi_timeframe
 from app.services.pattern_analysis import _convert_numpy, pattern_engine
 from app.services.professional_risk import professional_risk
+from app.services.signal_pipeline import signal_pipeline
 from app.services.smc_engine import smc_engine
 
 router = APIRouter(prefix="/api/v1/institutional", tags=["institutional"])
@@ -43,13 +44,22 @@ async def get_institutional_signal(
     capital: float = Query(10000, ge=100),
     risk_percent: float = Query(0.02, ge=0.001, le=0.1),
     user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Generate an institutional-grade signal with full analysis"""
-    signal = await institutional_signal_engine.generate_signal(
+    """Generate an institutional-grade signal with full analysis.
+
+    Routes through the canonical signal pipeline so the response
+    always reflects the same compose + ML boost + persist path used
+    by the worker and the legacy signals endpoint. Without the
+    pipeline each caller would risk drift between what the API
+    returns and what gets persisted.
+    """
+    signal = await signal_pipeline.emit(
         symbol=symbol.replace("-", "/"),
         timeframe=timeframe,
         capital=capital,
         risk_percent=risk_percent,
+        db=db,
     )
     return signal
 

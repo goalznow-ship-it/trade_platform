@@ -1,4 +1,5 @@
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -43,6 +44,17 @@ class Signal(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     result = Column(String(20), nullable=True)  # new, active, tp1_hit, tp2_hit, tp3_hit, sl_hit
     expires_at = Column(DateTime, nullable=True)
+
+    # Phase 1 — pipeline provenance. Populated by signal_pipeline.emit so
+    # downstream phases (self-learning, walk-forward gating, quality
+    # auto-disable) can read the exact factors and weights that produced
+    # the score at emit time.
+    factor_payload = Column(JSONB, nullable=True)
+    weights_used = Column(JSONB, nullable=True)
+    ml_boost = Column(Float, nullable=True)
+    pipeline_version = Column(String(20), nullable=True)
+    model_version = Column(String(50), nullable=True)
+    source_engine = Column(String(50), nullable=True)
 
 class AIAnalysis(Base):
     __tablename__ = "ai_analyses"
@@ -91,3 +103,43 @@ class Pattern(Base):
     confidence = Column(Float)
     detected_at = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SignalOutcome(Base):
+    """Resolved-signal telemetry written by the outcome resolver.
+
+    The resolver walks the live candle stream forward from each emitted
+    signal's entry timestamp and records:
+      - forward_return_pct — signed return from entry to first TP / SL
+        / horizon, depending on resolution_method.
+      - mae / mfe — worst adverse and best favorable excursion in
+        percent, computed against the M1 candles between entry and
+        resolution. Captured so the quality gate can penalize signals
+        that print winners only after a deep drawdown.
+      - bars_held — how many candles the trade was live.
+      - resolution_method — tp_hit / sl_hit / expired / manual.
+
+    One row per signal (signal_id is unique). The self-learning loop
+    joins on this table to compute per-(factor, symbol, timeframe)
+    forward-return distributions and adjust scoring weights.
+    """
+
+    __tablename__ = "signal_outcomes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_id = Column(
+        Integer,
+        ForeignKey("signals.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    resolved_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    horizon_bars = Column(Integer, nullable=True)
+    forward_return_pct = Column(Float, nullable=True)
+    mae = Column(Float, nullable=True)
+    mfe = Column(Float, nullable=True)
+    resolved_price = Column(Float, nullable=True)
+    bars_held = Column(Integer, nullable=True)
+    resolution_method = Column(String(20), nullable=False, index=True)
+    notes = Column(Text, nullable=True)

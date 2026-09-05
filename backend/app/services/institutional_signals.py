@@ -43,11 +43,35 @@ class InstitutionalSignalEngine:
         if isinstance(cached, dict):
             return cached
 
+        composed = await self._compose_signal(
+            symbol=symbol, timeframe=timeframe,
+            capital=capital, risk_percent=risk_percent,
+        )
+        if composed is None:
+            result = self._empty_signal(symbol, timeframe, "compose_failed")
+        else:
+            result = composed
+        await cache_set(cache_key, result, ttl=15)
+        return result
+
+    async def _compose_signal(
+        self,
+        symbol: str,
+        timeframe: str = "1h",
+        capital: float = 10000,
+        risk_percent: float = 0.02,
+    ) -> dict | None:
+        """Pure composition — no caching, no DB writes. Returns the full
+        institutional signal dict or ``None`` if upstream data is missing.
+
+        This is the single helper that ``signal_pipeline.emit`` calls so
+        that every emitted signal carries an identical composition. The
+        public ``generate_signal`` keeps its cache layer for back-compat
+        with existing endpoints, but the canonical path is the pipeline.
+        """
         data = await market_service.get_ohlcv(symbol, None, timeframe, 200)
         if not data or len(data) < 50:
-            result = self._empty_signal(symbol, timeframe, "Insufficient OHLCV data")
-            await cache_set(cache_key, result, ttl=10)
-            return result
+            return self._empty_signal(symbol, timeframe, "Insufficient OHLCV data")
 
         current_price = data[-1]["close"]
 
@@ -60,15 +84,13 @@ class InstitutionalSignalEngine:
         direction = inst_score["direction"]
         abs_score = inst_score["abs_score"]
         if abs_score < 70:
-            result = {
+            return {
                 **self._empty_signal(symbol, timeframe, f"Score {abs_score}/100 below 70 threshold"),
                 "institutional_score": inst_score,
                 "direction": direction,
                 "confidence": abs_score,
                 "current_price": round(current_price, 4),
             }
-            await cache_set(cache_key, result, ttl=15)
-            return result
 
         # The expensive six-timeframe and derivatives analysis only adds value
         # after the primary institutional score passes the execution gate.
@@ -141,7 +163,7 @@ class InstitutionalSignalEngine:
         }
         execution = await self._get_execution_approval(trade_request)
 
-        result = {
+        return {
             "symbol": symbol,
             "timeframe": timeframe,
             "generated_at": datetime.now(UTC).isoformat(),
@@ -183,8 +205,6 @@ class InstitutionalSignalEngine:
                 if details.get(key) is not None
             },
         }
-        await cache_set(cache_key, result, ttl=15)
-        return result
 
     def _enrich_signal(self, signal: dict) -> dict:
         """Add canonical unified fields to a signal for consistent frontend consumption"""
