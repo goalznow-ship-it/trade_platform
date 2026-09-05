@@ -56,9 +56,39 @@ class WebSocketClient:
 
     async def send_json(self, data: dict) -> bool:
         try:
-            await self.websocket.send_text(json.dumps(data))
+            # Pre-serialize once to avoid re-encoding on every send
+            text = json.dumps(data, default=str)
+            await self.websocket.send_text(text)
             return True
-        except Exception:
+        except RuntimeError as e:
+            # WebSocket already closed (common during disconnect)
+            logger.debug(f"WS send skipped (closed): {self.client_id}: {e}")
+            raise
+        except Exception as e:
+            # Log unexpected errors with context, don't swallow silently
+            logger.warning(
+                f"WS send failed for {self.client_id}: {type(e).__name__}: {e}"
+            )
+            return False
+
+    async def send_text_safe(self, text: str) -> bool:
+        """
+        Send pre-serialized text. Used in broadcast fan-out where the
+        payload is identical for every client. Returns True on success,
+        False on failure. Re-raises RuntimeError so caller can identify
+        stale connections.
+        """
+        try:
+            await self.websocket.send_text(text)
+            return True
+        except RuntimeError:
+            # WebSocket closed — let caller reap
+            raise
+        except Exception as e:
+            logger.warning(
+                f"WS send_text_safe failed for {self.client_id}: "
+                f"{type(e).__name__}: {e}"
+            )
             return False
 
     async def send_personalized(self, event: str, data: Any, channel: str = None):
@@ -181,29 +211,55 @@ class WebSocketManager:
         if channel not in self.channel_subscriptions:
             return
 
+        # Pre-serialize payload ONCE per broadcast (not per-client).
+        # For high-frequency channels like ticker/orderbook this is a major
+        # CPU saving on the event loop.
         payload = {
             "event": event,
             "channel": channel,
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        try:
+            text = json.dumps(payload, default=str)
+        except (TypeError, ValueError) as e:
+            logger.error(f"WS broadcast payload serialization failed: {e}")
+            return
 
-        disconnected = []
+        # Collect target clients, skipping exclude and dead ones
+        targets = []
         for client_id in self.channel_subscriptions[channel]:
             if client_id == exclude:
                 continue
             client = self.clients.get(client_id)
             if not client:
-                disconnected.append(client_id)
                 continue
-            if not await client.send_json(payload):
-                disconnected.append(client_id)
+            targets.append(client)
+
+        if not targets:
+            return
+
+        # PARALLEL fan-out — one slow client no longer blocks others.
+        # return_exceptions=True so one failure doesn't cancel the whole batch.
+        results = await asyncio.gather(
+            *[client.send_text_safe(text) for client in targets],
+            return_exceptions=True,
+        )
+
+        # Reap disconnected clients
+        disconnected: list[str] = []
+        for client, result in zip(targets, results):
+            if result is False or isinstance(result, Exception):
+                disconnected.append(client.client_id)
 
         for cid in disconnected:
             await self.disconnect(cid)
 
     async def send_to_user(self, user_id: int, event: str, data: Any, channel: str = None):
         client_ids = self.user_clients.get(user_id, set())
+        if not client_ids:
+            return
+
         payload = {
             "event": event,
             "data": data,
@@ -212,10 +268,30 @@ class WebSocketManager:
         if channel:
             payload["channel"] = channel
 
+        try:
+            text = json.dumps(payload, default=str)
+        except (TypeError, ValueError) as e:
+            logger.error(f"WS send_to_user payload serialization failed: {e}")
+            return
+
+        targets = []
         for client_id in list(client_ids):
             client = self.clients.get(client_id)
             if client:
-                await client.send_json(payload)
+                targets.append(client)
+
+        if not targets:
+            return
+
+        results = await asyncio.gather(
+            *[client.send_text_safe(text) for client in targets],
+            return_exceptions=True,
+        )
+
+        # Clean up failed clients
+        for client, result in zip(targets, results):
+            if result is False or isinstance(result, Exception):
+                await self.disconnect(client.client_id)
 
     async def handle_heartbeat(self, client: WebSocketClient, data: Optional[dict] = None):
         client.last_heartbeat = time.time()
