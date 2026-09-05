@@ -73,6 +73,7 @@ services:
 
   redis:
     image: redis:7.4-alpine
+    env_file: *project-env
     # No public port. Internal only.
     expose:
       - "6379"
@@ -86,7 +87,17 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    <<: *default-security
+    # NOTE: redis-alpine uses setpriv/setresuid internally for the
+    # redis user; on hardened hosts (e.g. Kali) the seccomp/AppArmor
+    # profile combined with cap_drop ALL blocks that. We drop only
+    # what is genuinely unused but keep the privileges redis needs.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - SYS_ADMIN
+      - SYS_MODULE
+      - SYS_RAWIO
     logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]

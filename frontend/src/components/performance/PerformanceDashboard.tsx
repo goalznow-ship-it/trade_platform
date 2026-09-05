@@ -48,8 +48,8 @@ export function PerformanceDashboard() {
 
     Promise.all([
       api.getPerformanceStats(days),
-      api.getAccuracyOverTime(days),
-      api.getCalibrationReport(days),
+      api.getPerformanceAccuracy(days),
+      api.getSignalCalibration(days),
     ])
       .then(([s, a, c]) => {
         if (cancelled) return
