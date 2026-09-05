@@ -369,9 +369,22 @@ class WebSocketManager:
                     except (json.JSONDecodeError, KeyError):
                         pass
         except asyncio.CancelledError:
-            pass
+            # Task was cancelled (shutdown). Bubble out so the finally
+            # block runs — do NOT swallow, the cleanup must execute.
+            raise
         finally:
-            await pubsub.unsubscribe()
+            # Unsubscribe first, then close. pubsub.close() releases the
+            # underlying connection back to the redis-py pool. Without it
+            # every restart of the listener task leaks a Redis connection
+            # until the process exits.
+            try:
+                await pubsub.unsubscribe()
+            except Exception:
+                pass
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
 
     async def _periodic_cleanup(self):
         while True:
