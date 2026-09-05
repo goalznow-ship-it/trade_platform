@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -50,19 +51,29 @@ class AugmentScoreRequest(BaseModel):
     base_score: float = Field(..., ge=0, le=100)
 
 
-# ── Helper ──────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────
+def _build_ohlcv_df(ohlcv: list) -> pd.DataFrame:
+    """
+    Pure CPU work: build a sorted, indexed DataFrame from raw OHLCV rows.
+    No I/O — safe to call inside asyncio.to_thread.
+    """
+    df = pd.DataFrame(
+        ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+    )
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    return df.set_index("timestamp").sort_index()
+
+
 async def _fetch_ohlcv_df(exchange, symbol: str, timeframe: str, limit: int = 500):
-    """Fetch OHLCV as DataFrame."""
+    """
+    Async wrapper. The network call is awaited; DataFrame construction
+    is dispatched to a worker thread so it does not block the event loop.
+    """
     try:
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         if not ohlcv:
             return None
-        df = pd.DataFrame(
-            ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-        df = df.set_index("timestamp").sort_index()
-        return df
+        return await asyncio.to_thread(_build_ohlcv_df, ohlcv)
     except Exception as e:
         logger.error(f"OHLCV fetch failed for {symbol}: {e}")
         return None
@@ -84,13 +95,21 @@ async def predict_symbol(
     if exchange is None:
         raise HTTPException(503, "No exchange client available")
 
-    df = await _fetch_ohlcv_df(exchange, symbol, timeframe)
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", timeframe) if symbol != "BTC/USDT" else None
+    # Fetch in parallel — both calls are network I/O, so asyncio.gather is
+    # the right tool (no thread needed for the wait itself).
+    if symbol == "BTC/USDT":
+        df, btc_df = await _fetch_ohlcv_df(exchange, symbol, timeframe), None
+    else:
+        df, btc_df = await asyncio.gather(
+            _fetch_ohlcv_df(exchange, symbol, timeframe),
+            _fetch_ohlcv_df(exchange, "BTC/USDT", timeframe),
+        )
 
     if df is None or df.empty or len(df) < 200:
         raise HTTPException(400, f"Insufficient data for {symbol}")
 
-    pred = engine.predict(symbol, df, btc_df)
+    # ML inference is CPU-bound (XGBoost + LightGBM + Transformer) — run in thread
+    pred = await asyncio.to_thread(engine.predict, symbol, df, btc_df)
     if "error" in pred:
         raise HTTPException(500, pred["error"])
 
@@ -109,19 +128,36 @@ async def predict_batch(req: BatchPredictionRequest, user=Depends(get_current_us
     if exchange is None:
         raise HTTPException(503, "No exchange client available")
 
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", req.timeframe)
-    results = []
-    for sym in req.symbols[:30]:  # cap to 30
-        try:
-            df = await _fetch_ohlcv_df(exchange, sym, req.timeframe)
+    symbols = req.symbols[:30]  # cap to 30
+    if not symbols:
+        return {"count": 0, "results": [], "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    # Fetch BTC context + all symbol DataFrames in parallel. Network I/O
+    # only — never blocks the event loop.
+    fetch_tasks = [_fetch_ohlcv_df(exchange, s, req.timeframe) for s in symbols]
+    btc_task = _fetch_ohlcv_df(exchange, "BTC/USDT", req.timeframe)
+    gathered = await asyncio.gather(*fetch_tasks, btc_task)
+    btc_df = gathered[-1]
+    dfs = gathered[:-1]
+
+    # Inference is CPU-bound — run all predictions on a single thread so
+    # we serialize XGBoost/LightGBM/Transformer calls but never block
+    # the event loop with them.
+    def _infer_all() -> list:
+        out: list = []
+        for sym, df in zip(symbols, dfs):
             if df is None or df.empty or len(df) < 200:
                 continue
-            pred = engine.predict(sym, df, btc_df)
-            pred["symbol"] = sym
-            results.append(pred)
-        except Exception as e:
-            logger.error(f"Batch predict failed for {sym}: {e}")
+            ctx = btc_df if (btc_df is not None and not btc_df.empty) else df
+            try:
+                pred = engine.predict(sym, df, ctx)
+                pred["symbol"] = sym
+                out.append(pred)
+            except Exception as e:
+                logger.error(f"Batch infer failed for {sym}: {e}")
+        return out
 
+    results = await asyncio.to_thread(_infer_all)
     return {
         "count": len(results),
         "results": results,
@@ -184,8 +220,10 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
             "note": "exchange_unavailable",
         }
 
-    df = await _fetch_ohlcv_df(exchange, req.symbol, "15m")
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", "15m")
+    df, btc_df = await asyncio.gather(
+        _fetch_ohlcv_df(exchange, req.symbol, "15m"),
+        _fetch_ohlcv_df(exchange, "BTC/USDT", "15m"),
+    )
     if df is None or df.empty:
         return {
             "final_score": req.base_score,
@@ -193,8 +231,11 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
             "note": "data_unavailable",
         }
 
-    pred = engine.predict(req.symbol, df, btc_df)
-    return engine.augment_institutional_score(req.base_score, pred)
+    # CPU-bound — never run on the event loop.
+    pred = await asyncio.to_thread(engine.predict, req.symbol, df, btc_df)
+    return await asyncio.to_thread(
+        engine.augment_institutional_score, req.base_score, pred
+    )
 
 
 @router.post("/retrain")
