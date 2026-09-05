@@ -108,7 +108,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/health":
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        from app.core.client_ip import get_client_ip
+        client_ip = get_client_ip(request)
         key = f"{client_ip}:{request.url.path}"
 
         allowed, remaining = await distributed_rate_limiter.check(

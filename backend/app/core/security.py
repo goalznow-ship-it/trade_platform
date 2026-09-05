@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import logger
+from app.core.client_ip import get_client_ip
 from app.core.redis import redis_client
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -261,7 +262,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "path": request.url.path,
                 "status": response.status_code,
                 "duration_ms": duration_ms,
-                "ip": request.client.host if request.client else "unknown",
+                "ip": get_client_ip(request),
                 "user_agent": request.headers.get("user-agent", ""),
                 "user_id": user_id,
             }
