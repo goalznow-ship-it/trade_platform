@@ -344,15 +344,17 @@ async def brain_system(admin: User = Depends(require_admin)):
 @router.get("/trading/control")
 async def trading_control_status(admin: User = Depends(require_admin)):
     from app.core.config import settings
-    from app.core.redis import redis_client
-    try:
-        halted = await redis_client.get("trading:kill_switch") == "1"
-        reason = await redis_client.get("trading:kill_switch:reason")
-    except Exception:
-        halted, reason = False, "Redis unavailable"
+    from app.core.kill_switch import get_kill_switch_status
+    # get_kill_switch_status returns ('unknown', None) on Redis error so the
+    # admin sees a real problem rather than a stale "halted=False" reading
+    # that would suggest trading is fine when the control plane is offline.
+    state, reason = await get_kill_switch_status()
+    halted = state == "active"
     return {
         "configured": settings.TRADING_ENABLED,
         "halted": halted,
+        "state": state,
+        "control_plane_degraded": state == "unknown",
         "reason": reason,
         "accepting_live_orders": settings.TRADING_ENABLED and not halted,
     }
@@ -377,13 +379,15 @@ async def set_trading_control(
     req: TradingControlRequest,
     admin: User = Depends(require_admin),
 ):
-    from app.core.redis import redis_client
+    # activate/deactivate raise on Redis failure — the previous version
+    # swallowed the error and returned 200, leaving the admin thinking
+    # the kill switch was toggled when it wasn't.
+    from app.core.kill_switch import activate, deactivate
     try:
         if req.halted:
-            await redis_client.set("trading:kill_switch", "1")
-            await redis_client.set("trading:kill_switch:reason", req.reason[:500])
+            await activate(req.reason or "Admin halt")
         else:
-            await redis_client.delete("trading:kill_switch", "trading:kill_switch:reason")
+            await deactivate()
     except Exception as exc:
         raise HTTPException(503, f"Trading control store unavailable: {exc}")
     return {"halted": req.halted, "reason": req.reason if req.halted else None}

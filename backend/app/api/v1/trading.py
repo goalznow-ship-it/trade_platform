@@ -99,15 +99,18 @@ async def trading_status(
         )
     )
     configured_exchanges = list(result.scalars().all())
-    kill_switch_active = False
-    try:
-        kill_switch_active = await redis_client.get("trading:kill_switch") == "1"
-    except Exception:
-        pass
+    from app.core.kill_switch import get_kill_switch_status
+    state, _ = await get_kill_switch_status()
+    # "unknown" → fail-closed for accepting orders; surface the
+    # underlying state to the UI so the user can see Redis is down.
+    kill_switch_active = (state == "active")
+    kill_switch_unknown = (state == "unknown")
     return {
         "default_mode": "paper",
         "live_trading_enabled": settings.TRADING_ENABLED,
         "kill_switch_active": kill_switch_active,
+        "kill_switch_state": state,
+        "kill_switch_unknown": kill_switch_unknown,
         "accepting_live_orders": (
             settings.TRADING_ENABLED
             and not kill_switch_active
@@ -128,13 +131,9 @@ async def create_order(
 
     if not settings.TRADING_ENABLED:
         raise HTTPException(503, "Live trading is disabled by server configuration")
-    try:
-        if await redis_client.get("trading:kill_switch") == "1":
-            raise HTTPException(503, "Emergency trading kill switch is active")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    from app.core.kill_switch import is_kill_switch_active
+    if await is_kill_switch_active():
+        raise HTTPException(503, "Emergency trading kill switch is active")
 
     client_order_id = idempotency_key or req.client_order_id
     if client_order_id:
@@ -297,10 +296,9 @@ async def preview_order(
     liquidation_check = (approval.get("validation") or {}).get("checks", {}).get("liquidation_distance", {})
 
     kill_switch_active = False
-    try:
-        kill_switch_active = await redis_client.get("trading:kill_switch") == "1"
-    except Exception:
-        pass
+    from app.core.kill_switch import get_kill_switch_status
+    state, _ = await get_kill_switch_status()
+    kill_switch_active = (state == "active")
 
     return {
         "preview_only": True,
@@ -413,13 +411,9 @@ async def close_position(
     """Close all or part of an existing position using a reduce-only market order."""
     if not settings.TRADING_ENABLED:
         raise HTTPException(503, "Live trading is disabled by server configuration")
-    try:
-        if await redis_client.get("trading:kill_switch") == "1":
-            raise HTTPException(503, "Emergency trading kill switch is active")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    from app.core.kill_switch import is_kill_switch_active
+    if await is_kill_switch_active():
+        raise HTTPException(503, "Emergency trading kill switch is active")
 
     existing = await db.execute(
         select(Order).where(
