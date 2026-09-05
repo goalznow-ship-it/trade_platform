@@ -11,6 +11,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+
+logger = logging.getLogger(__name__)
 
 
 class PositionalEncoding(nn.Module):
@@ -180,7 +183,7 @@ class TransformerSignalWrapper:
                 best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
 
             if (epoch + 1) % 5 == 0:
-                print(f"  epoch {epoch+1}/{self.epochs}  val_loss={val_loss:.4f}")
+                logger.info("Transformer epoch %d/%d val_loss=%.4f", epoch + 1, self.epochs, val_loss)
 
         if best_state is not None:
             self.model.load_state_dict(best_state)

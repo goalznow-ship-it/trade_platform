@@ -6,6 +6,7 @@ Often outperforms XGBoost on high-dimensional sparse data.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
+
+logger = logging.getLogger(__name__)
 
 
 class LightGBMSignalModel:
@@ -63,7 +66,7 @@ class LightGBMSignalModel:
                 callbacks=[lgb.early_stopping(30, verbose=False)],
             )
             oof_preds[val_idx] = model.predict_proba(X_val)
-            print(f"  fold {fold + 1}/{n_splits} done")
+            logger.info("LightGBM fold %d/%d done", fold + 1, n_splits)
 
         self.model = lgb.LGBMClassifier(**self.params)
         self.model.fit(X, y_mapped)

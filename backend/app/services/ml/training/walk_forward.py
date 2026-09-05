@@ -5,11 +5,14 @@ Prevents look-ahead bias, gives realistic performance estimates.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Dict, List
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
+
+logger = logging.getLogger(__name__)
 
 
 class WalkForwardValidator:
@@ -79,7 +82,12 @@ class WalkForwardValidator:
                 for name, fn in metric_fns.items():
                     results[name].append(fn(y_te.values, preds, proba))
             except Exception as e:
-                print(f"Fold {fold} failed: {e}")
+                # Use logger.exception so the traceback is captured —
+                # 'print' swallowed the type and lost the stack, which
+                # made fold failures (data shape mismatch, NaN
+                # inference, transformer OOM) impossible to diagnose
+                # after the fact.
+                logger.exception("Walk-forward fold %d failed", fold)
 
         summary = {
             "n_folds": len(next(iter(results.values()), [])),

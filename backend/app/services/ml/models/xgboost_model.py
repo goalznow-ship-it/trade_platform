@@ -5,6 +5,7 @@ XGBoost classifier for crypto signal generation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Tuple
@@ -13,6 +14,8 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import TimeSeriesSplit
+
+logger = logging.getLogger(__name__)
 
 
 class XGBoostSignalModel:
@@ -68,7 +71,7 @@ class XGBoostSignalModel:
                 verbose=False,
             )
             oof_preds[val_idx] = model.predict_proba(X_val)
-            print(f"  fold {fold + 1}/{n_splits} done")
+            logger.info("XGBoost fold %d/%d done", fold + 1, n_splits)
 
         self.model = xgb.XGBClassifier(**self.params)
         self.model.fit(X, y_mapped, verbose=False)
