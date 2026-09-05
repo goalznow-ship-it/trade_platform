@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.logging import logger
@@ -240,33 +240,63 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
 
 @router.post("/retrain")
 async def trigger_retrain(
-    background_tasks: BackgroundTasks,
     symbols: Optional[List[str]] = None,
     timeframe: str = "15m",
     include_transformer: bool = True,
     user=Depends(get_current_user),
 ):
     """
-    Trigger ML retraining in the background.
-    Admin-only in production.
+    Trigger ML retraining on the dedicated Celery worker.
+    Admin-only.
+
+    Why not BackgroundTasks: a single retrain runs XGBoost +
+    LightGBM + a PyTorch Transformer on up to 30 symbols. The
+    model weights are CPU-bound native code; a `BackgroundTasks`
+    task runs in the same event loop as live user requests and
+    would stall every other endpoint for the duration of
+    training — a self-inflicted DoS. The Celery worker runs
+    the job in a separate process (and, in production, a
+    separate container with the ml-training profile).
     """
     if not getattr(user, "is_admin", False):
         raise HTTPException(403, "Admin access required")
 
-    from app.services.ml.training.train_script import DEFAULT_SYMBOLS, run_training
+    from app.services.ml.training.train_script import DEFAULT_SYMBOLS
+    from app.workers import retrain_ml_models
 
     syms = symbols or DEFAULT_SYMBOLS
-
-    async def _job():
-        try:
-            await run_training(syms, timeframe, include_transformer, save=True)
-        except Exception as e:
-            logger.error(f"Background retrain failed: {e}")
-
-    background_tasks.add_task(_job)
+    async_result = retrain_ml_models.delay(
+        symbols=syms,
+        timeframe=timeframe,
+        include_transformer=include_transformer,
+    )
     return {
-        "status": "scheduled",
+        "status": "queued",
+        "task_id": async_result.id,
         "symbols": len(syms),
         "timeframe": timeframe,
         "include_transformer": include_transformer,
     }
+
+
+@router.get("/retrain/{task_id}")
+async def retrain_status(task_id: str, user=Depends(get_current_user)):
+    """
+    Poll the status of a previously-queued retrain task.
+    """
+    if not getattr(user, "is_admin", False):
+        raise HTTPException(403, "Admin access required")
+
+    from app.workers import celery_app
+    result = celery_app.AsyncResult(task_id)
+    response = {
+        "task_id": task_id,
+        "state": result.state,
+        "ready": result.ready(),
+    }
+    if result.ready():
+        try:
+            response["result"] = result.get(timeout=1)
+        except Exception as e:
+            response["error"] = str(e)
+    return response
