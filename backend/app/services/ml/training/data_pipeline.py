@@ -39,7 +39,19 @@ class TrainingDataPipeline:
     async def fetch_ohlcv(
         self, symbol: str, days: Optional[int] = None
     ) -> pd.DataFrame:
-        """Fetch OHLCV from exchange client. Returns DataFrame with DatetimeIndex."""
+        """
+        Fetch OHLCV from exchange client. Returns DataFrame with DatetimeIndex.
+
+        The previous implementation called fetch_ohlcv once with limit=1500
+        even when lookback_days=180. 180 days at 15m timeframe is
+        ~17,280 candles, so the training set was actually 6 days of data
+        dressed up as 180 days. Walk-forward validation on that produces
+        a model that overfits the latest week and cannot generalize.
+
+        This now paginates in 1500-candle chunks, walking forward in time
+        from `since` until either we hit `days` days back or the exchange
+        returns an empty page.
+        """
         days = days or self.lookback_days
         if self.exchange_client is None:
             logger.warning(f"No exchange client for {symbol}, returning empty")
@@ -49,13 +61,31 @@ class TrainingDataPipeline:
             since = int(
                 (datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000
             )
-            ohlcv = await self.exchange_client.fetch_ohlcv(
-                symbol, self.timeframe, since=since, limit=1500
-            )
-            if not ohlcv:
+            page_size = 1500
+            all_rows: list = []
+            last_ts = since
+            # Page until we get less than a full page (exchange has
+            # nothing newer than `last_ts` + page_size worth of bars)
+            # or we accumulate enough history to cover the window.
+            # 4 pages of 1500 = 6000 candles = 62.5 days at 15m; the
+            # loop auto-terminates when the exchange is exhausted.
+            for _ in range(16):  # hard cap: 16 * 1500 = 24k candles
+                page = await self.exchange_client.fetch_ohlcv(
+                    symbol, self.timeframe, since=last_ts, limit=page_size,
+                )
+                if not page:
+                    break
+                all_rows.extend(page)
+                # Advance since to the timestamp of the last row + 1 ms
+                # so the next page picks up where this one stopped.
+                last_ts = int(page[-1][0]) + 1
+                if len(page) < page_size:
+                    # Short page: no more data available.
+                    break
+            if not all_rows:
                 return pd.DataFrame()
             df = pd.DataFrame(
-                ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+                all_rows, columns=["timestamp", "open", "high", "low", "close", "volume"]
             )
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
             df = df.set_index("timestamp").sort_index()
