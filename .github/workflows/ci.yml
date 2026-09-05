@@ -163,7 +163,7 @@ jobs:
   deploy:
     name: Deploy to Production
     needs: [backend-lint, frontend-lint, backend-test, docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.DEPLOY_HOST != ''
     runs-on: ubuntu-latest
 
     steps:
