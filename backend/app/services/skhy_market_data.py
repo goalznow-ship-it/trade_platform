@@ -1,9 +1,10 @@
-import ccxt
 import asyncio
-import aiohttp
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
+import aiohttp
+import ccxt
+
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
@@ -33,7 +34,7 @@ class SkhyMarketData:
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         })
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._semaphore = asyncio.Semaphore(3)
         self._last_snapshots: dict[str, tuple[float, dict]] = {}
         self._last_ohlcv: dict[tuple[str, str, int], tuple[float, list]] = {}
@@ -84,7 +85,7 @@ class SkhyMarketData:
             "taker_buy_sell_ratio": taker_ratio if not isinstance(taker_ratio, Exception) else {},
             "trades": (trades if not isinstance(trades, Exception) else [])[:50],
             "orderbook": ob if not isinstance(ob, Exception) else {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data_freshness": "live" if isinstance(ticker, dict) and bool(ticker.get("price")) else "partial",
         }
         if not result["ticker"]:

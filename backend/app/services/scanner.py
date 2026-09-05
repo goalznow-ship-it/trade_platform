@@ -1,16 +1,16 @@
 import asyncio
-from typing import List, Optional
-from app.services.market import market_service
-from app.services.ai_analysis import ai_engine
-from app.services.market_coverage import market_coverage
+
 from app.core.logging import logger
+from app.services.ai_analysis import ai_engine
+from app.services.market import market_service
+from app.services.market_coverage import market_coverage
 
 
 class ScannerService:
     def __init__(self):
         self.logger = logger
 
-    async def scan_market(self, symbols: Optional[List[str]] = None, timeframe: str = '1h') -> list:
+    async def scan_market(self, symbols: list[str] | None = None, timeframe: str = '1h') -> list:
         if symbols is None:
             symbols = await market_coverage.get_top_symbols(25)
 

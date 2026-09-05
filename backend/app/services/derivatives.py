@@ -12,10 +12,10 @@ Comprehensive derivatives market analysis including:
 - Aggregated snapshot and async streaming
 """
 
-from typing import List, Dict, Optional
-from datetime import datetime, timezone, timedelta
 import asyncio
 import math
+from datetime import UTC, datetime, timedelta
+
 from app.core.logging import logger
 
 
@@ -30,8 +30,8 @@ class DerivativesEngine:
         symbol: str,
         funding_rate: float,
         next_funding_time: datetime,
-        funding_history: Optional[List[float]] = None,
-    ) -> Dict:
+        funding_history: list[float] | None = None,
+    ) -> dict:
         history = funding_history or []
         annualized = funding_rate * self.ANNUALIZED_FUNDING_PERIODS * 100
 
@@ -58,7 +58,7 @@ class DerivativesEngine:
             else:
                 trend = "mixed"
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         seconds_to_funding = max(0, (next_funding_time - now).total_seconds())
         hours_to_funding = round(seconds_to_funding / 3600, 2)
 
@@ -74,7 +74,7 @@ class DerivativesEngine:
             "next_funding_time": next_funding_time.isoformat() if isinstance(next_funding_time, datetime) else str(next_funding_time),
             "hours_to_funding": hours_to_funding,
             "funding_history": [round(f * 100, 6) for f in history],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     def analyze_open_interest(
@@ -82,9 +82,9 @@ class DerivativesEngine:
         symbol: str,
         oi_current: float,
         oi_change_24h: float,
-        oi_history: Optional[List[float]] = None,
-        price_change_24h: Optional[float] = None,
-    ) -> Dict:
+        oi_history: list[float] | None = None,
+        price_change_24h: float | None = None,
+    ) -> dict:
         history = oi_history or []
         oi_delta_direction = "up" if oi_change_24h > 0 else ("down" if oi_change_24h < 0 else "flat")
         oi_delta_magnitude = "significant" if abs(oi_change_24h) > 0.1 else ("moderate" if abs(oi_change_24h) > 0.05 else "minor")
@@ -128,7 +128,7 @@ class DerivativesEngine:
             "price_change_24h_pct": round(price_change_24h * 100, 2) if price_change_24h is not None else None,
             "divergence": divergence,
             "divergence_strength": divergence_strength if divergence else None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     def analyze_long_short_ratio(
@@ -136,7 +136,7 @@ class DerivativesEngine:
         long_ratio: float,
         short_ratio: float,
         long_short_ratio_value: float,
-    ) -> Dict:
+    ) -> dict:
         total = long_ratio + short_ratio
         long_pct = round((long_ratio / total) * 100, 2) if total > 0 else 50.0
         short_pct = round((short_ratio / total) * 100, 2) if total > 0 else 50.0
@@ -183,10 +183,10 @@ class DerivativesEngine:
             "extreme": extreme,
             "extreme_type": extreme_type,
             "interpretation": interpretation,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    def analyze_liquidations(self, liquidations: List[Dict]) -> Dict:
+    def analyze_liquidations(self, liquidations: list[dict]) -> dict:
         if not liquidations:
             return {
                 "total_liquidations": 0,
@@ -198,7 +198,7 @@ class DerivativesEngine:
                 "largest_liquidation": None,
                 "heatmap": [],
                 "clusters": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         total_long_value = 0.0
@@ -207,7 +207,7 @@ class DerivativesEngine:
         total_short_count = 0
         largest = None
 
-        heatmap_dict: Dict[str, Dict] = {}
+        heatmap_dict: dict[str, dict] = {}
 
         for liq in liquidations:
             price = liq.get("price", 0)
@@ -256,10 +256,10 @@ class DerivativesEngine:
             "largest_liquidation": largest,
             "heatmap": heatmap[:20],
             "clusters": clusters,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    def analyze_basis(self, spot_price: float, futures_price: float, expiry_days: float) -> Dict:
+    def analyze_basis(self, spot_price: float, futures_price: float, expiry_days: float) -> dict:
         basis = futures_price - spot_price
         basis_pct = (basis / spot_price) * 100 if spot_price else 0.0
         annualized_basis = (basis_pct / expiry_days) * 365 if expiry_days > 0 else 0.0
@@ -286,7 +286,7 @@ class DerivativesEngine:
             "market_status": market_status,
             "basis_strength": basis_strength,
             "interpretation": interpretation,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     def get_premium_index(self, mark_price: float, index_price: float) -> float:
@@ -294,7 +294,7 @@ class DerivativesEngine:
             return 0.0
         return round(((mark_price - index_price) / index_price) * 100, 6)
 
-    def get_gamma_exposure(self, option_data: Optional[Dict] = None) -> Dict:
+    def get_gamma_exposure(self, option_data: dict | None = None) -> dict:
         if option_data is not None:
             strikes = option_data.get("strikes", [])
             gex_levels = []
@@ -320,7 +320,7 @@ class DerivativesEngine:
                 "gamma_positive": total_gamma > 0,
                 "interpretation": "Positive gamma: market stabilizing" if total_gamma > 0 else "Negative gamma: market prone to moves",
                 "zero_gex_level": self._find_zero_gex(gex_levels),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         return {
@@ -332,11 +332,11 @@ class DerivativesEngine:
             "gamma_positive": None,
             "interpretation": None,
             "zero_gex_level": None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    def get_large_liquidation_zones(self, liquidations: List[Dict], threshold: float = 100000) -> List[Dict]:
-        large = [l for l in liquidations if abs(l.get("value", 0)) >= threshold]
+    def get_large_liquidation_zones(self, liquidations: list[dict], threshold: float = 100000) -> list[dict]:
+        large = [l for l in liquidations if abs(l.get("value", 0)) >= threshold]  # noqa: E741
         if not large:
             return []
 
@@ -367,25 +367,25 @@ class DerivativesEngine:
         self,
         symbol: str,
         funding_rate: float = 0.0,
-        next_funding_time: Optional[datetime] = None,
-        funding_history: Optional[List[float]] = None,
+        next_funding_time: datetime | None = None,
+        funding_history: list[float] | None = None,
         oi_current: float = 0.0,
         oi_change_24h: float = 0.0,
-        oi_history: Optional[List[float]] = None,
-        price_change_24h: Optional[float] = None,
+        oi_history: list[float] | None = None,
+        price_change_24h: float | None = None,
         long_ratio: float = 50.0,
         short_ratio: float = 50.0,
         long_short_ratio_value: float = 1.0,
-        liquidations: Optional[List[Dict]] = None,
+        liquidations: list[dict] | None = None,
         spot_price: float = 0.0,
         futures_price: float = 0.0,
         expiry_days: float = 30.0,
         mark_price: float = 0.0,
         index_price: float = 0.0,
-        option_data: Optional[Dict] = None,
+        option_data: dict | None = None,
         liquidation_threshold: float = 100000,
-    ) -> Dict:
-        nft = next_funding_time or (datetime.now(timezone.utc) + timedelta(hours=8))
+    ) -> dict:
+        nft = next_funding_time or (datetime.now(UTC) + timedelta(hours=8))
 
         funding = self.analyze_funding(symbol, funding_rate, nft, funding_history)
         oi = self.analyze_open_interest(symbol, oi_current, oi_change_24h, oi_history, price_change_24h)
@@ -409,10 +409,10 @@ class DerivativesEngine:
             "premium_index": premium,
             "gamma_exposure": gex,
             "large_liquidation_zones": zones,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    async def stream_updates(self, symbols: List[str], interval_seconds: float = 10.0):
+    async def stream_updates(self, symbols: list[str], interval_seconds: float = 10.0):
         while True:
             for symbol in symbols:
                 try:
@@ -427,11 +427,11 @@ class DerivativesEngine:
         magnitude = 10 ** math.floor(math.log10(max(price, 1)))
         return round(price / magnitude) * magnitude
 
-    def _summarize_cluster(self, cluster: List[Dict]) -> Dict:
-        total_value = sum(abs(l.get("value", 0)) for l in cluster)
-        prices = [l.get("price", 0) for l in cluster]
-        long_value = sum(abs(l.get("value", 0)) for l in cluster if l.get("side", "").lower() == "long")
-        short_value = sum(abs(l.get("value", 0)) for l in cluster if l.get("side", "").lower() == "short")
+    def _summarize_cluster(self, cluster: list[dict]) -> dict:
+        total_value = sum(abs(l.get("value", 0)) for l in cluster)  # noqa: E741
+        prices = [l.get("price", 0) for l in cluster]  # noqa: E741
+        long_value = sum(abs(l.get("value", 0)) for l in cluster if l.get("side", "").lower() == "long")  # noqa: E741
+        short_value = sum(abs(l.get("value", 0)) for l in cluster if l.get("side", "").lower() == "short")  # noqa: E741
         return {
             "price_min": round(min(prices), 4),
             "price_max": round(max(prices), 4),
@@ -442,7 +442,7 @@ class DerivativesEngine:
             "count": len(cluster),
         }
 
-    def _find_zero_gex(self, gex_levels: List[Dict]) -> Optional[float]:
+    def _find_zero_gex(self, gex_levels: list[dict]) -> float | None:
         if not gex_levels:
             return None
         pos_cross = None
@@ -457,12 +457,12 @@ class DerivativesEngine:
 
     def _compute_aggregate_signal(
         self,
-        funding: Dict,
-        oi: Dict,
-        ls: Dict,
-        basis: Dict,
+        funding: dict,
+        oi: dict,
+        ls: dict,
+        basis: dict,
         premium: float,
-    ) -> Dict:
+    ) -> dict:
         signals = []
         bullish_count = 0
         bearish_count = 0

@@ -6,23 +6,18 @@ Integrates with existing 100-point scoring system as a confidence booster.
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime
 
-import numpy as np
 import pandas as pd
 
 from app.core.logging import logger
 
 from .features.engineer import FeatureEngineer
 from .inference.predictor import RealTimePredictor
-from .models.ensemble import EnsemblePredictor
-from .models.xgboost_model import XGBoostSignalModel
 from .models.lightgbm_model import LightGBMSignalModel
 from .models.transformer import TransformerSignalWrapper
+from .models.xgboost_model import XGBoostSignalModel
 from .training.data_pipeline import TrainingDataPipeline
-from .training.metrics import TradingMetrics
 from .training.walk_forward import WalkForwardValidator
 
 
@@ -45,19 +40,19 @@ class MLSignalEngine:
         self.default_horizon_bars = default_horizon_bars
         self.default_label_threshold = default_label_threshold
         self.retrain_interval_hours = retrain_interval_hours
-        self.last_train_at: Optional[datetime] = None
+        self.last_train_at: datetime | None = None
 
     # ── TRAINING ─────────────────────────────────────────────────────
     async def train(
         self,
-        symbols: List[str],
+        symbols: list[str],
         exchange_client=None,
         benchmark_symbol: str = "BTC/USDT",
         timeframe: str = "15m",
         include_transformer: bool = True,
         n_splits: int = 5,
         save: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """
         Train the full ensemble on multi-symbol historical data.
         Returns aggregated metrics.
@@ -113,7 +108,7 @@ class MLSignalEngine:
             self.predictor.ensemble.save(self.model_dir)
             logger.info(f"Models saved to {self.model_dir}")
 
-        self.last_train_at = datetime.now(timezone.utc)
+        self.last_train_at = datetime.now(UTC)
         self.predictor._loaded = True
         return results
 
@@ -130,20 +125,20 @@ class MLSignalEngine:
         self,
         symbol: str,
         df: pd.DataFrame,
-        benchmark_df: Optional[pd.DataFrame] = None,
-        news_events: Optional[list] = None,
-        funding: Optional[pd.DataFrame] = None,
-        oi: Optional[pd.DataFrame] = None,
-    ) -> Dict:
+        benchmark_df: pd.DataFrame | None = None,
+        news_events: list | None = None,
+        funding: pd.DataFrame | None = None,
+        oi: pd.DataFrame | None = None,
+    ) -> dict:
         """Run inference for a single symbol."""
         return self.predictor.predict(df, benchmark_df, news_events, funding, oi)
 
     async def predict_batch(
         self,
-        symbols: List[str],
+        symbols: list[str],
         ohlcv_provider,
         benchmark_symbol: str = "BTC/USDT",
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Run inference for many symbols in one call."""
         self.predictor.reload_if_stale()
 
@@ -165,8 +160,8 @@ class MLSignalEngine:
     def augment_institutional_score(
         self,
         base_score: float,
-        ml_prediction: Dict,
-    ) -> Dict:
+        ml_prediction: dict,
+    ) -> dict:
         """
         Boost or reduce the existing 100-point institutional score
         based on ML confidence and agreement.
@@ -205,12 +200,12 @@ class MLSignalEngine:
     def needs_retrain(self) -> bool:
         if self.last_train_at is None:
             return True
-        elapsed = (datetime.now(timezone.utc) - self.last_train_at).total_seconds() / 3600
+        elapsed = (datetime.now(UTC) - self.last_train_at).total_seconds() / 3600
         return elapsed > self.retrain_interval_hours
 
 
 # Global singleton — initialised on first use
-_ml_engine: Optional[MLSignalEngine] = None
+_ml_engine: MLSignalEngine | None = None
 
 
 def get_ml_engine() -> MLSignalEngine:
@@ -222,7 +217,7 @@ def get_ml_engine() -> MLSignalEngine:
 
 
 # Convenience alias for imports
-ml_signal_engine: Optional[MLSignalEngine] = None
+ml_signal_engine: MLSignalEngine | None = None
 
 
 def init_ml_engine() -> MLSignalEngine:

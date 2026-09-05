@@ -12,8 +12,8 @@ Smart Money Concepts implementation:
 - Internal / External Structure
 - Session Range
 """
+
 import numpy as np
-from typing import Optional
 
 
 class SMCEngine:
@@ -244,7 +244,7 @@ class SMCEngine:
                                   "strength": "strong" if lows[i] < min(lows[max(0, i - 15):i + 10]) else "moderate"})
         return pools
 
-    def _liquidity_sweep(self, highs, lows, closes) -> Optional[dict]:
+    def _liquidity_sweep(self, highs, lows, closes) -> dict | None:
         if len(highs) < 20:
             return None
 
@@ -311,7 +311,7 @@ class SMCEngine:
 
         return {"equal_highs": equal_highs[-5:], "equal_lows": equal_lows[-5:]}
 
-    def _displacement(self, data: list) -> Optional[dict]:
+    def _displacement(self, data: list) -> dict | None:
         if len(data) < 10:
             return None
 
@@ -334,7 +334,7 @@ class SMCEngine:
 
         return {"detected": False}
 
-    def _inducement(self, highs, lows, closes, opens) -> Optional[dict]:
+    def _inducement(self, highs, lows, closes, opens) -> dict | None:
         if len(highs) < 20:
             return None
 

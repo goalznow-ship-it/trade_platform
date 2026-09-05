@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
 type MLStatusData = {
@@ -18,33 +18,62 @@ export default function MLStatus() {
   const [loading, setLoading] = useState(true);
   const [retraining, setRetraining] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Track pending timeouts so unmount cancels them. The previous
+  // version scheduled setTimeout(load, 2000) and setTimeout(setRetraining, 3000)
+  // in handleRetrain() with no tracking — when the user closed the
+  // panel mid-retrain those callbacks still fired and called
+  // setStatus / setRetraining on an unmounted component, which
+  // React logs as 'state update on an unmounted component' and
+  // which keeps the polling loop alive in the background.
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      timersRef.current.forEach((t) => clearTimeout(t));
+      timersRef.current.clear();
+    };
+  }, []);
+
+  const safeSetTimeout = (fn: () => void, ms: number) => {
+    const t = setTimeout(() => {
+      timersRef.current.delete(t);
+      if (isMountedRef.current) fn();
+    }, ms);
+    timersRef.current.add(t);
+  };
 
   const load = async () => {
     try {
       const data = await api.mlStatus();
-      setStatus(data);
+      if (isMountedRef.current) setStatus(data);
     } catch (e: any) {
-      setErr(e?.message || "Failed to load status");
+      if (isMountedRef.current) setErr(e?.message || "Failed to load status");
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 30000);
+    const t = setInterval(() => {
+      if (isMountedRef.current) load();
+    }, 30000);
     return () => clearInterval(t);
   }, []);
 
   const handleRetrain = async () => {
+    if (!isMountedRef.current) return;
     setRetraining(true);
     try {
       await api.mlRetrain();
-      setTimeout(load, 2000);
+      safeSetTimeout(load, 2000);
     } catch (e) {
       console.error(e);
     } finally {
-      setTimeout(() => setRetraining(false), 3000);
+      safeSetTimeout(() => setRetraining(false), 3000);
     }
   };
 

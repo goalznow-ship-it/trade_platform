@@ -2,16 +2,19 @@
 Signal Performance Tracking & Analytics
 """
 
-from datetime import datetime, timezone, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.analysis import Signal
+
 
 class PerformanceService:
     MIN_CALIBRATION_SAMPLES = 30
 
     async def get_stats(self, db: AsyncSession, days: int = 30) -> dict:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         result = await db.execute(
             select(Signal).where(Signal.created_at >= cutoff)
         )
@@ -60,7 +63,8 @@ class PerformanceService:
             pair_counts[pair]["total"] += 1
             pair_counts[pair]["wins"] += int(s.result == "tp_hit")
 
-        quality = lambda item: (item[1]["wins"] / item[1]["total"], item[1]["total"])
+        def quality(item):
+            return (item[1]["wins"] / item[1]["total"], item[1]["total"])
         best_tf = max(timeframe_counts.items(), key=quality)[0] if timeframe_counts else '--'
         best_pair = max(pair_counts.items(), key=quality)[0] if pair_counts else '--'
         calibration = self._calibration(completed_signals)
@@ -106,7 +110,7 @@ class PerformanceService:
         return buckets
 
     async def accuracy_over_time(self, db: AsyncSession, days: int = 90) -> list:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         result = await db.execute(
             select(Signal).where(Signal.created_at >= cutoff).order_by(Signal.created_at)
         )
@@ -128,7 +132,7 @@ class PerformanceService:
         ]
 
     async def calibration_report(self, db: AsyncSession, days: int = 90) -> dict:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         result = await db.execute(
             select(Signal).where(
                 Signal.created_at >= cutoff,
@@ -163,7 +167,7 @@ class PerformanceService:
         if signals:
             probabilities = [min(1.0, max(0.0, float(row.confidence) / 100)) for row in signals]
             outcomes = [1.0 if row.result == "tp_hit" else 0.0 for row in signals]
-            brier_score = sum((p - outcome) ** 2 for p, outcome in zip(probabilities, outcomes)) / sample_size
+            brier_score = sum((p - outcome) ** 2 for p, outcome in zip(probabilities, outcomes, strict=False)) / sample_size
             expected = sum(probabilities) / sample_size * 100
             observed = sum(outcomes) / sample_size * 100
             calibration_error = sum(

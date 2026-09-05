@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query, HTTPException
-from app.services.market import market_service
+from fastapi import APIRouter, HTTPException, Query
+
 from app.core.cache import cache_get, cache_set
+from app.services.market import market_service
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
 

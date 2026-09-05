@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Dict, Optional
 
-import numpy as np
 import pandas as pd
 
 from app.core.logging import logger
+
 from ..features.engineer import FeatureEngineer
 from ..models.ensemble import EnsemblePredictor
 
@@ -28,7 +27,7 @@ class RealTimePredictor:
         self.ensemble = EnsemblePredictor()
         self.fe = FeatureEngineer()
         self._loaded = False
-        self._last_load: Optional[datetime] = None
+        self._last_load: datetime | None = None
 
     def load(self) -> bool:
         """Load persisted ensemble from disk. Returns True on success."""
@@ -60,11 +59,11 @@ class RealTimePredictor:
     def predict(
         self,
         df: pd.DataFrame,
-        benchmark_df: Optional[pd.DataFrame] = None,
-        news_events: Optional[list] = None,
-        funding: Optional[pd.DataFrame] = None,
-        oi: Optional[pd.DataFrame] = None,
-    ) -> Dict:
+        benchmark_df: pd.DataFrame | None = None,
+        news_events: list | None = None,
+        funding: pd.DataFrame | None = None,
+        oi: pd.DataFrame | None = None,
+    ) -> dict:
         """
         Generate prediction for current market state.
 
@@ -119,7 +118,7 @@ class RealTimePredictor:
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
-    def feature_importance(self, top_n: int = 20) -> Dict:
+    def feature_importance(self, top_n: int = 20) -> dict:
         """Get feature importance from each base model."""
         out = {}
         if self.ensemble.xgb:

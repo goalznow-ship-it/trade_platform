@@ -1,7 +1,10 @@
-import ccxt
 import asyncio
+
+import ccxt
+
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
+
 
 class MarketService:
     def __init__(self):
@@ -211,7 +214,7 @@ class MarketService:
         overview_symbols = required + [symbol for symbol in symbols if symbol not in required]
         overview_symbols = overview_symbols[:max(10, len(symbols))]
         tickers = await asyncio.gather(*[self.get_ticker(s) for s in overview_symbols])
-        ticker_map = {symbol: ticker for symbol, ticker in zip(overview_symbols, tickers)}
+        ticker_map = dict(zip(overview_symbols, tickers, strict=False))
         btc = ticker_map.get("BTC/USDT", {})
         eth = ticker_map.get("ETH/USDT", {})
 

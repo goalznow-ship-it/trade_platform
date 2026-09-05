@@ -1,17 +1,20 @@
-import json
 import asyncio
-from typing import Optional
+import json  # noqa: F401
+import logging
+from datetime import UTC, datetime, timezone  # noqa: F401
+from typing import Optional  # noqa: F401
+
 from celery import Celery
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.services.ai_analysis import ai_engine
+from app.services.indicators import indicator_service  # noqa: F401
 from app.services.market import market_service
 from app.services.news import news_service
-from app.services.indicators import indicator_service
-from app.services.ai_analysis import ai_engine
-from app.services.signals import signal_service
 from app.services.notifications import notifications_service
-from sqlalchemy import select
-from datetime import datetime, timezone
+from app.services.signals import signal_service
 
 celery_app = Celery(
     "trading_worker",
@@ -28,15 +31,32 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # ML retrain is a long, multi-CPU job — don't time it out at
+    # the broker level. The task itself can take 10–30 minutes on
+    # 30 symbols with the Transformer included.
+    task_time_limit=3600,
+    task_soft_time_limit=3300,
 )
 
 
+# Reuse a long-lived event loop per worker process instead of
+# spinning a new one for every task. Spinning a new loop leaks
+# asyncpg connection pools because the engine binds to whatever
+# loop first touches it; the old loop's pool becomes orphaned.
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    global _loop
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+    return _loop
+
+
 def run_async(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    loop = _get_loop()
+    return loop.run_until_complete(coro)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
@@ -113,7 +133,7 @@ def send_signal_notification(self, signal_id: int):
                     return {"error": "Signal not found", "signal_id": signal_id}
 
                 users_result = await session.execute(
-                    select(User).where(User.is_active == True)
+                    select(User).where(User.is_active)
                 )
                 users = users_result.scalars().all()
 
@@ -169,7 +189,7 @@ def collect_news(self):
                         source=article.get("source", ""),
                         category=article.get("category", "crypto"),
                         summary=article.get("summary", ""),
-                        published_at=datetime.fromisoformat(article.get("published_at", datetime.now(timezone.utc).isoformat())),
+                        published_at=datetime.fromisoformat(article.get("published_at", datetime.now(UTC).isoformat())),
                         is_analyzed=True,
                     )
                     session.add(news_record)
@@ -239,3 +259,73 @@ def update_market_data(self):
         return run_async(update())
     except Exception as exc:
         self.retry(exc=exc)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.retrain_ml_models",
+    # Training runs XGBoost + LightGBM + Transformer on up to 30
+    # symbols with ~1500 candles each. On the dedicated ml_trainer
+    # profile this is bounded; cap to 1h hard, 55m soft, so the
+    # worker doesn't get stuck if a model write hangs.
+    max_retries=1,
+    default_retry_delay=300,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def retrain_ml_models(
+    self,
+    symbols: list,
+    timeframe: str = "15m",
+    include_transformer: bool = True,
+):
+    """
+    Long-running ML ensemble retraining. Runs in the dedicated
+    celery worker (not the live API process) so a single retrain
+    cannot block user requests.
+
+    Returns a dict with the training summary from MLSignalEngine.
+    """
+    import ccxt.async_support as ccxt
+
+    from app.services.ml import MLSignalEngine
+
+    class _ClientAdapter:
+        """Minimal fetch_ohlcv adapter wrapping a public ccxt client."""
+        def __init__(self, c):
+            self._c = c
+        async def fetch_ohlcv(self, sym, tf, limit=500):
+            return await self._c.fetch_ohlcv(sym, tf, limit=limit)
+        async def close(self):
+            await self._c.close()
+
+    async def _run():
+        client = ccxt.binanceusdm({
+            "enableRateLimit": True,
+            "options": {"defaultType": "future"},
+        })
+        adapter = _ClientAdapter(client)
+        engine = MLSignalEngine()
+        try:
+            results = await engine.train(
+                symbols=symbols,
+                exchange_client=adapter,
+                timeframe=timeframe,
+                include_transformer=include_transformer,
+                save=True,
+            )
+            return results
+        finally:
+            try:
+                await adapter.close()
+            except Exception as e:
+                logging.warning(f"retrain exchange close error: {e}")
+
+    try:
+        return run_async(_run())
+    except Exception as exc:
+        # Do not retry a failed training — it usually means a data
+        # issue, not a transient network blip. Log and let the
+        # operator inspect.
+        logging.error(f"ML retrain failed: {exc}")
+        return {"error": str(exc), "symbols": len(symbols)}

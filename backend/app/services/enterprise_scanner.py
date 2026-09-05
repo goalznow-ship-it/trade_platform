@@ -1,8 +1,8 @@
 import asyncio
-from typing import Optional, List
-from app.services.market import market_service
-from app.services.indicators import indicator_service
+
 from app.core.logging import logger
+from app.services.indicators import indicator_service
+from app.services.market import market_service
 
 
 class EnterpriseScanner:
@@ -24,7 +24,7 @@ class EnterpriseScanner:
                 ]
         return self._default_symbols
 
-    async def scan_by_filter(self, filter_type: str, symbols: Optional[List[str]] = None,
+    async def scan_by_filter(self, filter_type: str, symbols: list[str] | None = None,
                               timeframe: str = "1h", limit: int = 10) -> list:
         symbols = symbols or await self._get_symbols()
         results = []
@@ -43,7 +43,7 @@ class EnterpriseScanner:
         results.sort(key=lambda r: abs(r["score"]), reverse=True)
         return results[:limit]
 
-    async def scan_multi_filter(self, filters: List[str], symbols: Optional[List[str]] = None,
+    async def scan_multi_filter(self, filters: list[str], symbols: list[str] | None = None,
                                  timeframe: str = "1h", limit: int = 20) -> list:
         all_results = []
         for f in filters:
@@ -52,7 +52,7 @@ class EnterpriseScanner:
         all_results.sort(key=lambda r: abs(r["score"]), reverse=True)
         return all_results[:limit]
 
-    async def _apply_filter(self, filter_type: str, data: list) -> Optional[float]:
+    async def _apply_filter(self, filter_type: str, data: list) -> float | None:
         filters = {
             "rsi_oversold": self._rsi_oversold,
             "rsi_overbought": self._rsi_overbought,

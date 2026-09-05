@@ -32,7 +32,7 @@ class PricePredictionEngine:
             bearish_prob = 50
 
         # Expected move based on ATR-like volatility estimation
-        closes = [d["close"] for d in data[-20:]]
+        [d["close"] for d in data[-20:]]
         avg_range = sum(abs(data[i]["high"] - data[i]["low"]) for i in range(-20, 0)) / 20
         expected_move_pct = (avg_range / current_price) * 100 * (0.5 + abs(overall) * 0.5)
 

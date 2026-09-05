@@ -81,7 +81,7 @@ export default function MLPanel({ symbols }: { symbols: string[] }) {
         </div>
       ) : results.length === 0 ? (
         <div className="rounded bg-[#0a0f1c] p-8 text-center text-gray-500 text-sm">
-          No predictions yet. Train the models first via the "Retrain" button above.
+          No predictions yet. Train the models first via the &ldquo;Retrain&rdquo; button above.
         </div>
       ) : (
         <div className="space-y-2 max-h-[600px] overflow-y-auto">

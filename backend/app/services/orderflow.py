@@ -12,9 +12,10 @@ Institutional-grade order flow analytics:
 - Absorption ratio calculation
 """
 
+from datetime import UTC, datetime
+
 import numpy as np
-from typing import List, Dict
-from datetime import datetime, timezone
+
 from app.core.logging import logger
 
 
@@ -22,7 +23,7 @@ class OrderFlowAnalysis:
     def __init__(self):
         self.logger = logger
 
-    def analyze_orderbook(self, bids: List[Dict], asks: List[Dict]) -> Dict:
+    def analyze_orderbook(self, bids: list[dict], asks: list[dict]) -> dict:
         top_bids = bids[:50]
         top_asks = asks[:50]
         if not top_bids or not top_asks:
@@ -40,8 +41,8 @@ class OrderFlowAnalysis:
 
         vacuum = self.detect_liquidity_vacuum(top_bids, top_asks)
 
-        bid_prices = sorted(set(b["price"] for b in top_bids), reverse=True)
-        ask_prices = sorted(set(a["price"] for a in top_asks))
+        bid_prices = sorted({b["price"] for b in top_bids}, reverse=True)
+        ask_prices = sorted({a["price"] for a in top_asks})
         cvd = 0.0
         midpoint = None
         if bid_prices and ask_prices:
@@ -77,7 +78,7 @@ class OrderFlowAnalysis:
             "total_levels": {"bids": len(top_bids), "asks": len(top_asks)},
         }
 
-    def analyze_trades(self, trades: List[Dict]) -> Dict:
+    def analyze_trades(self, trades: list[dict]) -> dict:
         if not trades:
             return {"error": "empty_trades"}
 
@@ -93,7 +94,7 @@ class OrderFlowAnalysis:
         for t in trades:
             side = t.get("side", "").lower()
             amount = t.get("amount", 0)
-            price = t.get("price", 0)
+            t.get("price", 0)
 
             if side == "buy":
                 buy_volume += amount
@@ -135,7 +136,7 @@ class OrderFlowAnalysis:
             "sell_volume_pct": round(sell_volume / (total_volume + 1e-9) * 100, 2),
         }
 
-    def get_orderbook_imbalance(self, bids: List[Dict], asks: List[Dict]) -> float:
+    def get_orderbook_imbalance(self, bids: list[dict], asks: list[dict]) -> float:
         bid_vol = sum(b.get("amount", 0) for b in (bids or []))
         ask_vol = sum(a.get("amount", 0) for a in (asks or []))
         total = bid_vol + ask_vol
@@ -143,11 +144,11 @@ class OrderFlowAnalysis:
             return 0.0
         return (bid_vol - ask_vol) / total
 
-    def detect_iceberg(self, asks: List[Dict], bids: List[Dict]) -> Dict:
+    def detect_iceberg(self, asks: list[dict], bids: list[dict]) -> dict:
         icebergs = []
 
         for label, levels in [("ask", asks or []), ("bid", bids or [])]:
-            price_groups: Dict[float, List[float]] = {}
+            price_groups: dict[float, list[float]] = {}
             for lvl in levels:
                 price = lvl.get("price", 0)
                 amount = lvl.get("amount", 0)
@@ -173,12 +174,12 @@ class OrderFlowAnalysis:
             "total_estimated_volume": round(sum(i["total_estimated"] for i in icebergs), 4),
         }
 
-    def detect_liquidity_vacuum(self, bids: List[Dict], asks: List[Dict], threshold_pct: float = 0.001) -> Dict:
+    def detect_liquidity_vacuum(self, bids: list[dict], asks: list[dict], threshold_pct: float = 0.001) -> dict:
         vacuums = []
 
         for label, levels, ascending in [("bid", bids or [], False), ("ask", asks or [], True)]:
             sorted_levels = sorted(levels, key=lambda x: x["price"], reverse=not ascending)
-            prices = [l["price"] for l in sorted_levels]
+            prices = [l["price"] for l in sorted_levels]  # noqa: E741
             for i in range(len(prices) - 1):
                 gap_pct = abs(prices[i + 1] - prices[i]) / ((prices[i] + prices[i + 1]) / 2 + 1e-9)
                 if gap_pct > threshold_pct:
@@ -198,23 +199,23 @@ class OrderFlowAnalysis:
             "avg_gap_pct": round(np.mean([v["gap_pct"] for v in vacuums]), 4) if vacuums else 0,
         }
 
-    def detect_spoofing(self, snapshot_history: List[Dict]) -> Dict:
+    def detect_spoofing(self, snapshot_history: list[dict]) -> dict:
         if not snapshot_history or len(snapshot_history) < 2:
             return {"error": "insufficient_snapshots", "spoof_signals": [], "count": 0}
 
         alerts = []
-        suspicious_prices: Dict[float, int] = {}
+        suspicious_prices: dict[float, int] = {}
 
         for i in range(1, len(snapshot_history)):
             prev = snapshot_history[i - 1]
             curr = snapshot_history[i]
 
             for side in ("bid", "ask"):
-                prev_levels = {l["price"]: l["amount"] for l in prev.get(f"{side}s", [])}
-                curr_levels = {l["price"]: l["amount"] for l in curr.get(f"{side}s", [])}
+                prev_levels = {l["price"]: l["amount"] for l in prev.get(f"{side}s", [])}  # noqa: E741
+                curr_levels = {l["price"]: l["amount"] for l in curr.get(f"{side}s", [])}  # noqa: E741
 
                 appeared = set(curr_levels.keys()) - set(prev_levels.keys())
-                vanished = set(prev_levels.keys()) - set(curr_levels.keys())
+                set(prev_levels.keys()) - set(curr_levels.keys())
                 reappeared = appeared & set(prev_levels.keys())
 
                 for price in appeared:
@@ -244,7 +245,7 @@ class OrderFlowAnalysis:
             "total_suspicious_activity": sum(a["appear_disappear_count"] for a in alerts),
         }
 
-    def get_aggregated_snapshot(self, symbol: str, bid_data: List[Dict], ask_data: List[Dict], trades: List[Dict]) -> Dict:
+    def get_aggregated_snapshot(self, symbol: str, bid_data: list[dict], ask_data: list[dict], trades: list[dict]) -> dict:
         bids = bid_data or []
         asks = ask_data or []
         trades = trades or []
@@ -264,7 +265,7 @@ class OrderFlowAnalysis:
 
         return {
             "symbol": symbol,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "spread": round(spread, 4),
             "spread_pct": round(spread / ((best_ask + best_bid) / 2) * 100, 4) if asks and bids else 0,
             "mid_price": orderbook.get("mid_price"),
@@ -277,12 +278,12 @@ class OrderFlowAnalysis:
             "total_ask_volume": round(total_ask_vol, 4),
         }
 
-    def _depth_profile(self, levels: List[Dict], side: str) -> Dict:
+    def _depth_profile(self, levels: list[dict], side: str) -> dict:
         if not levels:
             return {"clusters": 0, "avg_size": 0, "top_heavy": False}
 
         sorted_levels = sorted(levels, key=lambda x: x["price"], reverse=(side == "bid"))
-        amounts = [l["amount"] for l in sorted_levels]
+        amounts = [l["amount"] for l in sorted_levels]  # noqa: E741
 
         clusters = 0
         cluster_threshold = np.mean(amounts) * 0.5 if amounts else 0
@@ -331,7 +332,7 @@ class OrderFlowAnalysis:
         else:
             return "no_absorption"
 
-    def _market_mood(self, orderbook: Dict, trade_analysis: Dict) -> str:
+    def _market_mood(self, orderbook: dict, trade_analysis: dict) -> str:
         ob_imb = orderbook.get("imbalance", 0)
         buy_sell = trade_analysis.get("buy_sell_ratio", 1)
         score = (ob_imb * 0.5) + (np.log10(buy_sell + 1e-9) * 0.5)

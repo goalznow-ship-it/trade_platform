@@ -1,10 +1,9 @@
 """Thread-safe provider health and circuit-breaker registry."""
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from threading import Lock
 import time
-from typing import Optional
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from threading import Lock
 
 
 @dataclass
@@ -12,9 +11,9 @@ class ProviderState:
     configured: bool = True
     consecutive_failures: int = 0
     circuit_open_until: float = 0.0
-    last_success_at: Optional[str] = None
-    last_failure_at: Optional[str] = None
-    last_error: Optional[str] = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    last_error: str | None = None
 
 
 class ProviderHealthRegistry:
@@ -38,14 +37,14 @@ class ProviderHealthRegistry:
             state = self._states.setdefault(provider, ProviderState())
             state.consecutive_failures = 0
             state.circuit_open_until = 0
-            state.last_success_at = datetime.now(timezone.utc).isoformat()
+            state.last_success_at = datetime.now(UTC).isoformat()
             state.last_error = None
 
     def failure(self, provider: str, error: Exception | str) -> None:
         with self._lock:
             state = self._states.setdefault(provider, ProviderState())
             state.consecutive_failures += 1
-            state.last_failure_at = datetime.now(timezone.utc).isoformat()
+            state.last_failure_at = datetime.now(UTC).isoformat()
             state.last_error = str(error)[:500]
             if state.consecutive_failures >= self.failure_threshold:
                 state.circuit_open_until = time.monotonic() + self.recovery_seconds

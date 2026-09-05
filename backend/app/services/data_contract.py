@@ -1,19 +1,19 @@
 """Shared response metadata for every real-data module."""
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def data_meta(
     source: str,
     *,
-    last_updated: Optional[str] = None,
+    last_updated: str | None = None,
     max_age_seconds: int = 60,
-    error_reason: Optional[str] = None,
+    error_reason: str | None = None,
     fallback_used: bool = False,
     configured: bool = True,
 ) -> dict[str, Any]:
@@ -24,7 +24,7 @@ def data_meta(
         try:
             age = max(
                 0,
-                (datetime.now(timezone.utc) - datetime.fromisoformat(updated.replace("Z", "+00:00"))).total_seconds(),
+                (datetime.now(UTC) - datetime.fromisoformat(updated.replace("Z", "+00:00"))).total_seconds(),
             )
             stale = age > max_age_seconds
             freshness = "stale" if stale else "live"

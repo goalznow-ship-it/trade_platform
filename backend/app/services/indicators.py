@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 class IndicatorService:
     @staticmethod
@@ -223,8 +224,8 @@ class IndicatorService:
             if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
                 pivots_low.append({'price': float(lows[i]), 'index': i})
         return {
-            'resistance': [p for p in pivots_high[-5:]],
-            'support': [p for p in pivots_low[-5:]],
+            'resistance': list(pivots_high[-5:]),
+            'support': list(pivots_low[-5:]),
             'recent_high': float(highs.tail(lookback).max()),
             'recent_low': float(lows.tail(lookback).min()),
         }

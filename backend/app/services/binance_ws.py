@@ -10,21 +10,22 @@ Connects to Binance WebSocket and broadcasts through our ws_manager
 import asyncio
 import json
 from collections import deque
-from typing import Dict, Set, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import aiohttp
-from app.core.websocket_manager import ws_manager
+
 from app.core.logging import logger
+from app.core.websocket_manager import ws_manager
 
 BINANCE_WS_BASE = "wss://fstream.binance.com"
 
 class BinanceWebSocketService:
     def __init__(self):
-        self.tasks: Dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, asyncio.Task] = {}
         self.running = False
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._prices: Dict[str, float] = {}
-        self._subscriptions: Set[str] = set()
+        self._session: aiohttp.ClientSession | None = None
+        self._prices: dict[str, float] = {}
+        self._subscriptions: set[str] = set()
         self._liquidations: deque[dict] = deque(maxlen=500)
 
     async def start(self):
@@ -34,7 +35,7 @@ class BinanceWebSocketService:
 
     async def stop(self):
         self.running = False
-        for name, task in self.tasks.items():
+        for _name, task in self.tasks.items():
             task.cancel()
         if self._session:
             await self._session.close()
@@ -69,6 +70,13 @@ class BinanceWebSocketService:
             logger.error(f"Too many streams: {len(streams)}")
             return
 
+        # Exponential backoff with jitter. The previous implementation
+        # slept a flat 5s on every failure — when Binance had a brief
+        # outage, every stream retried at the same cadence, hammering
+        # their edge and frequently getting rate-limited into a longer
+        # outage. Cap at 60s so a permanently broken stream still
+        # recovers within a minute once the upstream is back.
+        backoff = 1.0
         while self.running:
             try:
                 async with self._session.ws_connect(url, heartbeat=30) as ws:
@@ -78,11 +86,18 @@ class BinanceWebSocketService:
                             await handler(data.get("data", data))
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             break
+                    # Clean break out of the inner for — reset backoff
+                    # because we just had a working connection.
+                    backoff = 1.0
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Binance WS stream error: {e}")
-                await asyncio.sleep(5)
+                # Jitter ±25% so multiple workers don't reconnect in lockstep.
+                jitter = backoff * 0.25 * (2 * (asyncio.get_event_loop().time() % 1) - 1)
+                sleep_for = min(60.0, max(1.0, backoff + jitter))
+                await asyncio.sleep(sleep_for)
+                backoff = min(backoff * 2, 60.0)
 
     async def _handle_ticker(self, data: dict):
         symbol = data.get("s", "")
@@ -96,7 +111,7 @@ class BinanceWebSocketService:
             "volume": float(data.get("v", 0)),
             "high": float(data.get("h", 0)),
             "low": float(data.get("l", 0)),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def _handle_kline(self, data: dict):
@@ -132,7 +147,7 @@ class BinanceWebSocketService:
             "bids": bids,
             "asks": asks,
             "imbalance": round(imbalance, 4),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def _handle_liquidation(self, data: dict):
@@ -151,21 +166,21 @@ class BinanceWebSocketService:
             "side": "long" if order.get("S") == "SELL" else "short",
             "event_time": event_time,
             "timestamp": (
-                datetime.fromtimestamp(event_time / 1000, tz=timezone.utc).isoformat()
-                if event_time else datetime.now(timezone.utc).isoformat()
+                datetime.fromtimestamp(event_time / 1000, tz=UTC).isoformat()
+                if event_time else datetime.now(UTC).isoformat()
             ),
         }
         self._liquidations.append(item)
         await ws_manager.broadcast("derivatives", "liquidation_update", item)
 
-    def get_price(self, symbol: str) -> Optional[float]:
+    def get_price(self, symbol: str) -> float | None:
         return self._prices.get(symbol)
 
     async def get_all_prices(self) -> dict:
         return dict(self._prices)
 
     def get_recent_liquidations(self, max_age_seconds: int = 300) -> list[dict]:
-        cutoff = int(datetime.now(timezone.utc).timestamp() * 1000) - max_age_seconds * 1000
+        cutoff = int(datetime.now(UTC).timestamp() * 1000) - max_age_seconds * 1000
         return [
             dict(item)
             for item in self._liquidations

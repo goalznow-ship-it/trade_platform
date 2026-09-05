@@ -1,24 +1,38 @@
 import asyncio
-import ccxt
 import time as time_module
-from typing import Optional, List, Dict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+import ccxt
+
 from app.core.logging import logger
 from app.services.exchange.base import (
-    BaseExchange, OrderRequest, OrderResult,
-    PositionResult, BalanceResult, ExchangeInfo,
+    BalanceResult,
+    BaseExchange,
+    ExchangeInfo,
+    OrderRequest,
+    OrderResult,
+    PositionResult,
 )
 
 
 class BinanceFuturesExchange(BaseExchange):
     def __init__(self):
         super().__init__("binance")
-        self._ccxt: Optional[ccxt.binance] = None
+        self._ccxt: ccxt.binance | None = None
         self._last_heartbeat: float = 0
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 5
 
-    async def connect(self, api_key: str, secret_key: str, passphrase: Optional[str] = None) -> bool:
+    async def _call(self, method, *args, **kwargs):
+        """
+        Run a blocking ccxt call on a worker thread so the event loop
+        stays responsive. Every sync ccxt call must go through here.
+        """
+        if method is None:
+            raise RuntimeError("Binance exchange not connected")
+        return await asyncio.to_thread(method, *args, **kwargs)
+
+    async def connect(self, api_key: str, secret_key: str, passphrase: str | None = None) -> bool:
         self._api_key = api_key
         self._secret_key = secret_key
         try:
@@ -31,7 +45,8 @@ class BinanceFuturesExchange(BaseExchange):
                     "adjustForTimeDifference": True,
                 },
             })
-            self._ccxt.load_markets()
+            # load_markets is a heavy blocking network call; do it on a thread.
+            await self._call(self._ccxt.load_markets)
             self._connected = True
             self._last_heartbeat = time_module.time()
             self._reconnect_attempts = 0
@@ -90,11 +105,11 @@ class BinanceFuturesExchange(BaseExchange):
 
             if request.leverage > 1:
                 try:
-                    self._ccxt.set_leverage(request.leverage, symbol)
+                    await self._call(self._ccxt.set_leverage, request.leverage, symbol)
                 except Exception:
                     pass
 
-            params: Dict = {}
+            params: dict = {}
             if request.reduce_only:
                 params["reduceOnly"] = True
             if request.time_in_force:
@@ -103,26 +118,29 @@ class BinanceFuturesExchange(BaseExchange):
                 params["newClientOrderId"] = request.client_order_id
             if request.margin_mode:
                 try:
-                    self._ccxt.set_margin_mode(request.margin_mode, symbol)
+                    await self._call(self._ccxt.set_margin_mode, request.margin_mode, symbol)
                 except Exception:
                     pass
 
             ccxt_order = None
             if request.order_type == "market":
-                ccxt_order = self._ccxt.create_market_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_market_order,
                     symbol, request.side, request.quantity, params=params,
                 )
             elif request.order_type == "limit":
                 if not request.price:
                     raise ValueError("Price required for limit orders")
-                ccxt_order = self._ccxt.create_limit_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_limit_order,
                     symbol, request.side, request.quantity, request.price, params=params,
                 )
             elif request.order_type == "stop_market" or request.order_type == "stop":
                 params = {"stopPrice": request.stop_price}
                 if request.reduce_only:
                     params["closePosition"] = True
-                ccxt_order = self._ccxt.create_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_order,
                     symbol, "STOP_MARKET", request.side,
                     None if request.reduce_only else request.quantity,
                     None, params=params,
@@ -131,7 +149,8 @@ class BinanceFuturesExchange(BaseExchange):
                 params = {"stopPrice": request.stop_price}
                 if request.reduce_only:
                     params["closePosition"] = True
-                ccxt_order = self._ccxt.create_order(
+                ccxt_order = await self._call(
+                    self._ccxt.create_order,
                     symbol, "TAKE_PROFIT_MARKET", request.side,
                     None if request.reduce_only else request.quantity,
                     None, params=params,
@@ -149,12 +168,12 @@ class BinanceFuturesExchange(BaseExchange):
                 filled_quantity=0, price=request.price, avg_price=None,
                 status="rejected", reduce_only=request.reduce_only,
                 leverage=request.leverage, margin_mode=request.margin_mode,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 error=str(e),
             )
 
-    def _to_order_result(self, ccxt_order: Dict, req: OrderRequest) -> OrderResult:
+    def _to_order_result(self, ccxt_order: dict, req: OrderRequest) -> OrderResult:
         return OrderResult(
             order_id=str(ccxt_order.get("id", "")),
             symbol=ccxt_order.get("symbol", req.symbol),
@@ -169,32 +188,35 @@ class BinanceFuturesExchange(BaseExchange):
             leverage=req.leverage,
             margin_mode=req.margin_mode,
             created_at=datetime.fromtimestamp(
-                ccxt_order.get("timestamp", time_module.time()) / 1000, tz=timezone.utc,
-            ) if ccxt_order.get("timestamp") else datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+                ccxt_order.get("timestamp", time_module.time()) / 1000, tz=UTC,
+            ) if ccxt_order.get("timestamp") else datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         await self._ensure_connected()
         try:
-            self._ccxt.cancel_order(order_id, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.cancel_order, order_id, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Binance cancel_order error: {e}")
             return False
 
     async def modify_order(self, symbol: str, order_id: str,
-                           price: Optional[float] = None,
-                           quantity: Optional[float] = None,
-                           stop_price: Optional[float] = None) -> OrderResult:
+                           price: float | None = None,
+                           quantity: float | None = None,
+                           stop_price: float | None = None) -> OrderResult:
         await self._ensure_connected()
         sym = self._normalize_symbol(symbol)
         try:
-            params: Dict = {}
+            params: dict = {}
             if stop_price:
                 params["stopPrice"] = stop_price
-            self._ccxt.edit_order(order_id, sym, "limit" if price else "market",
-                                  None, quantity, price, params=params)
+            await self._call(
+                self._ccxt.edit_order, order_id, sym,
+                "limit" if price else "market",
+                None, quantity, price, params=params,
+            )
             return await self.get_order(symbol, order_id)
         except Exception as e:
             logger.error(f"Binance modify_order error: {e}")
@@ -203,15 +225,17 @@ class BinanceFuturesExchange(BaseExchange):
                 order_type="unknown", quantity=0, filled_quantity=0,
                 price=price, avg_price=None, status="error",
                 reduce_only=False, leverage=1, margin_mode="isolated",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 error=str(e),
             )
 
-    async def get_order(self, symbol: str, order_id: str) -> Optional[OrderResult]:
+    async def get_order(self, symbol: str, order_id: str) -> OrderResult | None:
         await self._ensure_connected()
         try:
-            order = self._ccxt.fetch_order(order_id, self._normalize_symbol(symbol))
+            order = await self._call(
+                self._ccxt.fetch_order, order_id, self._normalize_symbol(symbol),
+            )
             if not order:
                 return None
             return OrderResult(
@@ -227,18 +251,18 @@ class BinanceFuturesExchange(BaseExchange):
                 reduce_only=False,
                 leverage=1,
                 margin_mode="isolated",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
         except Exception as e:
             logger.error(f"Binance get_order error: {e}")
             return None
 
-    async def get_open_orders(self, symbol: Optional[str] = None) -> List[OrderResult]:
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResult]:
         await self._ensure_connected()
         try:
             sym = self._normalize_symbol(symbol) if symbol else None
-            orders = self._ccxt.fetch_open_orders(sym)
+            orders = await self._call(self._ccxt.fetch_open_orders, sym)
             results = []
             for o in orders:
                 results.append(OrderResult(
@@ -254,18 +278,21 @@ class BinanceFuturesExchange(BaseExchange):
                     reduce_only=False,
                     leverage=1,
                     margin_mode="isolated",
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
                 ))
             return results
         except Exception as e:
             logger.error(f"Binance get_open_orders error: {e}")
             return []
 
-    async def get_positions(self, symbol: Optional[str] = None) -> List[PositionResult]:
+    async def get_positions(self, symbol: str | None = None) -> list[PositionResult]:
         await self._ensure_connected()
         try:
-            positions = self._ccxt.fetch_positions([self._normalize_symbol(symbol)] if symbol else None)
+            positions = await self._call(
+                self._ccxt.fetch_positions,
+                [self._normalize_symbol(symbol)] if symbol else None,
+            )
             results = []
             for p in positions:
                 size = float(p.get("contracts", 0) or p.get("size", 0))
@@ -292,7 +319,7 @@ class BinanceFuturesExchange(BaseExchange):
     async def get_balance(self) -> BalanceResult:
         await self._ensure_connected()
         try:
-            bal = self._ccxt.fetch_balance()
+            bal = await self._call(self._ccxt.fetch_balance)
             usdt = bal.get("USDT", {})
             return BalanceResult(
                 total=float(usdt.get("total", 0)),
@@ -307,7 +334,7 @@ class BinanceFuturesExchange(BaseExchange):
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         await self._ensure_connected()
         try:
-            self._ccxt.set_leverage(leverage, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.set_leverage, leverage, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Binance set_leverage error: {e}")
@@ -316,16 +343,16 @@ class BinanceFuturesExchange(BaseExchange):
     async def set_margin_mode(self, symbol: str, mode: str) -> bool:
         await self._ensure_connected()
         try:
-            self._ccxt.set_margin_mode(mode, self._normalize_symbol(symbol))
+            await self._call(self._ccxt.set_margin_mode, mode, self._normalize_symbol(symbol))
             return True
         except Exception as e:
             logger.error(f"Binance set_margin_mode error: {e}")
             return False
 
-    async def get_funding_rate(self, symbol: str) -> Optional[Dict]:
+    async def get_funding_rate(self, symbol: str) -> dict | None:
         await self._ensure_connected()
         try:
-            funding = self._ccxt.fetch_funding_rate(self._normalize_symbol(symbol))
+            funding = await self._call(self._ccxt.fetch_funding_rate, self._normalize_symbol(symbol))
             if funding:
                 return {
                     "symbol": funding.get("symbol", symbol),
@@ -339,10 +366,10 @@ class BinanceFuturesExchange(BaseExchange):
             logger.error(f"Binance get_funding_rate error: {e}")
             return None
 
-    async def get_open_interest(self, symbol: str) -> Optional[Dict]:
+    async def get_open_interest(self, symbol: str) -> dict | None:
         await self._ensure_connected()
         try:
-            oi = self._ccxt.fetch_open_interest(self._normalize_symbol(symbol))
+            oi = await self._call(self._ccxt.fetch_open_interest, self._normalize_symbol(symbol))
             if oi:
                 return {
                     "symbol": oi.get("symbol", symbol),
@@ -355,10 +382,10 @@ class BinanceFuturesExchange(BaseExchange):
             logger.error(f"Binance get_open_interest error: {e}")
             return None
 
-    async def get_ticker(self, symbol: str) -> Optional[Dict]:
+    async def get_ticker(self, symbol: str) -> dict | None:
         await self._ensure_connected()
         try:
-            t = self._ccxt.fetch_ticker(self._normalize_symbol(symbol))
+            t = await self._call(self._ccxt.fetch_ticker, self._normalize_symbol(symbol))
             if t:
                 return {
                     "symbol": t.get("symbol", symbol),
@@ -377,10 +404,12 @@ class BinanceFuturesExchange(BaseExchange):
             logger.error(f"Binance get_ticker error: {e}")
             return None
 
-    async def get_orderbook(self, symbol: str, limit: int = 50) -> Optional[Dict]:
+    async def get_orderbook(self, symbol: str, limit: int = 50) -> dict | None:
         await self._ensure_connected()
         try:
-            ob = self._ccxt.fetch_order_book(self._normalize_symbol(symbol), limit)
+            ob = await self._call(
+                self._ccxt.fetch_order_book, self._normalize_symbol(symbol), limit,
+            )
             if ob:
                 return {
                     "bids": ob.get("bids", [])[:10],
@@ -392,10 +421,12 @@ class BinanceFuturesExchange(BaseExchange):
             logger.error(f"Binance get_orderbook error: {e}")
             return None
 
-    async def get_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> List[Dict]:
+    async def get_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> list[dict]:
         await self._ensure_connected()
         try:
-            ohlcvs = self._ccxt.fetch_ohlcv(self._normalize_symbol(symbol), timeframe, limit=limit)
+            ohlcvs = await self._call(
+                self._ccxt.fetch_ohlcv, self._normalize_symbol(symbol), timeframe, limit=limit,
+            )
             results = []
             for o in ohlcvs:
                 results.append({
@@ -411,10 +442,12 @@ class BinanceFuturesExchange(BaseExchange):
             logger.error(f"Binance get_ohlcv error: {e}")
             return []
 
-    async def get_leverage_brackets(self, symbol: str) -> Optional[List[Dict]]:
+    async def get_leverage_brackets(self, symbol: str) -> list[dict] | None:
         await self._ensure_connected()
         try:
-            return self._ccxt.fetch_leverage_tiers([self._normalize_symbol(symbol)])
+            return await self._call(
+                self._ccxt.fetch_leverage_tiers, [self._normalize_symbol(symbol)],
+            )
         except Exception as e:
             logger.error(f"Binance get_leverage_brackets error: {e}")
             return None

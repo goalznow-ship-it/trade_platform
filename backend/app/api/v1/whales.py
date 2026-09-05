@@ -1,6 +1,7 @@
 """Whale Transaction Tracking API"""
 
 from fastapi import APIRouter, Depends, Query
+
 from app.core.security import require_subscription
 from app.models.user import User
 from app.services.whale import whale_tracker

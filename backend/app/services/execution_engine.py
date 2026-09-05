@@ -5,8 +5,8 @@ Pre-trade validation gate that enforces ALL checks before trade execution.
 Every trade must pass every check to be approved.
 """
 
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from datetime import UTC, datetime
+
 from app.core.logging import logger
 
 try:
@@ -34,6 +34,15 @@ except ImportError:
     logger.warning("ExecutionEngine: market_service not available")
 
 
+def _service_unavailable(name: str) -> dict:
+    """Helper to build a uniform 'service missing' check result."""
+    return {
+        "passed": False,
+        "reason": f"{name} unavailable",
+        "service_unavailable": True,
+    }
+
+
 class ExecutionEngine:
     MAX_SPREAD_PCT: float = 0.001
     MAX_LEVERAGE: int = 125
@@ -42,7 +51,28 @@ class ExecutionEngine:
     MAX_CORRELATION_SCORE: float = 0.7
     MAX_FUNDING_RATE_ABS: float = 0.01
 
-    async def validate_trade(self, trade_request: Dict) -> Dict:
+    def _required_services_ok(self) -> bool:
+        """
+        Fail-closed guard for the critical path. If any service the
+        validator actually depends on is missing the runtime object
+        (not just the module import — e.g. the singleton was reset by a
+        hot-reload), we abort validation. The previous code crashed with
+        AttributeError: 'NoneType' object has no attribute 'get_ohlcv'
+        because the HAS_* flag is set at import time but the singleton
+        itself can be None at call time.
+        """
+        if not HAS_MARKET_SERVICE or market_service is None:
+            logger.error("ExecutionEngine: market_service not available, aborting validation")
+            return False
+        if not HAS_PROFESSIONAL_RISK or professional_risk is None:
+            logger.error("ExecutionEngine: professional_risk not available, aborting validation")
+            return False
+        if not HAS_SMC_ENGINE or smc_engine is None:
+            logger.error("ExecutionEngine: smc_engine not available, aborting validation")
+            return False
+        return True
+
+    async def validate_trade(self, trade_request: dict) -> dict:
         symbol = trade_request.get("symbol", "")
         direction = trade_request.get("direction", "long")
         entry = trade_request.get("entry_price", 0)
@@ -54,6 +84,20 @@ class ExecutionEngine:
         price = trade_request.get("price", entry)
         portfolio = trade_request.get("portfolio", {})
         timeframe = trade_request.get("timeframe", "1h")
+
+        if not self._required_services_ok():
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "passed": False,
+                "checks": {},
+                "check_count": 0,
+                "passed_count": 0,
+                "failed_count": 0,
+                "rejected_at_guard": True,
+                "reason": "Required services unavailable — validation aborted",
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
         checks = {}
 
@@ -97,10 +141,10 @@ class ExecutionEngine:
             "check_count": len(checks),
             "passed_count": sum(1 for c in checks.values() if c.get("passed", False)),
             "failed_count": sum(1 for c in checks.values() if not c.get("passed", False)),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    async def check_trend_alignment(self, symbol: str, direction: str, timeframe: str = "1h") -> Dict:
+    async def check_trend_alignment(self, symbol: str, direction: str, timeframe: str = "1h") -> dict:
         if not HAS_SMC_ENGINE or not HAS_MARKET_SERVICE:
             return {"check": "trend_alignment", "passed": False, "reason": "SMC engine or market service unavailable"}
 
@@ -114,7 +158,7 @@ class ExecutionEngine:
                 return {"check": "trend_alignment", "passed": False, "reason": f"SMC analysis unavailable: {smc_result['error']}"}
 
             trend = smc_result.get("trend", "ranging")
-            structure = smc_result.get("structure", {})
+            smc_result.get("structure", {})
 
             direction_map = {
                 "long": ("uptrend", "expansion"),
@@ -160,7 +204,7 @@ class ExecutionEngine:
             logger.error(f"check_trend_alignment error for {symbol}: {e}")
             return {"check": "trend_alignment", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_liquidity(self, symbol: str) -> Dict:
+    async def check_liquidity(self, symbol: str) -> dict:
         if not HAS_MARKET_SERVICE:
             return {"check": "liquidity", "passed": False, "reason": "Market service unavailable"}
 
@@ -201,7 +245,7 @@ class ExecutionEngine:
             logger.error(f"check_liquidity error for {symbol}: {e}")
             return {"check": "liquidity", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_spread(self, symbol: str, max_spread_pct: float = 0.001) -> Dict:
+    async def check_spread(self, symbol: str, max_spread_pct: float = 0.001) -> dict:
         if not HAS_MARKET_SERVICE:
             return {"check": "spread", "passed": False, "reason": "Market service unavailable"}
 
@@ -232,7 +276,7 @@ class ExecutionEngine:
             logger.error(f"check_spread error for {symbol}: {e}")
             return {"check": "spread", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_funding(self, symbol: str) -> Dict:
+    async def check_funding(self, symbol: str) -> dict:
         if not HAS_MARKET_SERVICE:
             return {"check": "funding", "passed": False, "reason": "Market service unavailable"}
 
@@ -264,7 +308,7 @@ class ExecutionEngine:
             logger.error(f"check_funding error for {symbol}: {e}")
             return {"check": "funding", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_correlation(self, symbol: str, portfolio: Dict) -> Dict:
+    async def check_correlation(self, symbol: str, portfolio: dict) -> dict:
         if not portfolio:
             return {"check": "correlation", "passed": True, "reason": "No portfolio provided, skipped"}
 
@@ -303,7 +347,7 @@ class ExecutionEngine:
     async def check_risk(
         self, symbol: str, direction: str, entry: float, sl: float,
         tp: float, leverage: int, balance: float, quantity: float = 0,
-    ) -> Dict:
+    ) -> dict:
         if not HAS_PROFESSIONAL_RISK:
             return {"check": "risk", "passed": False, "reason": "Professional risk engine unavailable"}
 
@@ -380,7 +424,7 @@ class ExecutionEngine:
             logger.error(f"check_risk error: {e}")
             return {"check": "risk", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_margin(self, leverage: int, position_size_value: float, balance: float) -> Dict:
+    async def check_margin(self, leverage: int, position_size_value: float, balance: float) -> dict:
         try:
             if leverage <= 0:
                 return {"check": "margin", "passed": False, "reason": "Leverage must be positive"}
@@ -408,7 +452,7 @@ class ExecutionEngine:
             logger.error(f"check_margin error: {e}")
             return {"check": "margin", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_leverage(self, symbol: str, requested_leverage: int, max_leverage: int = 125) -> Dict:
+    async def check_leverage(self, symbol: str, requested_leverage: int, max_leverage: int = 125) -> dict:
         try:
             if requested_leverage < 1:
                 return {"check": "leverage", "passed": False, "reason": "Leverage must be at least 1x"}
@@ -443,24 +487,26 @@ class ExecutionEngine:
             logger.error(f"check_leverage error: {e}")
             return {"check": "leverage", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_exchange_filters(self, symbol: str, quantity: float, price: float) -> Dict:
+    async def check_exchange_filters(self, symbol: str, quantity: float, price: float) -> dict:
         if not HAS_MARKET_SERVICE:
             return {"check": "exchange_filters", "passed": False, "reason": "Market service unavailable"}
 
         try:
-            import ccxt
-            ex = ccxt.binance({
-                'enableRateLimit': True,
-                'options': {'defaultType': 'future'}
-            })
-            markets = ex.load_markets()
+            exchange_id = market_service._resolve_exchange(symbol)
+            ex = market_service.exchanges[exchange_id]
+            # _call_exchange ensures markets are loaded once (cached),
+            # dispatches the sync ccxt call to a worker thread, and
+            # applies a shared rate-limit semaphore + timeout. This
+            # avoids creating a fresh ccxt client + re-downloading
+            # ~3000 markets on every trade validation.
+            markets = await market_service._call_exchange(ex.load_markets)
 
             if symbol not in markets:
                 return {"check": "exchange_filters", "passed": False, "reason": f"Symbol {symbol} not found in exchange markets"}
 
             market = markets[symbol]
             limits = market.get("limits", {})
-            precision = market.get("precision", {})
+            market.get("precision", {})
 
             issues = []
 
@@ -519,7 +565,7 @@ class ExecutionEngine:
             logger.error(f"check_exchange_filters error for {symbol}: {e}")
             return {"check": "exchange_filters", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def check_liquidation_distance(self, entry: float, sl: float, leverage: int) -> Dict:
+    async def check_liquidation_distance(self, entry: float, sl: float, leverage: int) -> dict:
         try:
             if not entry or entry <= 0:
                 return {"check": "liquidation_distance", "passed": False, "reason": "Invalid entry price"}
@@ -557,7 +603,7 @@ class ExecutionEngine:
             logger.error(f"check_liquidation_distance error: {e}")
             return {"check": "liquidation_distance", "passed": False, "reason": f"Check failed: {str(e)}"}
 
-    async def get_trade_approval(self, trade_request: Dict) -> Dict:
+    async def get_trade_approval(self, trade_request: dict) -> dict:
         validation = await self.validate_trade(trade_request)
         checks = validation.get("checks", {})
         rejection_reasons = self.get_rejection_reasons(checks)
@@ -572,7 +618,7 @@ class ExecutionEngine:
             "risk_label": self._risk_label(risk_score),
             "validation": validation,
             "rejection_reasons": rejection_reasons,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if validation["passed"]:
@@ -580,7 +626,7 @@ class ExecutionEngine:
 
         return result
 
-    def get_rejection_reasons(self, checks: Dict) -> List[str]:
+    def get_rejection_reasons(self, checks: dict) -> list[str]:
         reasons = []
         for check_name, check_result in checks.items():
             if not check_result.get("passed", False):
@@ -588,7 +634,7 @@ class ExecutionEngine:
                 reasons.append(f"[{check_name}] {reason}")
         return reasons
 
-    async def estimate_slippage(self, symbol: str, quantity: float, side: str) -> Dict:
+    async def estimate_slippage(self, symbol: str, quantity: float, side: str) -> dict:
         if not HAS_MARKET_SERVICE:
             return {"symbol": symbol, "estimated_slippage_pct": 0.001, "reason": "Market service unavailable, default slippage"}
 
@@ -646,12 +692,12 @@ class ExecutionEngine:
             logger.error(f"estimate_slippage error for {symbol}: {e}")
             return {"symbol": symbol, "estimated_slippage_pct": 0.001, "reason": f"Estimation failed: {str(e)}"}
 
-    async def get_execution_plan(self, trade_request: Dict) -> Dict:
+    async def get_execution_plan(self, trade_request: dict) -> dict:
         symbol = trade_request.get("symbol", "")
         direction = trade_request.get("direction", "long")
         entry = trade_request.get("entry_price", 0)
         quantity = trade_request.get("quantity", 0)
-        price = trade_request.get("price", entry)
+        trade_request.get("price", entry)
         slippage_tolerance = trade_request.get("slippage_tolerance", 0.001)
 
         order_side = "buy" if direction == "long" else "sell"
@@ -692,7 +738,7 @@ class ExecutionEngine:
             "reason": reason,
         }
 
-    def _estimate_liquidation_price(self, entry: float, sl: float, leverage: int) -> Optional[float]:
+    def _estimate_liquidation_price(self, entry: float, sl: float, leverage: int) -> float | None:
         if leverage <= 1:
             return sl
 
@@ -703,7 +749,7 @@ class ExecutionEngine:
             return entry - liq_buffer
         return entry + liq_buffer
 
-    def _calculate_risk_score(self, checks: Dict) -> int:
+    def _calculate_risk_score(self, checks: dict) -> int:
         score = 100
 
         deduction_map = {

@@ -1,16 +1,20 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.paper_trading import PaperOrder, PaperPosition
 from app.models.user import User
-from app.models.paper_trading import PaperPosition, PaperOrder
-from app.services.paper_trading import paper_trading_service
 from app.schemas.paper_trading import (
-    PaperOrderCreate, PaperAccountResponse, PaperPositionResponse,
-    PaperOrderResponse, PaperResetResponse,
+    PaperAccountResponse,
+    PaperOrderCreate,
+    PaperOrderResponse,
+    PaperPositionResponse,
+    PaperResetResponse,
 )
-from typing import Optional
+from app.services.paper_trading import paper_trading_service
 
 router = APIRouter(prefix="/paper", tags=["Paper Trading"])
 
@@ -32,7 +36,7 @@ async def get_paper_positions(user: User = Depends(get_current_user), db: AsyncS
     account = await paper_trading_service.get_or_create_account(user.id, db)
     result = await db.execute(
         select(PaperPosition).where(
-            PaperPosition.account_id == account.id, PaperPosition.is_open == True
+            PaperPosition.account_id == account.id, PaperPosition.is_open
         )
     )
     return result.scalars().all()
@@ -42,7 +46,7 @@ async def get_paper_positions(user: User = Depends(get_current_user), db: AsyncS
 async def get_paper_orders(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
 ):
     account = await paper_trading_service.get_or_create_account(user.id, db)
@@ -101,8 +105,8 @@ async def cancel_paper_order(
 @router.put("/positions/{position_id}/sl-tp")
 async def update_position_sl_tp(
     position_id: int,
-    stop_loss: Optional[float] = Query(default=None),
-    take_profit: Optional[float] = Query(default=None),
+    stop_loss: float | None = Query(default=None),
+    take_profit: float | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -111,7 +115,7 @@ async def update_position_sl_tp(
         select(PaperPosition).where(
             PaperPosition.id == position_id,
             PaperPosition.account_id == account.id,
-            PaperPosition.is_open == True,
+            PaperPosition.is_open,
         )
     )
     pos = result.scalar_one_or_none()
@@ -135,7 +139,7 @@ async def get_closed_positions(
     result = await db.execute(
         select(PaperPosition).where(
             PaperPosition.account_id == account.id,
-            PaperPosition.is_open == False,
+            not PaperPosition.is_open,
         )
         .order_by(PaperPosition.closed_at.desc())
         .limit(limit)

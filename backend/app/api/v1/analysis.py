@@ -1,6 +1,7 @@
 from fastapi import APIRouter
-from app.services.indicators import indicator_service
+
 from app.services.ai_analysis import ai_engine
+from app.services.indicators import indicator_service
 from app.services.market import market_service
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])

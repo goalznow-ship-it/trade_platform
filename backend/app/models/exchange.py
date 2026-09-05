@@ -1,10 +1,12 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint
-from sqlalchemy.sql import func
-from app.core.database import Base
 import enum
 
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.sql import func
 
-class ExchangeName(str, enum.Enum):
+from app.core.database import Base
+
+
+class ExchangeName(enum.StrEnum):
     BINANCE = "binance"
     BYBIT = "bybit"
     OKX = "okx"

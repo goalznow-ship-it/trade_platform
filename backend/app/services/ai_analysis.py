@@ -1,6 +1,8 @@
 import numpy as np
-from app.services.indicators import indicator_service
+
 from app.core.logging import logger
+from app.services.indicators import indicator_service
+
 
 class AIAnalysisEngine:
     def __init__(self):
@@ -222,10 +224,8 @@ class AIAnalysisEngine:
                 break
 
         if not fvg_detected:
-            order_block = False
             for i in range(-5, -1):
                 if closes[i] > opens[i] and lows[i] < lows[i+1] and closes[i+1] < closes[i]:
-                    order_block = True
                     score += 0.1
                     break
 

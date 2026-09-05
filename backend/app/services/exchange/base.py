@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -10,13 +9,13 @@ class OrderRequest:
     side: str
     quantity: float
     order_type: str = "market"
-    price: Optional[float] = None
-    stop_price: Optional[float] = None
+    price: float | None = None
+    stop_price: float | None = None
     leverage: int = 1
     reduce_only: bool = False
     time_in_force: str = "GTC"
     margin_mode: str = "isolated"
-    client_order_id: Optional[str] = None
+    client_order_id: str | None = None
 
 
 @dataclass
@@ -27,15 +26,15 @@ class OrderResult:
     order_type: str
     quantity: float
     filled_quantity: float
-    price: Optional[float]
-    avg_price: Optional[float]
+    price: float | None
+    avg_price: float | None
     status: str
     reduce_only: bool
     leverage: int
     margin_mode: str
     created_at: datetime
     updated_at: datetime
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -72,17 +71,17 @@ class ExchangeInfo:
 class BaseExchange(ABC):
     def __init__(self, name: str):
         self.name = name
-        self._api_key: Optional[str] = None
-        self._secret_key: Optional[str] = None
+        self._api_key: str | None = None
+        self._secret_key: str | None = None
         self._connected = False
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     @property
     def is_connected(self) -> bool:
         return self._connected
 
     @abstractmethod
-    async def connect(self, api_key: str, secret_key: str, passphrase: Optional[str] = None) -> bool:
+    async def connect(self, api_key: str, secret_key: str, passphrase: str | None = None) -> bool:
         ...
 
     @abstractmethod
@@ -107,21 +106,21 @@ class BaseExchange(ABC):
 
     @abstractmethod
     async def modify_order(self, symbol: str, order_id: str,
-                           price: Optional[float] = None,
-                           quantity: Optional[float] = None,
-                           stop_price: Optional[float] = None) -> OrderResult:
+                           price: float | None = None,
+                           quantity: float | None = None,
+                           stop_price: float | None = None) -> OrderResult:
         ...
 
     @abstractmethod
-    async def get_order(self, symbol: str, order_id: str) -> Optional[OrderResult]:
+    async def get_order(self, symbol: str, order_id: str) -> OrderResult | None:
         ...
 
     @abstractmethod
-    async def get_open_orders(self, symbol: Optional[str] = None) -> List[OrderResult]:
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResult]:
         ...
 
     @abstractmethod
-    async def get_positions(self, symbol: Optional[str] = None) -> List[PositionResult]:
+    async def get_positions(self, symbol: str | None = None) -> list[PositionResult]:
         ...
 
     @abstractmethod
@@ -137,27 +136,27 @@ class BaseExchange(ABC):
         ...
 
     @abstractmethod
-    async def get_funding_rate(self, symbol: str) -> Optional[Dict]:
+    async def get_funding_rate(self, symbol: str) -> dict | None:
         ...
 
     @abstractmethod
-    async def get_open_interest(self, symbol: str) -> Optional[Dict]:
+    async def get_open_interest(self, symbol: str) -> dict | None:
         ...
 
     @abstractmethod
-    async def get_ticker(self, symbol: str) -> Optional[Dict]:
+    async def get_ticker(self, symbol: str) -> dict | None:
         ...
 
     @abstractmethod
-    async def get_orderbook(self, symbol: str, limit: int = 50) -> Optional[Dict]:
+    async def get_orderbook(self, symbol: str, limit: int = 50) -> dict | None:
         ...
 
     @abstractmethod
-    async def get_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> List[Dict]:
+    async def get_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> list[dict]:
         ...
 
     @abstractmethod
-    async def get_leverage_brackets(self, symbol: str) -> Optional[List[Dict]]:
+    async def get_leverage_brackets(self, symbol: str) -> list[dict] | None:
         ...
 
     @abstractmethod

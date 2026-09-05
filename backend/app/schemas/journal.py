@@ -1,71 +1,72 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
-from app.models.journal import TradeRating, Emotion, MistakeType
+
+from pydantic import BaseModel, Field
+
+from app.models.journal import Emotion, MistakeType, TradeRating
 
 
 class JournalCreate(BaseModel):
-    trade_id: Optional[int] = None
+    trade_id: int | None = None
     symbol: str = Field(..., min_length=1, max_length=20)
     side: str = Field(..., pattern="^(long|short)$")
-    notes: Optional[str] = None
-    lessons: Optional[str] = None
-    emotion: Optional[Emotion] = None
-    mistakes: List[MistakeType] = []
-    tags: List[str] = []
-    strategy: Optional[str] = None
-    setup_description: Optional[str] = None
-    entry_reason: Optional[str] = None
-    exit_reason: Optional[str] = None
-    rating: Optional[TradeRating] = None
-    win_loss_reason: Optional[str] = None
-    screenshot_urls: List[str] = []
+    notes: str | None = None
+    lessons: str | None = None
+    emotion: Emotion | None = None
+    mistakes: list[MistakeType] = []
+    tags: list[str] = []
+    strategy: str | None = None
+    setup_description: str | None = None
+    entry_reason: str | None = None
+    exit_reason: str | None = None
+    rating: TradeRating | None = None
+    win_loss_reason: str | None = None
+    screenshot_urls: list[str] = []
     executed_plan: bool = False
     followed_rules: bool = False
-    psychological_state: Optional[str] = None
+    psychological_state: str | None = None
 
 
 class JournalUpdate(BaseModel):
-    notes: Optional[str] = None
-    lessons: Optional[str] = None
-    emotion: Optional[Emotion] = None
-    mistakes: Optional[List[MistakeType]] = None
-    tags: Optional[List[str]] = None
-    strategy: Optional[str] = None
-    setup_description: Optional[str] = None
-    entry_reason: Optional[str] = None
-    exit_reason: Optional[str] = None
-    rating: Optional[TradeRating] = None
-    win_loss_reason: Optional[str] = None
-    screenshot_urls: Optional[List[str]] = None
-    executed_plan: Optional[bool] = None
-    followed_rules: Optional[bool] = None
-    psychological_state: Optional[str] = None
+    notes: str | None = None
+    lessons: str | None = None
+    emotion: Emotion | None = None
+    mistakes: list[MistakeType] | None = None
+    tags: list[str] | None = None
+    strategy: str | None = None
+    setup_description: str | None = None
+    entry_reason: str | None = None
+    exit_reason: str | None = None
+    rating: TradeRating | None = None
+    win_loss_reason: str | None = None
+    screenshot_urls: list[str] | None = None
+    executed_plan: bool | None = None
+    followed_rules: bool | None = None
+    psychological_state: str | None = None
 
 
 class JournalResponse(BaseModel):
     id: int
     user_id: int
-    trade_id: Optional[int]
+    trade_id: int | None
     symbol: str
     side: str
-    notes: Optional[str]
-    lessons: Optional[str]
-    emotion: Optional[str]
-    mistakes: List
-    tags: List
-    strategy: Optional[str]
-    setup_description: Optional[str]
-    entry_reason: Optional[str]
-    exit_reason: Optional[str]
-    rating: Optional[str]
-    win_loss_reason: Optional[str]
-    screenshot_urls: List
+    notes: str | None
+    lessons: str | None
+    emotion: str | None
+    mistakes: list
+    tags: list
+    strategy: str | None
+    setup_description: str | None
+    entry_reason: str | None
+    exit_reason: str | None
+    rating: str | None
+    win_loss_reason: str | None
+    screenshot_urls: list
     executed_plan: bool
     followed_rules: bool
-    psychological_state: Optional[str]
+    psychological_state: str | None
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True

@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import os
-from datetime import timezone
+from datetime import UTC
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin
 from xml.etree import ElementTree
@@ -71,7 +71,7 @@ class NewsService:
             summary = BeautifulSoup(raw_summary, "html.parser").get_text(" ", strip=True)
             published_raw = item.findtext("pubDate") or item.findtext("date")
             try:
-                published = parsedate_to_datetime(published_raw).astimezone(timezone.utc).isoformat()
+                published = parsedate_to_datetime(published_raw).astimezone(UTC).isoformat()
             except (TypeError, ValueError):
                 published = utc_now()
             if title and link:
@@ -92,7 +92,7 @@ class NewsService:
         provider_errors = {}
         available = []
         all_news = []
-        for (name, _), result in zip(self.providers.items(), results):
+        for (name, _), result in zip(self.providers.items(), results, strict=False):
             if isinstance(result, Exception):
                 provider_errors[name] = f"{type(result).__name__}: {str(result)[:240]}"
                 logger.warning("News provider %s failed: %s", name, result)

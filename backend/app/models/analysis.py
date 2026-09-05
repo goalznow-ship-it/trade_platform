@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, Boolean, DateTime, Text, JSON
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.sql import func
+
 from app.core.database import Base
+
 
 class Indicator(Base):
     __tablename__ = "indicators"

@@ -4,8 +4,8 @@ Elliott Wave Analysis Engine
 - Next wave projection with targets
 - Fibonacci relationships between waves
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _convert(obj):
@@ -29,8 +29,8 @@ class ElliottWaveEngine:
         if len(data) < 100:
             return {"count": "unknown", "current_phase": "neutral", "next_wave": None, "waves": []}
         closes = np.array([d["close"] for d in data])
-        highs = np.array([d["high"] for d in data])
-        lows = np.array([d["low"] for d in data])
+        np.array([d["high"] for d in data])
+        np.array([d["low"] for d in data])
 
         def find_swings(values, window=5):
             peaks, troughs = [], []
@@ -146,7 +146,7 @@ class ElliottWaveEngine:
                 wave_labels.append({"wave": label, "type": w["type"], "price": w["price"], "index": w["index"]})
                 ew_count = i + 1
 
-            is_flat = abs(corrective_waves[0]["price"] - corrective_waves[2]["price"]) / max(corrective_waves[0]["price"], corrective_waves[2]["price"]) < 0.02
+            abs(corrective_waves[0]["price"] - corrective_waves[2]["price"]) / max(corrective_waves[0]["price"], corrective_waves[2]["price"]) < 0.02  # noqa: B015
             move = abs(corrective_waves[2]["price"] - corrective_waves[1]["price"])
             next_wave = {
                 "label": "1" if not wave_labels else str(int(wave_labels[-1]["wave"]) + 1 if wave_labels[-1]["wave"].isdigit() else "1"),
@@ -165,7 +165,7 @@ class ElliottWaveEngine:
                 else:
                     best_model = "extended"
 
-        current_price = float(closes[-1])
+        float(closes[-1])
         recent_trend = "up" if closes[-10] < closes[-1] else "down" if closes[-10] > closes[-1] else "neutral"
         ratio_change = abs(closes[-1] - closes[-10]) / closes[-10] * 100 if closes[-10] > 0 else 0
         momentum = "strong" if ratio_change > 5 else "moderate" if ratio_change > 2 else "weak"

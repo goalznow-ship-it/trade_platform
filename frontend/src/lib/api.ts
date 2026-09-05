@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -54,7 +54,30 @@ async function request<T>(endpoint: string, options?: RequestInit, retried = fal
   if (res.status === 401 && typeof window !== "undefined") {
     localStorage.removeItem("token")
     localStorage.removeItem("refresh_token")
-    if (!window.location.pathname.startsWith("/login")) window.location.assign("/login")
+    // Use a soft navigation so we don't blow away the entire React tree
+    // and lose any in-memory state (open modals, draft orders, the
+    // WebSocket subscriptions tracked in WSProvider). window.location
+    // is a full page reload — every page did its own auth check on
+    // mount anyway, but you lost scroll position, audio playback,
+    // and any cached API responses.
+    if (!window.location.pathname.startsWith("/login")) {
+      // next/navigation's router isn't available outside React context
+      // (this module is imported by client components and by non-React
+      // utilities). We dispatch a custom event that AuthGuard listens
+      // for and translates to router.replace(). This keeps navigation
+      // SPA-local.
+      const next = encodeURIComponent(window.location.pathname + window.location.search)
+      window.dispatchEvent(new CustomEvent("app:auth:expired", { detail: { next } }))
+      // Fallback: if no listener is attached (older build, server
+      // component import), do the full reload as a last resort.
+      // The dispatch above is synchronous; the listener runs on the
+      // next microtask, so a small timeout lets it complete before
+      // we tear the page down.
+      setTimeout(() => {
+        if (window.location.pathname.startsWith("/login")) return
+        window.location.assign(`/login?next=${next}`)
+      }, 50)
+    }
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))

@@ -1,13 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.watchlist import watchlist_service
 from app.schemas.watchlist import (
-    WatchlistCreate, WatchlistUpdate, WatchlistResponse,
-    WatchlistSymbolCreate, WatchlistSymbolReorder, WatchlistSymbolResponse,
+    WatchlistCreate,
+    WatchlistResponse,
+    WatchlistSymbolCreate,
+    WatchlistSymbolReorder,
+    WatchlistSymbolResponse,
+    WatchlistUpdate,
 )
+from app.services.watchlist import watchlist_service
 
 router = APIRouter(prefix="/watchlists", tags=["Watchlists"])
 

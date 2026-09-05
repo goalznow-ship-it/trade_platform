@@ -10,8 +10,8 @@ Unified signal format consumed by all frontend pages:
 
 Ensures the same symbol+timeframe produces identical data everywhere.
 """
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
 from app.services.signal_direction import normalize_signal_direction
 
 
@@ -20,19 +20,19 @@ class CanonicalSignalEngine:
               symbol: str,
               exchange: str = "Binance",
               timeframe: str = "1h",
-              signal_data: Optional[dict] = None,
-              scoring_data: Optional[dict] = None,
-              pattern_data: Optional[dict] = None,
-              mtf_data: Optional[dict] = None,
-              futures_data: Optional[dict] = None,
-              risk_data: Optional[dict] = None) -> dict:
-        now_iso = datetime.now(timezone.utc).isoformat()
+              signal_data: dict | None = None,
+              scoring_data: dict | None = None,
+              pattern_data: dict | None = None,
+              mtf_data: dict | None = None,
+              futures_data: dict | None = None,
+              risk_data: dict | None = None) -> dict:
+        now_iso = datetime.now(UTC).isoformat()
 
         direction = normalize_signal_direction(signal_data.get("direction")) if signal_data else "neutral"
         confidence = signal_data.get("confidence", 0) if signal_data else 0
         current_price = signal_data.get("current_price", 0) if signal_data else 0
 
-        entry_zone = (signal_data or {}).get("entry_zone", {})
+        (signal_data or {}).get("entry_zone", {})
         stop_loss = (signal_data or {}).get("stop_loss")
         tp1 = (signal_data or {}).get("take_profit_1")
         tp2 = (signal_data or {}).get("take_profit_2")
@@ -65,7 +65,7 @@ class CanonicalSignalEngine:
         # Futures data
         funding_rate = (futures_data or {}).get("funding_rate", 0)
         oi = (futures_data or {}).get("open_interest", 0)
-        ls_ratio = (futures_data or {}).get("long_short_ratio")
+        (futures_data or {}).get("long_short_ratio")
         funding_pressure = (futures_data or {}).get("funding_pressure", "neutral")
 
         # Factor scores normalized to -100/+100
@@ -119,9 +119,9 @@ class CanonicalSignalEngine:
         # Risk profile
         risk_level = inst_score.get("risk_level", "medium")
         if risk_data:
-            validation = risk_data.get("validation", {}) if isinstance(risk_data, dict) else {}
+            risk_data.get("validation", {}) if isinstance(risk_data, dict) else {}
         else:
-            validation = (signal_data or {}).get("validation", {})
+            (signal_data or {}).get("validation", {})
 
         # Support/resistance from trend lines or pattern
         support = None

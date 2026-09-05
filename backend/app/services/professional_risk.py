@@ -11,7 +11,7 @@ Position sizing and risk management:
 - Liquidation distance
 - Risk category classification
 """
-from typing import Optional
+
 from app.services.indicators import indicator_service
 
 
@@ -25,9 +25,9 @@ class ProfessionalRiskEngine:
         capital: float,
         entry_price: float,
         stop_loss: float,
-        risk_percent: Optional[float] = None,
-        leverage: Optional[int] = None,
-        atr_value: Optional[float] = None,
+        risk_percent: float | None = None,
+        leverage: int | None = None,
+        atr_value: float | None = None,
     ) -> dict:
         risk_pct = risk_percent or self.MAX_RISK_PER_TRADE
 
@@ -78,7 +78,7 @@ class ProfessionalRiskEngine:
         data: list,
         multiplier: float = 1.5,
         direction: str = "long",
-    ) -> Optional[float]:
+    ) -> float | None:
         if len(data) < 20:
             return None
 
@@ -129,8 +129,8 @@ class ProfessionalRiskEngine:
         take_profit: float,
         leverage: int,
         balance: float,
-        atr_value: Optional[float] = None,
-        data: Optional[list] = None,
+        atr_value: float | None = None,
+        data: list | None = None,
     ) -> dict:
         checks = []
         passed = True
@@ -196,7 +196,7 @@ class ProfessionalRiskEngine:
             "max_risk_percent": round(risk_pct, 2) if 'risk_pct' in locals() else 0,
         }
 
-    def _recommended_leverage(self, risk_per_unit: float, atr_value: Optional[float] = None) -> int:
+    def _recommended_leverage(self, risk_per_unit: float, atr_value: float | None = None) -> int:
         if risk_per_unit <= 0.005:
             return 20
         elif risk_per_unit <= 0.01:
@@ -211,7 +211,7 @@ class ProfessionalRiskEngine:
 
     def _estimate_liquidation(
         self, entry: float, stop: float, leverage: int, has_size: bool
-    ) -> Optional[float]:
+    ) -> float | None:
         if leverage <= 1:
             return stop
 

@@ -4,9 +4,9 @@ Market Coverage Service
 - Auto-updates weekly from Binance volume ranking
 - Cached symbols with fallback
 """
-from datetime import datetime, timezone
-from typing import List
 import asyncio
+from datetime import UTC, datetime
+
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
@@ -37,7 +37,7 @@ class MarketCoverageService:
         self._logger = logger
 
     @staticmethod
-    def _normalize_symbols(symbols: List[str]) -> List[str]:
+    def _normalize_symbols(symbols: list[str]) -> list[str]:
         # Repair symbols cached by older releases that used spot asset names
         # for Binance perpetual contracts.
         aliases = {"PEPE/USDT": "1000PEPE/USDT"}
@@ -49,7 +49,7 @@ class MarketCoverageService:
         ))
 
     @staticmethod
-    def _with_required_symbols(symbols: List[str], count: int) -> List[str]:
+    def _with_required_symbols(symbols: list[str], count: int) -> list[str]:
         anchors = ["BTC/USDT", "ETH/USDT"]
         required_tail = ["SKHY/USDT"]
         required = anchors + required_tail
@@ -66,7 +66,7 @@ class MarketCoverageService:
         base = symbol.split("/")[0] if "/" in symbol else symbol
         return self._symbol_exchange_override.get(base, "binance")
 
-    async def get_top_symbols(self, count: int = 30, force_refresh: bool = False) -> List[str]:
+    async def get_top_symbols(self, count: int = 30, force_refresh: bool = False) -> list[str]:
         if force_refresh:
             return await self._fetch_and_cache()
 
@@ -83,12 +83,12 @@ class MarketCoverageService:
 
         return await self._fetch_and_cache()
 
-    async def _fetch_and_cache(self) -> List[str]:
+    async def _fetch_and_cache(self) -> list[str]:
         try:
             symbols = self._normalize_symbols(await self._fetch_top_from_exchange())
             if symbols and len(symbols) >= 20:
                 await cache_set(self._cache_key, symbols, ttl=self._update_interval_hours * 3600)
-                await cache_set(self._cache_key_timestamp, datetime.now(timezone.utc).isoformat(),
+                await cache_set(self._cache_key_timestamp, datetime.now(UTC).isoformat(),
                                 ttl=self._update_interval_hours * 3600)
                 self._logger.info(f"Market coverage updated: {len(symbols)} symbols")
                 return self._with_required_symbols(symbols, 30)
@@ -98,9 +98,10 @@ class MarketCoverageService:
         await cache_set(self._cache_key, self._fallback, ttl=3600)
         return self._fallback
 
-    async def _fetch_top_from_exchange(self) -> List[str]:
+    async def _fetch_top_from_exchange(self) -> list[str]:
         try:
             import asyncio
+
             import ccxt
             ex = ccxt.binance({
                 'enableRateLimit': True,
@@ -166,7 +167,7 @@ class MarketCoverageService:
             pass
         return {}
 
-    async def get_market_gainers(self, count: int = 10) -> List[dict]:
+    async def get_market_gainers(self, count: int = 10) -> list[dict]:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
@@ -187,7 +188,7 @@ class MarketCoverageService:
         results.sort(key=lambda r: r['change_percent'], reverse=True)
         return results[:count]
 
-    async def get_market_losers(self, count: int = 10) -> List[dict]:
+    async def get_market_losers(self, count: int = 10) -> list[dict]:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
@@ -208,7 +209,7 @@ class MarketCoverageService:
         results.sort(key=lambda r: r['change_percent'])
         return results[:count]
 
-    async def get_volume_leaders(self, count: int = 10) -> List[dict]:
+    async def get_volume_leaders(self, count: int = 10) -> list[dict]:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
@@ -229,7 +230,7 @@ class MarketCoverageService:
         results.sort(key=lambda r: r['volume_24h'], reverse=True)
         return results[:count]
 
-    async def get_funding_rates(self, count: int = 20) -> List[dict]:
+    async def get_funding_rates(self, count: int = 20) -> list[dict]:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
@@ -255,7 +256,7 @@ class MarketCoverageService:
         results.sort(key=lambda r: abs(r['funding_rate']), reverse=True)
         return results
 
-    async def get_open_interest_data(self, count: int = 20) -> List[dict]:
+    async def get_open_interest_data(self, count: int = 20) -> list[dict]:
         symbols = await self.get_top_symbols(count=30)
         from app.services.market import market_service
 
@@ -287,7 +288,7 @@ class MarketCoverageService:
         results.sort(key=lambda r: r['open_interest_usd'], reverse=True)
         return results
 
-    async def get_trending_coins(self, count: int = 10) -> List[dict]:
+    async def get_trending_coins(self, count: int = 10) -> list[dict]:
         gainers = await self.get_market_gainers(count * 2)
         volumes = await self.get_volume_leaders(count * 2)
 

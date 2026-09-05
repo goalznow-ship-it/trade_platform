@@ -5,8 +5,8 @@ Fibonacci Analysis Engine
 - Golden zone detection (0.382-0.618)
 - AI TP calculation based on fib levels
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _convert(obj):
@@ -79,12 +79,12 @@ class FibonacciEngine:
         golden_zone["current_price_in_zone"] = in_golden_zone
 
         nearest_level = min(levels, key=lambda x: abs(x["price"] - current_price))
-        nearest_retracement = [l for l in levels if l["type"] == "retracement"]
+        nearest_retracement = [l for l in levels if l["type"] == "retracement"]  # noqa: E741
         nearest_retrace = min(nearest_retracement, key=lambda x: abs(x["price"] - current_price)) if nearest_retracement else nearest_level
 
         support_fib = None
         resistance_fib = None
-        for l in levels:
+        for l in levels:  # noqa: E741
             if l["price"] < current_price:
                 support_fib = l
             elif l["price"] > current_price and resistance_fib is None:
@@ -92,10 +92,10 @@ class FibonacciEngine:
 
         ai_targets = {}
         if direction == "long":
-            for ext in [l for l in levels if l["level"] in (1.272, 1.618, 2.618)]:
+            for ext in [l for l in levels if l["level"] in (1.272, 1.618, 2.618)]:  # noqa: E741
                 ai_targets[f"tp_{ext['level']}"] = round(ext["price"], 4)
         else:
-            for ext in [l for l in levels if l["level"] in (1.272, 1.618, 2.618)]:
+            for ext in [l for l in levels if l["level"] in (1.272, 1.618, 2.618)]:  # noqa: E741
                 ai_targets[f"tp_{ext['level']}"] = round(ext["price"], 4)
 
         return _convert({

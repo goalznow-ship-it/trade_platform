@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings
+
 from pydantic import model_validator
-from typing import Optional
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -24,29 +24,32 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CORS_ORIGINS: str = "*"
-    EXCHANGE_ENCRYPTION_KEY: Optional[str] = None
+    EXCHANGE_ENCRYPTION_KEY: str | None = None
     ENABLE_BACKGROUND_SERVICES: bool = True
     TRADING_ENABLED: bool = False
 
     RATE_LIMIT_MAX: int = 60
     RATE_LIMIT_WINDOW: int = 60
 
-    BINANCE_API_KEY: Optional[str] = None
-    BINANCE_SECRET_KEY: Optional[str] = None
-    BYBIT_API_KEY: Optional[str] = None
-    BYBIT_SECRET_KEY: Optional[str] = None
-    COINGECKO_API_KEY: Optional[str] = None
+    BINANCE_API_KEY: str | None = None
+    BINANCE_SECRET_KEY: str | None = None
+    BYBIT_API_KEY: str | None = None
+    BYBIT_SECRET_KEY: str | None = None
+    COINGECKO_API_KEY: str | None = None
 
-    TELEGRAM_BOT_TOKEN: Optional[str] = None
-    DISCORD_BOT_TOKEN: Optional[str] = None
-    SENDGRID_API_KEY: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    DISCORD_BOT_TOKEN: str | None = None
+    SENDGRID_API_KEY: str | None = None
 
-    SSL_CERT_PATH: Optional[str] = None
-    SSL_KEY_PATH: Optional[str] = None
+    SSL_CERT_PATH: str | None = None
+    SSL_KEY_PATH: str | None = None
 
     @model_validator(mode="after")
     def validate_production_settings(self):
-        if self.ENVIRONMENT.lower() == "production":
+        # Use exact comparison for production gating — previous
+        # implementation used .lower() which let ENVIRONMENT=Production
+        # slip through, defeating the check.
+        if self.ENVIRONMENT == "production":
             errors = []
             if self.SECRET_KEY == "ta-pro-secret-key-change-in-production" or len(self.SECRET_KEY) < 32:
                 errors.append("SECRET_KEY must be unique and at least 32 characters")
@@ -58,6 +61,18 @@ class Settings(BaseSettings):
                 errors.append("EXCHANGE_ENCRYPTION_KEY is required")
             if errors:
                 raise ValueError("Invalid production configuration: " + "; ".join(errors))
+        else:
+            # In development, warn loudly if someone is running with the
+            # well-known default secret key — this exact string appears
+            # in the repo and is on every attacker's wordlist.
+            if self.SECRET_KEY == "ta-pro-secret-key-change-in-production":
+                import warnings
+                warnings.warn(
+                    "SECRET_KEY is set to the public default. "
+                    "Tokens signed with this key are forgeable. "
+                    "Set a unique SECRET_KEY (>= 32 chars) in .env.",
+                    stacklevel=2,
+                )
         return self
 
     @property

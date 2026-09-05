@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
+
 from app.core.database import Base
+
 
 class Trade(Base):
     __tablename__ = "trades"

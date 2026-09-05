@@ -5,8 +5,6 @@ Combines news, social, and on-chain signals into ML features.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import numpy as np
 import pandas as pd
 
@@ -104,9 +102,9 @@ class SentimentFeatures:
     @staticmethod
     def combine_all(
         index: pd.DatetimeIndex,
-        news_events: Optional[list] = None,
-        funding: Optional[pd.DataFrame] = None,
-        oi: Optional[pd.DataFrame] = None,
+        news_events: list | None = None,
+        funding: pd.DataFrame | None = None,
+        oi: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         parts = []
         if news_events:

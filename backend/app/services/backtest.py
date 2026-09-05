@@ -1,9 +1,10 @@
 import asyncio
-import pandas as pd
-import numpy as np
 import math
-from typing import Optional
 from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+
 from app.core.logging import logger
 
 
@@ -31,7 +32,7 @@ class BacktestService:
         leverage: int = 1,
         risk_per_trade: float = 0.02,
         mode: str = "balanced",
-        funding_rates: Optional[list] = None,
+        funding_rates: list | None = None,
     ) -> dict:
         from app.core.cache import cache_get, cache_set
 
@@ -69,7 +70,7 @@ class BacktestService:
         leverage: int = 1,
         risk_per_trade: float = 0.02,
         mode: str = "balanced",
-        funding_rates: Optional[list] = None,
+        funding_rates: list | None = None,
     ) -> dict:
         config = self.MODES.get(mode)
         if config is None:
@@ -223,7 +224,7 @@ class BacktestService:
     def _generate_institutional_signal(
         self, symbol: str, data: list,
         scorer, smc, timeframe: str, threshold: float, diagnostics: dict,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         try:
             if len(data) < 50:
                 return None
@@ -271,7 +272,7 @@ class BacktestService:
     def _open_position(self, signal: dict, current_row, balance: float,
                        risk_per_trade: float, leverage: int, entry_index: int,
                        slippage_bps: float,
-                       execution_price: Optional[float] = None) -> dict:
+                       execution_price: float | None = None) -> dict:
         entry = float(execution_price if execution_price is not None else signal["entry_price"])
         sl = signal["stop_loss"]
         direction = signal["direction"]

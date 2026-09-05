@@ -11,8 +11,8 @@ Detects chart formations:
 - Rectangle Consolidation
 - Cup and Handle
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _convert_numpy(obj):
@@ -41,7 +41,7 @@ class ChartPatternEngine:
         highs = np.array([d["high"] for d in data])
         lows = np.array([d["low"] for d in data])
         closes = np.array([d["close"] for d in data])
-        opens = np.array([d["open"] for d in data])
+        np.array([d["open"] for d in data])
         volumes = np.array([d["volume"] for d in data])
 
         current_price = float(closes[-1])
@@ -139,7 +139,7 @@ class ChartPatternEngine:
 
         # Flag detection (need a strong prior move + consolidation)
         if len(data) >= 30:
-            move_start = max(len(data) - 30, 0)
+            max(len(data) - 30, 0)
             move_high = float(max(highs[-30:]))
             move_low = float(min(lows[-30:]))
             move_pct = (move_high - move_low) / move_low * 100
@@ -349,8 +349,8 @@ class ChartPatternEngine:
                         "current_price": round(current_price, 4),
                         "projected_direction": "neutral",
                         "confidence": 60,
-                        "entry_trigger_up": f"Break above resistance for long",
-                        "entry_trigger_down": f"Break below support for short",
+                        "entry_trigger_up": "Break above resistance for long",
+                        "entry_trigger_down": "Break below support for short",
                         "invalidation": "Price reaches apex without breakout",
                         "breakout_confirm_up": current_price > recent_sh[-1]["price"],
                         "breakout_confirm_down": current_price < recent_sl[-1]["price"],
@@ -822,7 +822,6 @@ class ChartPatternEngine:
         measured_move = pattern.get("measured_move", 0)
 
         entry = current_price
-        sl = invalidation
         try:
             sl_price = float(invalidation.split("at ")[-1]) if "at " in invalidation else 0
         except (ValueError, IndexError):

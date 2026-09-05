@@ -189,8 +189,8 @@ export function normalizeSkhyAnalysis(analysis: Record<string, unknown> | null |
     }
     return []
   }
-  let chUpper = getChannelLine("upper", "upper_line", "top_line")
-  let chLower = getChannelLine("lower", "lower_line", "bottom_line")
+  const chUpper = getChannelLine("upper", "upper_line", "top_line")
+  const chLower = getChannelLine("lower", "lower_line", "bottom_line")
   let chMid = getChannelLine("mid", "median", "median_line", "mid_line")
 
   // Calculate median from upper+lower if mid missing

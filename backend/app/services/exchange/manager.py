@@ -1,18 +1,23 @@
 import asyncio
-from typing import Optional, Dict, List, Callable
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Optional
+
 from cryptography.fernet import Fernet
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.logging import logger
+from app.models.exchange import ExchangeCredentials
 from app.services.exchange.base import (
-    BaseExchange, OrderRequest, OrderResult,
-    PositionResult, BalanceResult,
+    BalanceResult,
+    BaseExchange,
+    OrderRequest,
+    OrderResult,
+    PositionResult,
 )
 from app.services.exchange.binance_futures import BinanceFuturesExchange
 from app.services.exchange.bybit_futures import BybitFuturesExchange
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.exchange import ExchangeCredentials
-
 
 ENCRYPTION_KEY = None
 
@@ -56,15 +61,15 @@ class ExchangeManager:
         if self._initialized:
             return
         self._initialized = True
-        self._exchange_factories: Dict[str, Callable[[], BaseExchange]] = {}
-        self._user_connections: Dict[int, Dict[str, BaseExchange]] = {}
-        self._reconnect_tasks: Dict[str, asyncio.Task] = {}
+        self._exchange_factories: dict[str, Callable[[], BaseExchange]] = {}
+        self._user_connections: dict[int, dict[str, BaseExchange]] = {}
+        self._reconnect_tasks: dict[str, asyncio.Task] = {}
 
     def register_exchange(self, name: str, factory: Callable[[], BaseExchange]) -> None:
         self._exchange_factories[name] = factory
 
     async def get_user_exchange(self, user_id: int, exchange_name: str,
-                                 db: AsyncSession) -> Optional[BaseExchange]:
+                                 db: AsyncSession) -> BaseExchange | None:
         if user_id in self._user_connections and exchange_name in self._user_connections[user_id]:
             exchange = self._user_connections[user_id][exchange_name]
             if exchange.is_connected:
@@ -74,7 +79,7 @@ class ExchangeManager:
             select(ExchangeCredentials).where(
                 ExchangeCredentials.user_id == user_id,
                 ExchangeCredentials.exchange == exchange_name,
-                ExchangeCredentials.is_active == True,
+                ExchangeCredentials.is_active,
             )
         )
         creds = result.scalar_one_or_none()
@@ -97,15 +102,15 @@ class ExchangeManager:
             self._user_connections[user_id] = {}
         self._user_connections[user_id][exchange_name] = exchange_client
 
-        creds.last_used = datetime.now(timezone.utc)
+        creds.last_used = datetime.now(UTC)
         await db.commit()
 
         return exchange_client
 
     async def save_credentials(self, user_id: int, exchange: str,
                                 api_key: str, secret_key: str,
-                                passphrase: Optional[str] = None,
-                                label: Optional[str] = None,
+                                passphrase: str | None = None,
+                                label: str | None = None,
                                 db: AsyncSession = None) -> bool:
         try:
             encrypted_key = encrypt_api_key(api_key)
@@ -146,7 +151,7 @@ class ExchangeManager:
         exchange: str,
         api_key: str,
         secret_key: str,
-        passphrase: Optional[str] = None,
+        passphrase: str | None = None,
     ) -> bool:
         factory = self._exchange_factories.get(exchange)
         if not factory:
@@ -181,7 +186,7 @@ class ExchangeManager:
             logger.error(f"Remove credentials error: {e}")
             return False
 
-    async def disconnect_user(self, user_id: int, exchange_name: Optional[str] = None) -> None:
+    async def disconnect_user(self, user_id: int, exchange_name: str | None = None) -> None:
         if user_id not in self._user_connections:
             return
         if exchange_name:
@@ -189,7 +194,7 @@ class ExchangeManager:
             if ex:
                 await ex.disconnect()
         else:
-            for name, ex in self._user_connections[user_id].items():
+            for _name, ex in self._user_connections[user_id].items():
                 await ex.disconnect()
             self._user_connections.pop(user_id, None)
 
@@ -214,7 +219,7 @@ class ExchangeManager:
             await self.disconnect_user(user_id)
 
     async def get_position(self, user_id: int, exchange_name: str,
-                            symbol: str, db: AsyncSession) -> Optional[PositionResult]:
+                            symbol: str, db: AsyncSession) -> PositionResult | None:
         ex = await self.get_user_exchange(user_id, exchange_name, db)
         if not ex:
             return None
@@ -222,14 +227,14 @@ class ExchangeManager:
         return positions[0] if positions else None
 
     async def get_all_positions(self, user_id: int, exchange_name: str,
-                                  db: AsyncSession) -> List[PositionResult]:
+                                  db: AsyncSession) -> list[PositionResult]:
         ex = await self.get_user_exchange(user_id, exchange_name, db)
         if not ex:
             return []
         return await ex.get_positions()
 
     async def get_balance(self, user_id: int, exchange_name: str,
-                            db: AsyncSession) -> Optional[BalanceResult]:
+                            db: AsyncSession) -> BalanceResult | None:
         ex = await self.get_user_exchange(user_id, exchange_name, db)
         if not ex:
             return None
@@ -246,8 +251,8 @@ class ExchangeManager:
                 filled_quantity=0, price=request.price, avg_price=None,
                 status="rejected", reduce_only=request.reduce_only,
                 leverage=request.leverage, margin_mode=request.margin_mode,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 error="Exchange not connected",
             )
         return await ex.create_order(request)

@@ -3,12 +3,12 @@ AI Signal Engine - generates complete trade setups with entry zones, targets, an
 """
 
 import asyncio
-from typing import Optional, List
-from app.services.ai_analysis import ai_engine as core_ai
-from app.services.market import market_service
-from app.services.indicators import indicator_service
+
 from app.ai_engine.scoring import SignalScorer
 from app.core.logging import logger
+from app.services.ai_analysis import ai_engine as core_ai
+from app.services.indicators import indicator_service
+from app.services.market import market_service
 
 scorer = SignalScorer()
 
@@ -16,7 +16,7 @@ class AIEngine:
     def __init__(self):
         self._scan_lock = asyncio.Lock()
 
-    async def generate_signal(self, symbol: str, timeframe: str = '1h') -> Optional[dict]:
+    async def generate_signal(self, symbol: str, timeframe: str = '1h') -> dict | None:
         try:
             data = await market_service.get_ohlcv(symbol, 'binance', timeframe, 200)
             if not data or len(data) < 50:
@@ -78,7 +78,7 @@ class AIEngine:
             logger.error(f"Signal generation failed for {symbol}: {e}")
             return None
 
-    async def scan_all(self, symbols: Optional[List[str]] = None, min_confidence: float = 50) -> List[dict]:
+    async def scan_all(self, symbols: list[str] | None = None, min_confidence: float = 50) -> list[dict]:
         from app.core.cache import cache_get, cache_set
 
         cache_key = "legacy:signal_scan:all"
@@ -106,9 +106,9 @@ class AIEngine:
 
     async def _scan_uncached(
         self,
-        symbols: Optional[List[str]],
+        symbols: list[str] | None,
         min_confidence: float,
-    ) -> List[dict]:
+    ) -> list[dict]:
         if symbols is None:
             from app.services.market_coverage import market_coverage
             try:
@@ -121,7 +121,7 @@ class AIEngine:
 
         semaphore = asyncio.Semaphore(3)
 
-        async def scan_symbol(sym: str) -> Optional[dict]:
+        async def scan_symbol(sym: str) -> dict | None:
             async with semaphore:
                 signal = await self.generate_signal(sym, '1h')
                 if signal and signal['confidence'] >= min_confidence:
@@ -132,9 +132,9 @@ class AIEngine:
         results = [signal for signal in scanned if signal is not None]
         return sorted(results, key=lambda r: r['confidence'], reverse=True)[:20]
 
-    def _generate_reasons(self, analysis: dict, scoring: dict, is_long: bool, conf: float) -> List[str]:
+    def _generate_reasons(self, analysis: dict, scoring: dict, is_long: bool, conf: float) -> list[str]:
         reasons = []
-        details = analysis.get('details', {})
+        analysis.get('details', {})
         scores = analysis.get('scores', {})
 
         trend = scores.get('trend', 0)
@@ -163,7 +163,7 @@ class AIEngine:
             reasons.append("Technical setup forming")
         return reasons[:5]
 
-    def _generate_invalidations(self, analysis: dict, is_long: bool, price: float, sl: float) -> List[str]:
+    def _generate_invalidations(self, analysis: dict, is_long: bool, price: float, sl: float) -> list[str]:
         inv = []
         if is_long:
             inv.append(f"4H candle close below ${round(sl, 0)}")

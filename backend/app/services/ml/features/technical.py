@@ -7,7 +7,6 @@ that capture momentum, volatility, trend, and mean-reversion dynamics.
 from __future__ import annotations
 
 import math
-from typing import Sequence
 
 import numpy as np
 import pandas as pd

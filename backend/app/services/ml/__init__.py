@@ -5,15 +5,17 @@ Production-grade machine learning pipeline for crypto trading signals.
 Combines XGBoost + LightGBM + Transformer models into an ensemble.
 """
 
-from .signal_engine import MLSignalEngine, ml_signal_engine
 from .features.engineer import FeatureEngineer
-from .models.ensemble import EnsemblePredictor
-from .training.data_pipeline import TrainingDataPipeline
 from .inference.predictor import RealTimePredictor
+from .models.ensemble import EnsemblePredictor
+from .signal_engine import MLSignalEngine, get_ml_engine, init_ml_engine, ml_signal_engine
+from .training.data_pipeline import TrainingDataPipeline
 
 __all__ = [
     "MLSignalEngine",
     "ml_signal_engine",
+    "get_ml_engine",
+    "init_ml_engine",
     "FeatureEngineer",
     "EnsemblePredictor",
     "TrainingDataPipeline",

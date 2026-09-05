@@ -1,10 +1,11 @@
-from typing import Optional
-from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime
+
 from sqlalchemy import select, update
-from app.models.admin import Notification
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.logging import logger
 from app.core.websocket_manager import ws_manager
+from app.models.admin import Notification
 
 
 class NotificationService:
@@ -13,10 +14,10 @@ class NotificationService:
 
     async def get_notifications(self, user_id: int, db: AsyncSession, limit: int = 50,
                                 offset: int = 0, unread_only: bool = False,
-                                notification_type: Optional[str] = None) -> list:
+                                notification_type: str | None = None) -> list:
         q = select(Notification).where(Notification.user_id == user_id)
         if unread_only:
-            q = q.where(Notification.is_read == False)
+            q = q.where(not Notification.is_read)
         if notification_type:
             q = q.where(Notification.type == notification_type)
         q = q.order_by(Notification.created_at.desc()).offset(offset).limit(limit)
@@ -24,8 +25,8 @@ class NotificationService:
         return result.scalars().all()
 
     async def create_notification(self, user_id: int, notification_type: str, title: str,
-                                   message: Optional[str] = None, channel: str = "in_app",
-                                   related_id: Optional[int] = None, db: Optional[AsyncSession] = None) -> Notification:
+                                   message: str | None = None, channel: str = "in_app",
+                                   related_id: int | None = None, db: AsyncSession | None = None) -> Notification:
         notification = Notification(
             user_id=user_id, type=notification_type, title=title,
             message=message, channel=channel, related_id=related_id,
@@ -41,7 +42,7 @@ class NotificationService:
                 "type": notification_type,
                 "title": title,
                 "message": message,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }, channel="notifications"
         )
         return notification
@@ -58,7 +59,7 @@ class NotificationService:
     async def mark_all_read(self, user_id: int, db: AsyncSession):
         await db.execute(
             update(Notification).where(
-                Notification.user_id == user_id, Notification.is_read == False
+                Notification.user_id == user_id, not Notification.is_read
             ).values(is_read=True)
         )
         await db.commit()
@@ -76,7 +77,7 @@ class NotificationService:
 
     async def get_unread_count(self, user_id: int, db: AsyncSession) -> int:
         result = await db.execute(
-            select(Notification).where(Notification.user_id == user_id, Notification.is_read == False)
+            select(Notification).where(Notification.user_id == user_id, not Notification.is_read)
         )
         return len(result.scalars().all())
 

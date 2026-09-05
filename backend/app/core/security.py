@@ -1,15 +1,17 @@
 import json
 import secrets
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Set
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import UTC, datetime, timedelta
+
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
-from starlette.middleware.base import BaseHTTPMiddleware
-from sqlalchemy.ext.asyncio import AsyncSession
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.client_ip import get_client_ip
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import logger
@@ -18,8 +20,12 @@ from app.core.redis import redis_client
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# JWT Blacklist (in-memory, use Redis for production)
-_token_blacklist: Set[str] = set()
+# Redis is the SINGLE source of truth for token revocation. We previously
+# also kept a per-process in-memory set, but in any deployment with
+# gunicorn --workers > 1 (the only realistic prod setup) a token that
+# was "revoked" via /auth/logout would still be accepted by other
+# workers. The in-memory set was both incomplete and a memory leak
+# (no TTL cleanup). Removed in favor of the Redis-backed checks below.
 
 
 def hash_password(password: str) -> str:
@@ -32,58 +38,116 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "type": "access", "jti": secrets.token_urlsafe(24)})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh", "jti": secrets.token_urlsafe(24)})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
+    """
+    Decode a JWT and return its payload. This function does NOT check
+    the revocation list — that's `is_token_revoked` (async, Redis-backed)
+    which must be called separately by the caller.
+
+    Why split: a single sync function can't query Redis. Putting the
+    revocation check here would either require a per-process in-memory
+    blacklist (broken under multi-worker gunicorn) or block the event
+    loop on every protected request.
+    """
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        jti = payload.get("jti")
-        if jti and jti in _token_blacklist:
-            raise HTTPException(status_code=401, detail="Token revoked")
-        return payload
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
 async def is_token_revoked(payload: dict) -> bool:
+    """
+    Single source of truth: Redis. A token is revoked if its jti is
+    in the auth:revoked:* set OR if a user-wide "revoke-all-issued-before"
+    marker exists and the token's iat is older than the marker.
+
+    Returns True if Redis is unreachable (fail-closed — a missing
+    revocation check is worse than a forced re-login).
+    """
     jti = payload.get("jti")
     if not jti:
         return True
-    if jti in _token_blacklist:
-        return True
+    user_id = payload.get("sub")
+    iat = payload.get("iat")
     try:
-        return bool(await redis_client.exists(f"auth:revoked:{jti}"))
-    except Exception:
+        # Per-token revocation (logout)
+        if jti and await redis_client.exists(f"auth:revoked:{jti}"):
+            return True
+        # Per-user "revoke all before T" marker (password change,
+        # force-logout-everywhere). The marker value is a unix timestamp;
+        # any token with iat <= that is rejected.
+        if user_id and iat is not None:
+            marker = await redis_client.get(f"auth:user_revoked_at:{user_id}")
+            if marker is not None:
+                try:
+                    if int(iat) <= int(marker):
+                        return True
+                except (TypeError, ValueError):
+                    pass
         return False
+    except Exception as e:
+        # Fail-closed: if we can't confirm the token is valid, treat it
+        # as revoked. Otherwise a Redis outage would silently let every
+        # previously-revoked token back in.
+        logger.error(f"is_token_revoked Redis check failed: {e}")
+        return True
 
 
 async def revoke_token(token: str):
+    """
+    Mark a single token as revoked. TTL is set to the token's remaining
+    lifetime so Redis evicts the entry automatically when the token
+    would have expired anyway.
+    """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         jti = payload.get("jti")
         if jti:
-            _token_blacklist.add(jti)
-            expires_in = max(1, int(payload["exp"] - datetime.now(timezone.utc).timestamp()))
-            try:
-                await redis_client.setex(f"auth:revoked:{jti}", expires_in, "1")
-            except Exception:
-                logger.warning("Redis unavailable; token revocation is process-local")
+            expires_in = max(1, int(payload["exp"] - datetime.now(UTC).timestamp()))
+            await redis_client.setex(f"auth:revoked:{jti}", expires_in, "1")
     except JWTError:
         pass
+    except Exception as e:
+        # If Redis is down, surface the failure — the caller (the logout
+        # endpoint) should fail the request rather than silently
+        # "succeeding" without actually revoking anything.
+        logger.error(f"revoke_token Redis write failed: {e}")
+        raise
 
 
-def revoke_all_user_tokens(user_id: int):
-    pass
+async def revoke_all_user_tokens(user_id: int):
+    """
+    Revoke every currently-valid token for a user by setting a marker
+    timestamp in Redis. Any token issued before this call (lower `iat`)
+    will be rejected by `is_token_revoked`. Used for password change,
+    "log out everywhere", and admin force-revoke.
+    """
+    try:
+        now = int(datetime.now(UTC).timestamp())
+        # Keep marker for the max possible token lifetime so an old
+        # session can't slip through after the marker expires.
+        marker_ttl = (
+            settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            + settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
+        )
+        await redis_client.setex(
+            f"auth:user_revoked_at:{user_id}", marker_ttl, str(now),
+        )
+    except Exception as e:
+        logger.error(f"revoke_all_user_tokens failed for user {user_id}: {e}")
+        raise
 
 
 def generate_totp_secret() -> str:
@@ -125,8 +189,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise HTTPException(401, "User not found or inactive")
     expires_at = user.subscription_expires
     if expires_at and expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at and expires_at < datetime.now(timezone.utc):
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at and expires_at < datetime.now(UTC):
         if user.subscription_tier != "free":
             user.subscription_tier = "free"
             user.subscription_expires = None
@@ -199,7 +263,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "path": request.url.path,
                 "status": response.status_code,
                 "duration_ms": duration_ms,
-                "ip": request.client.host if request.client else "unknown",
+                "ip": get_client_ip(request),
                 "user_agent": request.headers.get("user-agent", ""),
                 "user_id": user_id,
             }

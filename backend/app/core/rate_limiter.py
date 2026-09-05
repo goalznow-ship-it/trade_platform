@@ -1,19 +1,20 @@
-import time
 import secrets
-from typing import Dict, Tuple
+import time
+from datetime import UTC, datetime
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from datetime import datetime, timezone
-from app.core.redis import redis_client
+
 from app.core.logging import logger
+from app.core.redis import redis_client
 
 
 class InMemoryRateLimiter:
     def __init__(self):
-        self.requests: Dict[str, list] = {}
+        self.requests: dict[str, list] = {}
 
-    def check(self, key: str, max_requests: int = 60, window_seconds: int = 60) -> Tuple[bool, int]:
+    def check(self, key: str, max_requests: int = 60, window_seconds: int = 60) -> tuple[bool, int]:
         now = time.time()
         if key not in self.requests:
             self.requests[key] = []
@@ -34,7 +35,7 @@ rate_limiter = InMemoryRateLimiter()
 class DistributedRateLimiter:
     async def check(
         self, key: str, max_requests: int, window_seconds: int,
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         now = time.time()
         redis_key = f"rate:{key}"
         member = f"{now}:{secrets.token_hex(6)}"
@@ -61,12 +62,12 @@ class DailyUsageTracker:
     """Tracks daily API usage per user for subscription limits."""
 
     def __init__(self):
-        self._data: Dict[int, list] = {}
+        self._data: dict[int, list] = {}
 
     def _today_key(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(UTC).strftime("%Y-%m-%d")
 
-    def check(self, user_id: int, max_daily: int) -> Tuple[bool, int]:
+    def check(self, user_id: int, max_daily: int) -> tuple[bool, int]:
         key = self._today_key()
         user_key = f"{user_id}:{key}"
 
@@ -74,7 +75,7 @@ class DailyUsageTracker:
         if user_key not in self._data:
             self._data[user_key] = []
 
-        today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        today_ts = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         self._data[user_key] = [t for t in self._data[user_key] if t >= today_ts]
 
         used = len(self._data[user_key])
@@ -87,7 +88,7 @@ class DailyUsageTracker:
     def daily_usage(self, user_id: int) -> int:
         key = self._today_key()
         user_key = f"{user_id}:{key}"
-        today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        today_ts = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         self._data[user_key] = [t for t in self._data.get(user_key, []) if t >= today_ts]
         return len(self._data.get(user_key, []))
 
@@ -108,7 +109,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/health":
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        from app.core.client_ip import get_client_ip
+        client_ip = get_client_ip(request)
         key = f"{client_ip}:{request.url.path}"
 
         allowed, remaining = await distributed_rate_limiter.check(

@@ -1,11 +1,12 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
-from app.core.websocket_manager import ws_manager
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+
 from app.core.database import async_session_factory
-from app.core.security import get_user_from_token, require_admin
 from app.core.logging import logger
+from app.core.security import get_user_from_token, require_admin
+from app.core.websocket_manager import ws_manager
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ async def _authenticate_connection(websocket: WebSocket, client, legacy_token: s
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=5)
         message = json.loads(raw)
-    except (asyncio.TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+    except (TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
         await websocket.close(code=1008, reason="Authentication required")
         return False
 

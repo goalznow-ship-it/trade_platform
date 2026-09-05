@@ -1,17 +1,17 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
-from fastapi.responses import JSONResponse
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
-from app.core.websocket_manager import ws_manager, Channel
-from app.core.security import get_current_user
-from app.services.skhy_market_data import skhy_market_data, normalize_symbol
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+
+from app.core.cache import cache_get, cache_set
+from app.core.logging import logger
 from app.services.market_coverage import market_coverage
 from app.services.skhy_analysis_engine import skhy_analysis
+from app.services.skhy_market_data import normalize_symbol, skhy_market_data
 from app.services.skhy_signal_history import skhy_history
-from app.core.logging import logger
-from app.core.cache import cache_get, cache_set
 
 router = APIRouter(prefix="/api/v1/skhy", tags=["skhy"])
 
@@ -66,7 +66,7 @@ async def _compute_rankings(timeframe: str) -> dict:
         "timeframe": timeframe,
         "sort": "signal_confidence_desc",
         "source": "SKHY analysis engine",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "stale": False,
     }
     await cache_set(f"skhy:rankings:{timeframe}", response, ttl=45)
@@ -146,7 +146,7 @@ async def _build_snapshot_payload(timeframe: str, symbol: str = "SKHYUSDT") -> d
         "current_candle_close": current_candle["close"] if current_candle else None,
         "current_candle_high": current_candle["high"] if current_candle else None,
         "current_candle_low": current_candle["low"] if current_candle else None,
-        "latest_update": datetime.now(timezone.utc).isoformat(),
+        "latest_update": datetime.now(UTC).isoformat(),
         "provider_status": "connected",
         "data_freshness": snapshot.get("data_freshness", "live"),
     }
@@ -161,17 +161,27 @@ async def get_ohlcv(timeframe: str = "1h", limit: int = 200, symbol: str = "SKHY
             return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": f"{symbol} OHLCV məlumatı yoxdur ({timeframe})"}
         return {"symbol": symbol, "timeframe": timeframe, "data": ohlcv}
     except Exception as e:
-        return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": str(e)}
+        # safe_error_response: in DEBUG we include str(e) for the dev,
+        # in production we return a generic phrase + a correlation id
+        # so support can find the matching server log.
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="OHLCV məlumatı əldə edilə bilmir", context=f"skhy.ohlcv {symbol} {timeframe}",
+        )
+        return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": msg, "correlation_id": corr}
 
 @router.get("/snapshot")
 async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
         return await _build_snapshot_payload(timeframe, symbol)
     except Exception as e:
-        logger.error(f"SKHY snapshot error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message=f"{normalize_symbol(symbol)} məlumatı əldə edilə bilmir", context=f"skhy.snapshot {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"{normalize_symbol(symbol)} məlumatı əldə edilə bilmir: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/analysis")
@@ -183,10 +193,13 @@ async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN),
             return JSONResponse(status_code=503, content=result)
         return result
     except Exception as e:
-        logger.error(f"SKHY analysis error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Analiz xətası", context=f"skhy.analysis {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Analiz xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/scenarios")
@@ -195,10 +208,13 @@ async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN)
         symbol = await _allowed_symbol(symbol)
         return await skhy_analysis.get_scenarios(timeframe, symbol)
     except Exception as e:
-        logger.error(f"SKHY scenarios error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Ssenari xətası", context=f"skhy.scenarios {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Ssenari xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/history")
@@ -215,10 +231,13 @@ async def get_history(timeframe: str = Query(default="1h", pattern=TF_PATTERN), 
             "timeframe": timeframe,
         }
     except Exception as e:
-        logger.error(f"SKHY history error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Tarixçə xətası", context=f"skhy.history {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Tarixçə xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/backtest")
@@ -245,10 +264,13 @@ async def run_backtest(
             "results": results,
         }
     except Exception as e:
-        logger.error(f"SKHY backtest error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Backtest xətası", context=f"skhy.backtest {symbol} {timeframe} {mode}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Backtest xətası: {str(e)}"}
+            content={"error": msg, "correlation_id": corr}
         )
 
 @router.get("/diagnostics")
@@ -295,13 +317,16 @@ async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTER
                 "ask": ticker.get("ask"),
                 "data_freshness": snapshot.get("data_freshness", "unknown"),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
-        logger.error(f"SKHY diagnostics error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Diagnostics xətası", context=f"skhy.diagnostics {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Diagnostics xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
@@ -455,7 +480,7 @@ async def skhy_websocket(websocket: WebSocket, timeframe: str = "1h", symbol: st
                 await websocket.send_json({
                     "event": "skhy_update",
                     "data": payload,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
                 await asyncio.sleep(3)
             except Exception as e:

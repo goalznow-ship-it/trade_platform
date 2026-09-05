@@ -12,11 +12,11 @@ Endpoints:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import List, Optional
+import asyncio
+from datetime import UTC, datetime
 
 import pandas as pd
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.logging import logger
@@ -41,7 +41,7 @@ class PredictionResponse(BaseModel):
 
 
 class BatchPredictionRequest(BaseModel):
-    symbols: List[str]
+    symbols: list[str]
     timeframe: str = "15m"
 
 
@@ -50,19 +50,29 @@ class AugmentScoreRequest(BaseModel):
     base_score: float = Field(..., ge=0, le=100)
 
 
-# ── Helper ──────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────
+def _build_ohlcv_df(ohlcv: list) -> pd.DataFrame:
+    """
+    Pure CPU work: build a sorted, indexed DataFrame from raw OHLCV rows.
+    No I/O — safe to call inside asyncio.to_thread.
+    """
+    df = pd.DataFrame(
+        ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+    )
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    return df.set_index("timestamp").sort_index()
+
+
 async def _fetch_ohlcv_df(exchange, symbol: str, timeframe: str, limit: int = 500):
-    """Fetch OHLCV as DataFrame."""
+    """
+    Async wrapper. The network call is awaited; DataFrame construction
+    is dispatched to a worker thread so it does not block the event loop.
+    """
     try:
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         if not ohlcv:
             return None
-        df = pd.DataFrame(
-            ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-        df = df.set_index("timestamp").sort_index()
-        return df
+        return await asyncio.to_thread(_build_ohlcv_df, ohlcv)
     except Exception as e:
         logger.error(f"OHLCV fetch failed for {symbol}: {e}")
         return None
@@ -84,15 +94,33 @@ async def predict_symbol(
     if exchange is None:
         raise HTTPException(503, "No exchange client available")
 
-    df = await _fetch_ohlcv_df(exchange, symbol, timeframe)
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", timeframe) if symbol != "BTC/USDT" else None
+    # Fetch in parallel — both calls are network I/O, so asyncio.gather is
+    # the right tool (no thread needed for the wait itself).
+    if symbol == "BTC/USDT":
+        df, btc_df = await _fetch_ohlcv_df(exchange, symbol, timeframe), None
+    else:
+        df, btc_df = await asyncio.gather(
+            _fetch_ohlcv_df(exchange, symbol, timeframe),
+            _fetch_ohlcv_df(exchange, "BTC/USDT", timeframe),
+        )
 
     if df is None or df.empty or len(df) < 200:
         raise HTTPException(400, f"Insufficient data for {symbol}")
 
-    pred = engine.predict(symbol, df, btc_df)
+    # ML inference is CPU-bound (XGBoost + LightGBM + Transformer) — run in thread
+    pred = await asyncio.to_thread(engine.predict, symbol, df, btc_df)
     if "error" in pred:
-        raise HTTPException(500, pred["error"])
+        # Don't echo pred["error"] verbatim — that came from the
+        # inference layer and may include file paths or feature
+        # names. Log it server-side, return a generic message with
+        # a correlation id the user can quote to support.
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            RuntimeError(pred["error"]),
+            user_message="ML prediction failed",
+            context=f"ml.predict {symbol} {timeframe}",
+        )
+        raise HTTPException(500, detail={"error": msg, "correlation_id": corr})
 
     pred["symbol"] = symbol
     return pred
@@ -109,23 +137,40 @@ async def predict_batch(req: BatchPredictionRequest, user=Depends(get_current_us
     if exchange is None:
         raise HTTPException(503, "No exchange client available")
 
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", req.timeframe)
-    results = []
-    for sym in req.symbols[:30]:  # cap to 30
-        try:
-            df = await _fetch_ohlcv_df(exchange, sym, req.timeframe)
+    symbols = req.symbols[:30]  # cap to 30
+    if not symbols:
+        return {"count": 0, "results": [], "timestamp": datetime.now(UTC).isoformat()}
+
+    # Fetch BTC context + all symbol DataFrames in parallel. Network I/O
+    # only — never blocks the event loop.
+    fetch_tasks = [_fetch_ohlcv_df(exchange, s, req.timeframe) for s in symbols]
+    btc_task = _fetch_ohlcv_df(exchange, "BTC/USDT", req.timeframe)
+    gathered = await asyncio.gather(*fetch_tasks, btc_task)
+    btc_df = gathered[-1]
+    dfs = gathered[:-1]
+
+    # Inference is CPU-bound — run all predictions on a single thread so
+    # we serialize XGBoost/LightGBM/Transformer calls but never block
+    # the event loop with them.
+    def _infer_all() -> list:
+        out: list = []
+        for sym, df in zip(symbols, dfs, strict=False):
             if df is None or df.empty or len(df) < 200:
                 continue
-            pred = engine.predict(sym, df, btc_df)
-            pred["symbol"] = sym
-            results.append(pred)
-        except Exception as e:
-            logger.error(f"Batch predict failed for {sym}: {e}")
+            ctx = btc_df if (btc_df is not None and not btc_df.empty) else df
+            try:
+                pred = engine.predict(sym, df, ctx)
+                pred["symbol"] = sym
+                out.append(pred)
+            except Exception as e:
+                logger.error(f"Batch infer failed for {sym}: {e}")
+        return out
 
+    results = await asyncio.to_thread(_infer_all)
     return {
         "count": len(results),
         "results": results,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -184,8 +229,10 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
             "note": "exchange_unavailable",
         }
 
-    df = await _fetch_ohlcv_df(exchange, req.symbol, "15m")
-    btc_df = await _fetch_ohlcv_df(exchange, "BTC/USDT", "15m")
+    df, btc_df = await asyncio.gather(
+        _fetch_ohlcv_df(exchange, req.symbol, "15m"),
+        _fetch_ohlcv_df(exchange, "BTC/USDT", "15m"),
+    )
     if df is None or df.empty:
         return {
             "final_score": req.base_score,
@@ -193,39 +240,72 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
             "note": "data_unavailable",
         }
 
-    pred = engine.predict(req.symbol, df, btc_df)
-    return engine.augment_institutional_score(req.base_score, pred)
+    # CPU-bound — never run on the event loop.
+    pred = await asyncio.to_thread(engine.predict, req.symbol, df, btc_df)
+    return await asyncio.to_thread(
+        engine.augment_institutional_score, req.base_score, pred
+    )
 
 
 @router.post("/retrain")
 async def trigger_retrain(
-    background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
+    symbols: list[str] | None = None,
     timeframe: str = "15m",
     include_transformer: bool = True,
     user=Depends(get_current_user),
 ):
     """
-    Trigger ML retraining in the background.
-    Admin-only in production.
+    Trigger ML retraining on the dedicated Celery worker.
+    Admin-only.
+
+    Why not BackgroundTasks: a single retrain runs XGBoost +
+    LightGBM + a PyTorch Transformer on up to 30 symbols. The
+    model weights are CPU-bound native code; a `BackgroundTasks`
+    task runs in the same event loop as live user requests and
+    would stall every other endpoint for the duration of
+    training — a self-inflicted DoS. The Celery worker runs
+    the job in a separate process (and, in production, a
+    separate container with the ml-training profile).
     """
     if not getattr(user, "is_admin", False):
         raise HTTPException(403, "Admin access required")
 
-    from app.services.ml.training.train_script import DEFAULT_SYMBOLS, run_training
+    from app.services.ml.training.train_script import DEFAULT_SYMBOLS
+    from app.workers import retrain_ml_models
 
     syms = symbols or DEFAULT_SYMBOLS
-
-    async def _job():
-        try:
-            await run_training(syms, timeframe, include_transformer, save=True)
-        except Exception as e:
-            logger.error(f"Background retrain failed: {e}")
-
-    background_tasks.add_task(_job)
+    async_result = retrain_ml_models.delay(
+        symbols=syms,
+        timeframe=timeframe,
+        include_transformer=include_transformer,
+    )
     return {
-        "status": "scheduled",
+        "status": "queued",
+        "task_id": async_result.id,
         "symbols": len(syms),
         "timeframe": timeframe,
         "include_transformer": include_transformer,
     }
+
+
+@router.get("/retrain/{task_id}")
+async def retrain_status(task_id: str, user=Depends(get_current_user)):
+    """
+    Poll the status of a previously-queued retrain task.
+    """
+    if not getattr(user, "is_admin", False):
+        raise HTTPException(403, "Admin access required")
+
+    from app.workers import celery_app
+    result = celery_app.AsyncResult(task_id)
+    response = {
+        "task_id": task_id,
+        "state": result.state,
+        "ready": result.ready(),
+    }
+    if result.ready():
+        try:
+            response["result"] = result.get(timeout=1)
+        except Exception as e:
+            response["error"] = str(e)
+    return response

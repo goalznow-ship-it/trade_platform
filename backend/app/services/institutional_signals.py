@@ -11,15 +11,15 @@ Integrates:
 Produces comprehensive signals with all required fields.
 """
 import asyncio
-from datetime import datetime, timezone
-from typing import Optional, List
-from app.services.market import market_service
+from datetime import UTC, datetime
+
+from app.core.logging import logger
+from app.services.indicators import indicator_service
 from app.services.institutional_scoring import institutional_scorer
-from app.services.smc_engine import smc_engine
+from app.services.market import market_service
 from app.services.multi_timeframe import multi_timeframe
 from app.services.professional_risk import professional_risk
-from app.services.indicators import indicator_service
-from app.core.logging import logger
+from app.services.smc_engine import smc_engine
 
 
 class InstitutionalSignalEngine:
@@ -100,7 +100,7 @@ class InstitutionalSignalEngine:
 
         invalidation = self._calculate_invalidation(current_price, direction, smc_data, data)
 
-        score_details = inst_score.get("scores", {})
+        inst_score.get("scores", {})
         reasons = self._build_reasons(direction, inst_score, smc_data, mtf, futures_data)
 
         hold_time = self._estimate_hold_time(timeframe, direction)
@@ -144,7 +144,7 @@ class InstitutionalSignalEngine:
         result = {
             "symbol": symbol,
             "timeframe": timeframe,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "current_price": round(current_price, 4),
             "direction": direction,
             "confidence": round(abs_score, 1),
@@ -201,7 +201,7 @@ class InstitutionalSignalEngine:
         details = inst_score.get("details", {}) or {}
         futures_data = signal.get("futures") or {}
         smc_data = signal.get("market_structure", {}) or {}
-        indicators = signal.get("indicators", {}) or {}
+        signal.get("indicators", {}) or {}
         entry_zone = signal.get("entry_zone", {}) or {}
         alignment = signal.get("alignment", {}) or {}
 
@@ -248,9 +248,9 @@ class InstitutionalSignalEngine:
         signal["composite_score"] = max(0, min(100, confidence))
         return signal
 
-    async def scan_all(self, min_score: float = 70, limit: int = 10) -> List[dict]:
-        from app.services.market_coverage import market_coverage
+    async def scan_all(self, min_score: float = 70, limit: int = 10) -> list[dict]:
         from app.core.cache import cache_get, cache_set
+        from app.services.market_coverage import market_coverage
 
         cache_key = "institutional:scan:all"
         cached = await cache_get(cache_key)
@@ -275,7 +275,7 @@ class InstitutionalSignalEngine:
             symbols = await market_coverage.get_top_symbols(30)
             semaphore = asyncio.Semaphore(6)
 
-            async def analyze_symbol(symbol: str) -> Optional[dict]:
+            async def analyze_symbol(symbol: str) -> dict | None:
                 async with semaphore:
                     try:
                         return await self.generate_signal(symbol)
@@ -315,14 +315,14 @@ class InstitutionalSignalEngine:
 
     def _calculate_entry_zone(self, price: float, atr: float, direction: str) -> dict:
         if direction == "long":
-            atr_offset = atr * 0.3 if atr else price * 0.003
+            atr * 0.3 if atr else price * 0.003
             return {
                 "min": round(price * 0.995, 4),
                 "max": round(price * 1.002, 4),
                 "mid": round(price, 4),
             }
         else:
-            atr_offset = atr * 0.3 if atr else price * 0.003
+            atr * 0.3 if atr else price * 0.003
             return {
                 "min": round(price * 0.998, 4),
                 "max": round(price * 1.005, 4),
@@ -355,7 +355,7 @@ class InstitutionalSignalEngine:
                                  score: dict) -> tuple:
         risk = abs(entry - stop)
         abs_score = score.get("abs_score", 50)
-        rr_multiplier = 1 + (abs_score / 100)
+        1 + (abs_score / 100)
 
         if direction == "long":
             tp1 = entry + risk * 1.5
@@ -386,7 +386,7 @@ class InstitutionalSignalEngine:
             return f"Price closes above {price * 1.03:.2f} (3% rise from current)"
 
     def _build_reasons(self, direction: str, score: dict, smc: dict,
-                        mtf: dict, futures: Optional[dict]) -> List[str]:
+                        mtf: dict, futures: dict | None) -> list[str]:
         reasons = []
         scores = score.get("scores", {})
 
@@ -461,7 +461,7 @@ class InstitutionalSignalEngine:
         }
         return mapping.get(timeframe, "1-24 hours")
 
-    async def _get_futures_data(self, symbol: str) -> Optional[dict]:
+    async def _get_futures_data(self, symbol: str) -> dict | None:
         try:
             from app.services.market import market_service
 
@@ -496,7 +496,7 @@ class InstitutionalSignalEngine:
         return {
             "symbol": symbol,
             "timeframe": timeframe,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "error": reason,
             "direction": "neutral",
             "confidence": 0,

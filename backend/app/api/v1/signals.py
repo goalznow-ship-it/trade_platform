@@ -1,17 +1,18 @@
 """Enhanced Signal API with lifecycle tracking & subscription limits"""
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai_engine.engine import ai_engine
 from app.core.database import get_db
-from app.core.security import get_current_user
 from app.core.rate_limiter import daily_tracker
-from app.models.user import User
+from app.core.security import get_current_user
 from app.models.analysis import Signal
 from app.models.market import Symbol as SymbolModel
-from app.ai_engine.engine import ai_engine
+from app.models.user import User
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
@@ -72,7 +73,7 @@ async def _persist_signal(signal: dict, db: AsyncSession) -> None:
         result="new",
         is_active=True,
         expires_at=(
-            datetime.now(timezone.utc) + {
+            datetime.now(UTC) + {
                 "1m": timedelta(hours=2),
                 "5m": timedelta(hours=8),
                 "15m": timedelta(hours=18),
@@ -136,7 +137,7 @@ async def scan_all(
 
 @router.get("/history")
 async def signal_history(
-    symbol: Optional[str] = None,
+    symbol: str | None = None,
     limit: int = 50,
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):

@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1 import trading
+from app.core import kill_switch
 
 
 class ScalarResult:
@@ -39,6 +40,11 @@ class FakeExchange:
         return self.positions
 
 
+async def _kill_off() -> bool:
+    """Stand-in for is_kill_switch_active() that always reports inactive."""
+    return False
+
+
 @pytest.mark.asyncio
 async def test_partial_close_is_opposite_side_reduce_only(monkeypatch):
     position = SimpleNamespace(
@@ -57,11 +63,8 @@ async def test_partial_close_is_opposite_side_reduce_only(monkeypatch):
             filled_quantity=0.5, avg_price=65000.0, error=None,
         )
 
-    async def redis_get(_key):
-        return None
-
     monkeypatch.setattr(trading.settings, "TRADING_ENABLED", True)
-    monkeypatch.setattr(trading.redis_client, "get", redis_get)
+    monkeypatch.setattr(kill_switch, "is_kill_switch_active", _kill_off)
     monkeypatch.setattr(trading.exchange_manager, "get_user_exchange", get_exchange)
     monkeypatch.setattr(trading.exchange_manager, "create_order", create_order)
 
@@ -93,11 +96,8 @@ async def test_close_rejects_missing_position_without_order(monkeypatch):
         nonlocal called
         called = True
 
-    async def redis_get(_key):
-        return None
-
     monkeypatch.setattr(trading.settings, "TRADING_ENABLED", True)
-    monkeypatch.setattr(trading.redis_client, "get", redis_get)
+    monkeypatch.setattr(kill_switch, "is_kill_switch_active", _kill_off)
     monkeypatch.setattr(trading.exchange_manager, "get_user_exchange", get_exchange)
     monkeypatch.setattr(trading.exchange_manager, "create_order", create_order)
 

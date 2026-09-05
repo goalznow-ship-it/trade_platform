@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AuthGuard from "@/components/AuthGuard";
+import { AuthGuard } from "@/components/AuthGuard";
 import MLPanel from "@/components/ml/MLPanel";
 import MLStatus from "@/components/ml/MLStatus";
 import MLPredictionCard from "@/components/ml/MLPredictionCard";

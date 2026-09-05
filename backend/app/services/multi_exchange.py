@@ -1,5 +1,6 @@
+
 import ccxt
-from typing import Optional, Dict
+
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
 
@@ -7,10 +8,10 @@ from app.core.logging import logger
 class ExchangeRegistry:
     def __init__(self):
         self.logger = logger
-        self._exchanges: Dict[str, ccxt.Exchange] = {}
+        self._exchanges: dict[str, ccxt.Exchange] = {}
 
-    def _get_exchange(self, name: str, api_key: Optional[str] = None,
-                       secret: Optional[str] = None, passphrase: Optional[str] = None) -> Optional[ccxt.Exchange]:
+    def _get_exchange(self, name: str, api_key: str | None = None,
+                       secret: str | None = None, passphrase: str | None = None) -> ccxt.Exchange | None:
         cache_key = f"{name}:{api_key or ''}"
         if cache_key in self._exchanges:
             return self._exchanges[cache_key]
