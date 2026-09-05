@@ -1,19 +1,19 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.core.database import get_db
-from app.core.security import get_current_user
-from app.core.config import settings
-from app.core.redis import redis_client
-from app.models.user import User
-from app.models.trade import TradeHistory, Order
-from app.services.exchange.manager import exchange_manager
-from app.services.exchange.base import OrderRequest as ExchangeOrderRequest
-from datetime import datetime, timezone
 import csv
 import io
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.trade import Order, TradeHistory
+from app.models.user import User
+from app.services.exchange.base import OrderRequest as ExchangeOrderRequest
+from app.services.exchange.manager import exchange_manager
 
 router = APIRouter(prefix="/trade", tags=["Trading"])
 
@@ -24,14 +24,14 @@ class OrderRequest(BaseModel):
     side: str = Field(pattern="^(buy|sell)$")
     amount: float = Field(gt=0)
     order_type: str = Field(default="market", pattern="^(market|limit|stop|stop_market|take_profit_market)$")
-    price: Optional[float] = Field(default=None, gt=0)
-    stop_price: Optional[float] = Field(default=None, gt=0)
-    stop_loss: Optional[float] = Field(default=None, gt=0)
-    take_profit: Optional[float] = Field(default=None, gt=0)
+    price: float | None = Field(default=None, gt=0)
+    stop_price: float | None = Field(default=None, gt=0)
+    stop_loss: float | None = Field(default=None, gt=0)
+    take_profit: float | None = Field(default=None, gt=0)
     leverage: int = Field(default=1, ge=1, le=125)
     reduce_only: bool = False
     margin_mode: str = Field(default="isolated", pattern="^(isolated|cross)$")
-    client_order_id: Optional[str] = Field(
+    client_order_id: str | None = Field(
         default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$",
     )
 
@@ -48,13 +48,13 @@ class APIKeyRequest(BaseModel):
     exchange: str = Field(pattern="^(binance|bybit)$")
     api_key: str = Field(min_length=8, max_length=255)
     secret_key: str = Field(min_length=8, max_length=255)
-    passphrase: Optional[str] = None
-    label: Optional[str] = Field(default=None, max_length=100)
+    passphrase: str | None = None
+    label: str | None = Field(default=None, max_length=100)
 
 
 class TradeNoteUpdate(BaseModel):
-    notes: Optional[str] = None
-    tags: Optional[list[str]] = None
+    notes: str | None = None
+    tags: list[str] | None = None
 
 
 class CancelOrderRequest(BaseModel):
@@ -67,9 +67,9 @@ class ModifyOrderRequest(BaseModel):
     exchange: str = "binance"
     symbol: str
     order_id: str
-    price: Optional[float] = None
-    quantity: Optional[float] = None
-    stop_price: Optional[float] = None
+    price: float | None = None
+    quantity: float | None = None
+    stop_price: float | None = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -95,7 +95,7 @@ async def trading_status(
     result = await db.execute(
         select(ExchangeCredentials.exchange).where(
             ExchangeCredentials.user_id == user.id,
-            ExchangeCredentials.is_active == True,
+            ExchangeCredentials.is_active,
         )
     )
     configured_exchanges = list(result.scalars().all())
@@ -123,7 +123,7 @@ async def trading_status(
 @router.post("/order")
 async def create_order(
     req: OrderRequest,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -325,7 +325,7 @@ async def preview_order(
         ),
         "live_trading_enabled": settings.TRADING_ENABLED,
         "kill_switch_active": kill_switch_active,
-        "market_data_timestamp": datetime.now(timezone.utc).isoformat(),
+        "market_data_timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -747,7 +747,7 @@ async def list_api_keys(
     result = await db.execute(
         select(ExchangeCredentials).where(
             ExchangeCredentials.user_id == user.id,
-            ExchangeCredentials.is_active == True,
+            ExchangeCredentials.is_active,
         ).order_by(ExchangeCredentials.exchange)
     )
     return [

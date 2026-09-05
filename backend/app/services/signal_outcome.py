@@ -1,6 +1,6 @@
 """Resolve persisted signal outcomes from real exchange candles."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 
@@ -25,8 +25,8 @@ class SignalOutcomeResolver:
     @staticmethod
     def _aware(value: datetime | None) -> datetime:
         if value is None:
-            return datetime.now(timezone.utc)
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            return datetime.now(UTC)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
 
     @staticmethod
     def _candle_result(signal: Signal, candle: dict) -> str | None:
@@ -61,7 +61,7 @@ class SignalOutcomeResolver:
         return None
 
     async def resolve_open_signals(self, limit: int = 100) -> dict:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with async_session_factory() as db:
             rows = await db.execute(
                 select(Signal)
@@ -98,7 +98,7 @@ class SignalOutcomeResolver:
                 for candle in candles:
                     candle_time = datetime.fromtimestamp(
                         float(candle["time"]),
-                        tz=timezone.utc,
+                        tz=UTC,
                     )
                     if candle_time < created:
                         continue

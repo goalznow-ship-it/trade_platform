@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Any
 from datetime import datetime
-from app.models.alert import AlertType, AlertCondition
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from app.models.alert import AlertCondition, AlertType
 
 
 class AlertCreate(BaseModel):
@@ -9,36 +11,36 @@ class AlertCreate(BaseModel):
     alert_type: AlertType
     symbol: str = Field(..., min_length=1, max_length=20)
     exchange: str = Field(default="binance")
-    timeframe: Optional[str] = None
+    timeframe: str | None = None
     condition: AlertCondition
-    value: Optional[float] = None
-    value_secondary: Optional[float] = None
-    comparison_symbol: Optional[str] = None
-    channels: List[str] = Field(default=["in_app"])
+    value: float | None = None
+    value_secondary: float | None = None
+    comparison_symbol: str | None = None
+    channels: list[str] = Field(default=["in_app"])
     cooldown_minutes: int = Field(default=0, ge=0)
     max_triggers: int = Field(default=0, ge=0)
     is_recurring: bool = False
-    metadata: Optional[dict] = None
+    metadata: dict | None = None
 
 
 class AlertUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    alert_type: Optional[AlertType] = None
-    symbol: Optional[str] = None
-    condition: Optional[AlertCondition] = None
-    value: Optional[float] = None
-    value_secondary: Optional[float] = None
-    channels: Optional[List[str]] = None
-    cooldown_minutes: Optional[int] = None
-    max_triggers: Optional[int] = None
-    is_active: Optional[bool] = None
-    is_recurring: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=200)
+    alert_type: AlertType | None = None
+    symbol: str | None = None
+    condition: AlertCondition | None = None
+    value: float | None = None
+    value_secondary: float | None = None
+    channels: list[str] | None = None
+    cooldown_minutes: int | None = None
+    max_triggers: int | None = None
+    is_active: bool | None = None
+    is_recurring: bool | None = None
 
 
 class AlertTriggerResponse(BaseModel):
     id: int
     triggered_value: float
-    triggered_at_price: Optional[float]
+    triggered_at_price: float | None
     channel: str
     delivered: bool
     triggered_at: datetime
@@ -54,20 +56,20 @@ class AlertResponse(BaseModel):
     alert_type: str
     symbol: str
     exchange: str
-    timeframe: Optional[str]
+    timeframe: str | None
     condition: str
-    value: Optional[float]
-    value_secondary: Optional[float]
+    value: float | None
+    value_secondary: float | None
     channels: Any
     cooldown_minutes: int
     max_triggers: int
     is_active: bool
     is_recurring: bool
     trigger_count: int
-    last_triggered_at: Optional[datetime]
+    last_triggered_at: datetime | None
     created_at: datetime
-    updated_at: Optional[datetime]
-    triggers: List[AlertTriggerResponse] = []
+    updated_at: datetime | None
+    triggers: list[AlertTriggerResponse] = []
 
     class Config:
         from_attributes = True

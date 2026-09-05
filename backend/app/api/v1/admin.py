@@ -1,26 +1,27 @@
 import os
+from datetime import UTC, datetime
+
 import psutil
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
 from pydantic import BaseModel
-from typing import Optional
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.websocket_manager import ws_manager
-from app.models.user import User
-from app.models.analysis import Signal
-from app.models.trade import Trade
-from app.models.market import Symbol
 from app.models.admin import AuditLog, Subscription
+from app.models.analysis import Signal
+from app.models.market import Symbol
+from app.models.trade import Trade
+from app.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 class UserUpdate(BaseModel):
-    is_admin: Optional[bool] = None
-    is_active: Optional[bool] = None
-    subscription_tier: Optional[str] = None
+    is_admin: bool | None = None
+    is_active: bool | None = None
+    subscription_tier: str | None = None
 
 class SymbolCreate(BaseModel):
     name: str
@@ -40,7 +41,7 @@ async def system_health(
     from app.core.redis import redis_client
     health = {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "services": {},
     }
     try:
@@ -56,8 +57,8 @@ async def system_health(
         health["services"]["postgres"] = "disconnected"
         health["status"] = "degraded"
     health["services"]["websocket"] = f"{ws_manager.stats['total_clients']} clients"
-    from app.services.streaming import streaming_service
     from app.core.provider_health import provider_health
+    from app.services.streaming import streaming_service
     stream_stats = streaming_service.get_stats()
     provider_stats = provider_health.snapshot()
     health["services"]["streaming"] = (
@@ -106,9 +107,9 @@ async def ws_clients(admin: User = Depends(require_admin)):
 @router.get("/stats")
 async def get_stats(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     total_users = await db.scalar(select(func.count(User.id)))
-    active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
+    active_users = await db.scalar(select(func.count(User.id)).where(User.is_active))
     total_signals = await db.scalar(select(func.count(Signal.id)))
-    active_signals = await db.scalar(select(func.count(Signal.id)).where(Signal.is_active == True))
+    active_signals = await db.scalar(select(func.count(Signal.id)).where(Signal.is_active))
     total_symbols = await db.scalar(select(func.count(Symbol.id)))
     total_trades = await db.scalar(select(func.count(Trade.id)))
 
@@ -225,14 +226,14 @@ async def list_subscriptions(admin: User = Depends(require_admin), db: AsyncSess
 
 @router.get("/revenue")
 async def revenue_stats(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(func.sum(Subscription.price)).where(Subscription.is_active == True))
+    result = await db.execute(select(func.sum(Subscription.price)).where(Subscription.is_active))
     total_revenue = result.scalar() or 0
     result = await db.execute(
-        select(func.count(Subscription.id)).where(Subscription.is_active == True, Subscription.tier != "free")
+        select(func.count(Subscription.id)).where(Subscription.is_active, Subscription.tier != "free")
     )
     paid_subs = result.scalar() or 0
     result = await db.execute(
-        select(Subscription.tier, func.count(Subscription.id)).where(Subscription.is_active == True).group_by(Subscription.tier)
+        select(Subscription.tier, func.count(Subscription.id)).where(Subscription.is_active).group_by(Subscription.tier)
     )
     tier_breakdown = {row[0]: row[1] for row in result.all()}
     return {
@@ -267,9 +268,16 @@ async def brain_status(admin: User = Depends(require_admin)):
 @router.get("/brain/engines")
 async def brain_engines(admin: User = Depends(require_admin)):
     from app.services.brain import (
-        orderflow_engine, derivatives_engine, smc_engine,
-        institutional_scorer, multi_timeframe_engine, market_coverage,
-        macro_engine, onchain_engine, social_sentiment, whale_tracker,
+        derivatives_engine,
+        institutional_scorer,
+        macro_engine,
+        market_coverage,
+        multi_timeframe_engine,
+        onchain_engine,
+        orderflow_engine,
+        smc_engine,
+        social_sentiment,
+        whale_tracker,
     )
     return {
         "engines": {
@@ -308,8 +316,8 @@ async def brain_self_learning(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.self_learning import self_learning
     from app.models.trade import TradeHistory
+    from app.services.self_learning import self_learning
     history_result = await db.execute(
         select(TradeHistory).order_by(TradeHistory.closed_at.desc()).limit(1000)
     )
@@ -363,8 +371,8 @@ async def trading_control_status(admin: User = Depends(require_admin)):
 @router.get("/providers/health")
 async def provider_health_status(admin: User = Depends(require_admin)):
     # Imports ensure all provider facades register their configuration state.
-    from app.services import macro_engine, onchain, social_sentiment  # noqa: F401
     from app.core.provider_health import provider_health
+    from app.services import macro_engine, onchain, social_sentiment  # noqa: F401
     providers = provider_health.snapshot()
     return {
         "providers": providers,
@@ -396,8 +404,8 @@ async def set_trading_control(
 # Audit Logs
 @router.get("/execution/stats")
 async def execution_stats(admin: User = Depends(require_admin)):
-    from app.services.execution_engine import execution_engine
     from app.core.redis import redis_client
+    from app.services.execution_engine import execution_engine
     try:
         total_validations = int(await redis_client.get("execution:total_validations") or 0)
         total_approved = int(await redis_client.get("execution:total_approved") or 0)
@@ -427,7 +435,7 @@ async def execution_stats(admin: User = Depends(require_admin)):
 
 @router.get("/logs")
 async def get_logs(
-    action: Optional[str] = None,
+    action: str | None = None,
     limit: int = 100,
     offset: int = 0,
     admin: User = Depends(require_admin),
@@ -442,4 +450,4 @@ async def get_logs(
         query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
     )
     logs = result.scalars().all()
-    return [{"id": l.id, "user_id": l.user_id, "action": l.action, "resource": l.resource, "details": l.details, "ip_address": l.ip_address, "created_at": str(l.created_at)} for l in logs]
+    return [{"id": l.id, "user_id": l.user_id, "action": l.action, "resource": l.resource, "details": l.details, "ip_address": l.ip_address, "created_at": str(l.created_at)} for l in logs]  # noqa: E741

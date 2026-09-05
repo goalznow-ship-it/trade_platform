@@ -1,5 +1,6 @@
+
 from pydantic import BaseModel
-from typing import Optional
+
 
 class CandleSchema(BaseModel):
     time: int
@@ -11,18 +12,18 @@ class CandleSchema(BaseModel):
 
 class TickerSchema(BaseModel):
     symbol: str
-    price: Optional[float] = None
-    bid: Optional[float] = None
-    ask: Optional[float] = None
-    high_24h: Optional[float] = None
-    low_24h: Optional[float] = None
-    volume_24h: Optional[float] = None
-    change_percent: Optional[float] = None
+    price: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+    high_24h: float | None = None
+    low_24h: float | None = None
+    volume_24h: float | None = None
+    change_percent: float | None = None
 
 class MarketOverviewSchema(BaseModel):
-    btc_price: Optional[float] = None
-    btc_change: Optional[float] = None
-    eth_price: Optional[float] = None
-    total_market_cap: Optional[float] = None
-    total_volume_24h: Optional[float] = None
-    btc_dominance: Optional[float] = None
+    btc_price: float | None = None
+    btc_change: float | None = None
+    eth_price: float | None = None
+    total_market_cap: float | None = None
+    total_volume_24h: float | None = None
+    btc_dominance: float | None = None

@@ -1,10 +1,12 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
-from sqlalchemy.sql import func
-from app.core.database import Base
 import enum
 
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.sql import func
 
-class TradeRating(str, enum.Enum):
+from app.core.database import Base
+
+
+class TradeRating(enum.StrEnum):
     PERFECT = "perfect"
     GOOD = "good"
     AVERAGE = "average"
@@ -12,7 +14,7 @@ class TradeRating(str, enum.Enum):
     BAD = "bad"
 
 
-class Emotion(str, enum.Enum):
+class Emotion(enum.StrEnum):
     CONFIDENT = "confident"
     HOPEFUL = "hopeful"
     NEUTRAL = "neutral"
@@ -23,7 +25,7 @@ class Emotion(str, enum.Enum):
     FOMO = "fomo"
 
 
-class MistakeType(str, enum.Enum):
+class MistakeType(enum.StrEnum):
     FOMO_ENTRY = "fomo_entry"
     EARLY_EXIT = "early_exit"
     LATE_EXIT = "late_exit"

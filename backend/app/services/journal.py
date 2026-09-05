@@ -1,7 +1,8 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.journal import TradeJournal
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.logging import logger
+from app.models.journal import TradeJournal
 
 
 class JournalService:

@@ -1,6 +1,7 @@
-from app.services.indicators import indicator_service
-from app.services.ai_analysis import ai_engine
 from app.core.logging import logger
+from app.services.ai_analysis import ai_engine
+from app.services.indicators import indicator_service
+
 
 class SignalService:
     def __init__(self):
@@ -15,9 +16,9 @@ class SignalService:
 
         rsi = indicator_service.rsi(data)
         macd = indicator_service.macd(data)
-        bb = indicator_service.bollinger(data)
+        indicator_service.bollinger(data)
         supertrend_data = indicator_service.supertrend(data)
-        pivot = indicator_service.pivot_points(data)
+        indicator_service.pivot_points(data)
 
         current_price = data[-1]['close']
 

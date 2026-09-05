@@ -1,9 +1,10 @@
-from typing import Optional, List
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.watchlist import Watchlist, WatchlistSymbol
+
 from app.core.logging import logger
+from app.models.watchlist import Watchlist, WatchlistSymbol
 
 
 class WatchlistService:
@@ -19,7 +20,7 @@ class WatchlistService:
         )
         return result.scalars().all()
 
-    async def get_watchlist(self, watchlist_id: int, user_id: int, db: AsyncSession) -> Optional[Watchlist]:
+    async def get_watchlist(self, watchlist_id: int, user_id: int, db: AsyncSession) -> Watchlist | None:
         result = await db.execute(
             select(Watchlist)
             .where(Watchlist.id == watchlist_id, Watchlist.user_id == user_id)
@@ -27,14 +28,14 @@ class WatchlistService:
         )
         return result.scalar_one_or_none()
 
-    async def create_watchlist(self, user_id: int, name: str, description: Optional[str], db: AsyncSession) -> Watchlist:
+    async def create_watchlist(self, user_id: int, name: str, description: str | None, db: AsyncSession) -> Watchlist:
         wl = Watchlist(user_id=user_id, name=name, description=description)
         db.add(wl)
         await db.commit()
         await db.refresh(wl)
         return wl
 
-    async def update_watchlist(self, watchlist_id: int, user_id: int, data: dict, db: AsyncSession) -> Optional[Watchlist]:
+    async def update_watchlist(self, watchlist_id: int, user_id: int, data: dict, db: AsyncSession) -> Watchlist | None:
         wl = await self.get_watchlist(watchlist_id, user_id, db)
         if not wl:
             return None
@@ -54,7 +55,7 @@ class WatchlistService:
         return True
 
     async def add_symbol(self, watchlist_id: int, user_id: int, symbol: str, exchange: str,
-                         notes: Optional[str], db: AsyncSession) -> Optional[WatchlistSymbol]:
+                         notes: str | None, db: AsyncSession) -> WatchlistSymbol | None:
         wl = await self.get_watchlist(watchlist_id, user_id, db)
         if not wl:
             return None
@@ -81,7 +82,7 @@ class WatchlistService:
         await db.commit()
         return True
 
-    async def toggle_favorite(self, watchlist_id: int, user_id: int, symbol: str, db: AsyncSession) -> Optional[WatchlistSymbol]:
+    async def toggle_favorite(self, watchlist_id: int, user_id: int, symbol: str, db: AsyncSession) -> WatchlistSymbol | None:
         wl = await self.get_watchlist(watchlist_id, user_id, db)
         if not wl:
             return None
@@ -98,7 +99,7 @@ class WatchlistService:
         await db.commit()
         return ws
 
-    async def reorder_symbols(self, watchlist_id: int, user_id: int, symbols: List[str], db: AsyncSession) -> bool:
+    async def reorder_symbols(self, watchlist_id: int, user_id: int, symbols: list[str], db: AsyncSession) -> bool:
         wl = await self.get_watchlist(watchlist_id, user_id, db)
         if not wl:
             return False

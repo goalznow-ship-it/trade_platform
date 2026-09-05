@@ -5,15 +5,13 @@ Combines technical + microstructure + cross-asset + sentiment into one matrix.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import numpy as np
 import pandas as pd
 
-from .technical import TechnicalFeatures
-from .microstructure import MicrostructureFeatures
 from .cross_asset import CrossAssetFeatures
+from .microstructure import MicrostructureFeatures
 from .sentiment import SentimentFeatures
+from .technical import TechnicalFeatures
 
 
 class FeatureEngineer:
@@ -32,11 +30,11 @@ class FeatureEngineer:
     def build(
         self,
         df: pd.DataFrame,
-        benchmark_df: Optional[pd.DataFrame] = None,
-        news_events: Optional[list] = None,
-        funding: Optional[pd.DataFrame] = None,
-        oi: Optional[pd.DataFrame] = None,
-        market_basket: Optional[Dict[str, pd.DataFrame]] = None,
+        benchmark_df: pd.DataFrame | None = None,
+        news_events: list | None = None,
+        funding: pd.DataFrame | None = None,
+        oi: pd.DataFrame | None = None,
+        market_basket: dict[str, pd.DataFrame] | None = None,
     ) -> pd.DataFrame:
         if df.empty or len(df) < 200:
             return pd.DataFrame()

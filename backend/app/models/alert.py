@@ -1,11 +1,13 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Text, JSON
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from app.core.database import Base
 import enum
 
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
-class AlertType(str, enum.Enum):
+from app.core.database import Base
+
+
+class AlertType(enum.StrEnum):
     PRICE = "price"
     EMA_CROSS = "ema_cross"
     GOLDEN_CROSS = "golden_cross"
@@ -25,7 +27,7 @@ class AlertType(str, enum.Enum):
     TREND_CHANGE = "trend_change"
 
 
-class AlertChannel(str, enum.Enum):
+class AlertChannel(enum.StrEnum):
     TELEGRAM = "telegram"
     DISCORD = "discord"
     EMAIL = "email"
@@ -33,7 +35,7 @@ class AlertChannel(str, enum.Enum):
     PUSH = "push"
 
 
-class AlertCondition(str, enum.Enum):
+class AlertCondition(enum.StrEnum):
     ABOVE = "above"
     BELOW = "below"
     CROSSES_ABOVE = "crosses_above"

@@ -1,6 +1,6 @@
 from app.services.ai_analysis import ai_engine
-from app.services.market import market_service
 from app.services.indicators import indicator_service
+from app.services.market import market_service
 from app.services.signals import signal_service
 
 
@@ -110,8 +110,8 @@ class EnterpriseSignalEngine:
         # Liquidation zones estimation (simplified)
         data = await market_service.get_ohlcv(symbol, "binance", "1h", 100)
         if data:
-            recent_lows = min(d["low"] for d in data[-20:])
-            recent_highs = max(d["high"] for d in data[-20:])
+            min(d["low"] for d in data[-20:])
+            max(d["high"] for d in data[-20:])
             current = data[-1]["close"]
             liq_long_zone = round(current * 0.95, 2)
             liq_short_zone = round(current * 1.05, 2)
@@ -139,7 +139,7 @@ class EnterpriseSignalEngine:
         structure = await self.analyze_market_structure(data)
         futures = await self.analyze_futures(symbol)
         indicators = await self._compute_enhanced_indicators(data)
-        signals_result = await signal_service.generate_signals(symbol, data, timeframe)
+        await signal_service.generate_signals(symbol, data, timeframe)
 
         current_price = data[-1]["close"]
         direction = analysis.get("prediction", "neutral")

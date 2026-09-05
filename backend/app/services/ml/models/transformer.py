@@ -10,11 +10,8 @@ Architecture:
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -93,7 +90,7 @@ class TransformerSignalWrapper:
         epochs: int = 30,
         batch_size: int = 64,
         lr: float = 1e-3,
-        device: Optional[str] = None,
+        device: str | None = None,
     ):
         self.seq_len = seq_len
         self.epochs = epochs
@@ -105,7 +102,7 @@ class TransformerSignalWrapper:
             "nhead": nhead,
             "num_layers": num_layers,
         }
-        self.model: Optional[TransformerSignalModel] = None
+        self.model: TransformerSignalModel | None = None
         self.feature_names: list[str] = []
         self.metrics: dict = {}
 

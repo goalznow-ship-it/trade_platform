@@ -10,24 +10,24 @@ Weight adjustment uses proportional allocation:
 - All weights re-normalized to sum to 1.0
 """
 
-from typing import List, Dict, Optional
-from datetime import datetime, timezone, timedelta
 import math
 import statistics
+from datetime import UTC, datetime, timedelta
+
 from app.core.logging import logger
 
 
 class SelfLearningEngine:
     def __init__(self):
-        self.trade_history: List[Dict] = []
-        self.weight_history: List[Dict] = []
+        self.trade_history: list[dict] = []
+        self.weight_history: list[dict] = []
         self.default_weights = {
             "trend": 0.20, "momentum": 0.15, "volume": 0.15,
             "liquidity": 0.15, "smc": 0.20, "risk": 0.15,
         }
         self.current_weights = dict(self.default_weights)
 
-    def record_trade(self, trade_data: Dict) -> None:
+    def record_trade(self, trade_data: dict) -> None:
         source_trade_id = trade_data.get("source_trade_id")
         if source_trade_id is not None and any(
             item.get("source_trade_id") == source_trade_id
@@ -37,8 +37,8 @@ class SelfLearningEngine:
         trade_data = dict(trade_data)
         trade_data["id"] = len(self.trade_history) + 1
         if "entry_time" not in trade_data:
-            trade_data["entry_time"] = datetime.now(timezone.utc).isoformat()
-        trade_data["recorded_at"] = datetime.now(timezone.utc).isoformat()
+            trade_data["entry_time"] = datetime.now(UTC).isoformat()
+        trade_data["recorded_at"] = datetime.now(UTC).isoformat()
         self.trade_history.append(trade_data)
         logger.info(
             "Trade recorded",
@@ -46,17 +46,17 @@ class SelfLearningEngine:
                    "direction": trade_data.get("direction")},
         )
 
-    def _get_trade(self, trade_id: int) -> Optional[Dict]:
+    def _get_trade(self, trade_id: int) -> dict | None:
         for t in self.trade_history:
             if t["id"] == trade_id:
                 return t
         return None
 
-    def _filter_trades_by_timeframe(self, timeframe: str) -> List[Dict]:
+    def _filter_trades_by_timeframe(self, timeframe: str) -> list[dict]:
         if timeframe == "all" or not self.trade_history:
             return list(self.trade_history)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         periods = {
             "week": timedelta(days=7),
             "month": timedelta(days=30),
@@ -82,7 +82,7 @@ class SelfLearningEngine:
                 result.append(t)
         return result
 
-    def evaluate_trade(self, trade_id: int) -> Dict:
+    def evaluate_trade(self, trade_id: int) -> dict:
         trade = self._get_trade(trade_id)
         if not trade:
             return {"error": "Trade not found", "trade_id": trade_id}
@@ -113,10 +113,10 @@ class SelfLearningEngine:
             "max_drawdown_acceptable": dd_acceptable,
             "outcome": outcome,
             "pnl_percent": round(trade.get("pnl_percent", 0), 2),
-            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "evaluated_at": datetime.now(UTC).isoformat(),
         }
 
-    def get_performance_metrics(self, timeframe: str = "all") -> Dict:
+    def get_performance_metrics(self, timeframe: str = "all") -> dict:
         trades = self._filter_trades_by_timeframe(timeframe)
         if not trades:
             return {
@@ -188,7 +188,7 @@ class SelfLearningEngine:
             } if worst_trade else None,
         }
 
-    def analyze_missed_profit(self, trade_id: int) -> Dict:
+    def analyze_missed_profit(self, trade_id: int) -> dict:
         trade = self._get_trade(trade_id)
         if not trade:
             return {"error": "Trade not found", "trade_id": trade_id}
@@ -263,7 +263,7 @@ class SelfLearningEngine:
 
         categories = list(self.default_weights.keys())
 
-        accuracies: Dict[str, float] = {}
+        accuracies: dict[str, float] = {}
         for cat in categories:
             outcomes = []
             for t in recent:
@@ -285,7 +285,7 @@ class SelfLearningEngine:
         avg_accuracy = statistics.mean(accuracies.values())
 
         self.weight_history.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "weights": dict(self.current_weights),
             "accuracies": {k: round(v, 4) for k, v in accuracies.items()},
             "avg_accuracy": round(avg_accuracy, 4),
@@ -317,14 +317,14 @@ class SelfLearningEngine:
 
     def get_optimal_position_size(
         self, score: float, balance: float, volatility: float
-    ) -> Dict:
+    ) -> dict:
         clamped_score = max(0, min(100, score))
         base_risk = 0.01 + (clamped_score / 100) * 0.02
         vol_penalty = min(0.5, volatility / 10) * 0.005
         risk_pct = max(0.005, base_risk - vol_penalty)
 
         score_range_low = max(0, int(clamped_score / 10) * 10)
-        score_range_high = min(100, score_range_low + 10)
+        min(100, score_range_low + 10)
         similar_trades = [
             t for t in self.trade_history
             if abs(t.get("scores_at_entry", {}).get("total", 50) - clamped_score) <= 15
@@ -366,7 +366,7 @@ class SelfLearningEngine:
             "similar_trades_analyzed": len(similar_trades),
         }
 
-    def get_learning_report(self) -> Dict:
+    def get_learning_report(self) -> dict:
         weight_changes = self.weight_history[-20:] if self.weight_history else []
         metrics = self.get_performance_metrics()
 
@@ -400,12 +400,12 @@ class SelfLearningEngine:
             "total_trades_recorded": len(self.trade_history),
             "total_weight_adjustments": len(self.weight_history),
             "recommendations": recommendations,
-            "report_generated_at": datetime.now(timezone.utc).isoformat(),
+            "report_generated_at": datetime.now(UTC).isoformat(),
         }
 
     def reset_weights(self) -> None:
         self.weight_history.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "weights": dict(self.current_weights),
             "reset": True,
         })

@@ -1,11 +1,13 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import json
-from datetime import datetime, timezone
-from app.services.market import market_service
-from app.services.ai_analysis import ai_engine
-from app.services.signals import signal_service
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
 from app.core.logging import logger
+from app.services.ai_analysis import ai_engine
+from app.services.market import market_service
+from app.services.signals import signal_service
 
 router = APIRouter()
 
@@ -26,7 +28,7 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
                 signals = await signal_service.generate_signals(symbol, data, "1m")
                 payload = {
                     "symbol": symbol,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "price": data[-1]['close'] if data else None,
                     "volume": data[-1]['volume'] if data else None,
                     "high_24h": max(d['high'] for d in data[-24:]) if len(data) >= 24 else None,

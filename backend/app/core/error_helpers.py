@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional, Tuple
 
 from app.core.config import settings
 
@@ -30,7 +29,7 @@ def safe_error_response(
     user_message: str,
     context: str = "",
     log_level: int = logging.ERROR,
-) -> Tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """
     Returns (client_message, correlation_id).
 

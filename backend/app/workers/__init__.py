@@ -1,18 +1,20 @@
-import json
 import asyncio
+import json  # noqa: F401
 import logging
-from typing import Optional
+from datetime import UTC, datetime, timezone  # noqa: F401
+from typing import Optional  # noqa: F401
+
 from celery import Celery
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.services.ai_analysis import ai_engine
+from app.services.indicators import indicator_service  # noqa: F401
 from app.services.market import market_service
 from app.services.news import news_service
-from app.services.indicators import indicator_service
-from app.services.ai_analysis import ai_engine
-from app.services.signals import signal_service
 from app.services.notifications import notifications_service
-from sqlalchemy import select
-from datetime import datetime, timezone
+from app.services.signals import signal_service
 
 celery_app = Celery(
     "trading_worker",
@@ -41,7 +43,7 @@ celery_app.conf.update(
 # spinning a new one for every task. Spinning a new loop leaks
 # asyncpg connection pools because the engine binds to whatever
 # loop first touches it; the old loop's pool becomes orphaned.
-_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:
@@ -131,7 +133,7 @@ def send_signal_notification(self, signal_id: int):
                     return {"error": "Signal not found", "signal_id": signal_id}
 
                 users_result = await session.execute(
-                    select(User).where(User.is_active == True)
+                    select(User).where(User.is_active)
                 )
                 users = users_result.scalars().all()
 
@@ -187,7 +189,7 @@ def collect_news(self):
                         source=article.get("source", ""),
                         category=article.get("category", "crypto"),
                         summary=article.get("summary", ""),
-                        published_at=datetime.fromisoformat(article.get("published_at", datetime.now(timezone.utc).isoformat())),
+                        published_at=datetime.fromisoformat(article.get("published_at", datetime.now(UTC).isoformat())),
                         is_analyzed=True,
                     )
                     session.add(news_record)
@@ -284,8 +286,9 @@ def retrain_ml_models(
 
     Returns a dict with the training summary from MLSignalEngine.
     """
-    from app.services.ml import MLSignalEngine
     import ccxt.async_support as ccxt
+
+    from app.services.ml import MLSignalEngine
 
     class _ClientAdapter:
         """Minimal fetch_ohlcv adapter wrapping a public ccxt client."""

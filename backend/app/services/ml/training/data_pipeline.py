@@ -5,13 +5,12 @@ Fetches historical OHLCV + builds features + labels for ML training.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime, timedelta
 
-import numpy as np
 import pandas as pd
 
 from app.core.logging import logger
+
 from ..features.engineer import FeatureEngineer
 
 
@@ -37,7 +36,7 @@ class TrainingDataPipeline:
         self.fe = FeatureEngineer()
 
     async def fetch_ohlcv(
-        self, symbol: str, days: Optional[int] = None
+        self, symbol: str, days: int | None = None
     ) -> pd.DataFrame:
         """
         Fetch OHLCV from exchange client. Returns DataFrame with DatetimeIndex.
@@ -59,7 +58,7 @@ class TrainingDataPipeline:
 
         try:
             since = int(
-                (datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000
+                (datetime.now(UTC) - timedelta(days=days)).timestamp() * 1000
             )
             page_size = 1500
             all_rows: list = []
@@ -99,10 +98,10 @@ class TrainingDataPipeline:
         self,
         symbol: str,
         benchmark_symbol: str = "BTC/USDT",
-        news_events: Optional[list] = None,
-        funding: Optional[pd.DataFrame] = None,
-        oi: Optional[pd.DataFrame] = None,
-    ) -> Tuple[pd.DataFrame, pd.Series]:
+        news_events: list | None = None,
+        funding: pd.DataFrame | None = None,
+        oi: pd.DataFrame | None = None,
+    ) -> tuple[pd.DataFrame, pd.Series]:
         """
         Build (X, y) for one symbol.
         Returns empty if data insufficient.
@@ -125,8 +124,8 @@ class TrainingDataPipeline:
         return X, y
 
     async def build_multi_symbol_dataset(
-        self, symbols: List[str], benchmark_symbol: str = "BTC/USDT"
-    ) -> Tuple[pd.DataFrame, pd.Series]:
+        self, symbols: list[str], benchmark_symbol: str = "BTC/USDT"
+    ) -> tuple[pd.DataFrame, pd.Series]:
         """
         Concatenate features from multiple symbols.
         Each symbol's data is treated as independent samples.

@@ -2,12 +2,15 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Dict, Set, Optional, Any, Callable
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import WebSocket
-from app.core.redis import redis_client
+
 from app.core.logging import logger
 from app.core.rate_limiter import InMemoryRateLimiter
+from app.core.redis import redis_client
 
 
 class ConnectionState:
@@ -46,13 +49,13 @@ class WebSocketClient:
     def __init__(self, websocket: WebSocket, client_id: str):
         self.websocket = websocket
         self.client_id = client_id
-        self.user_id: Optional[int] = None
+        self.user_id: int | None = None
         self.state = ConnectionState.PENDING
-        self.subscriptions: Set[str] = set()
-        self.symbol_subscriptions: Set[str] = set()
-        self.connected_at = datetime.now(timezone.utc)
+        self.subscriptions: set[str] = set()
+        self.symbol_subscriptions: set[str] = set()
+        self.connected_at = datetime.now(UTC)
         self.last_heartbeat = time.time()
-        self.user_agent: Optional[str] = None
+        self.user_agent: str | None = None
 
     async def send_json(self, data: dict) -> bool:
         try:
@@ -95,7 +98,7 @@ class WebSocketClient:
         payload = {
             "event": event,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         if channel:
             payload["channel"] = channel
@@ -108,13 +111,13 @@ class WebSocketClient:
 
 class WebSocketManager:
     def __init__(self):
-        self.clients: Dict[str, WebSocketClient] = {}
-        self.channel_subscriptions: Dict[str, Set[str]] = {ch: set() for ch in Channel.ALL}
-        self.user_clients: Dict[int, Set[str]] = {}
-        self.publishers: Dict[str, Callable] = {}
+        self.clients: dict[str, WebSocketClient] = {}
+        self.channel_subscriptions: dict[str, set[str]] = {ch: set() for ch in Channel.ALL}
+        self.user_clients: dict[int, set[str]] = {}
+        self.publishers: dict[str, Callable] = {}
         self.rate_limiter = InMemoryRateLimiter()
-        self._redis_task: Optional[asyncio.Task] = None
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._redis_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task | None = None
 
     async def start(self):
         self._redis_task = asyncio.create_task(self._redis_listener())
@@ -138,7 +141,7 @@ class WebSocketManager:
 
         await client.send_json({
             "event": "connected",
-            "data": {"client_id": client_id, "server_time": datetime.now(timezone.utc).isoformat()},
+            "data": {"client_id": client_id, "server_time": datetime.now(UTC).isoformat()},
         })
         logger.info(f"WebSocket client connected: {client_id}")
         return client
@@ -218,7 +221,7 @@ class WebSocketManager:
             "event": event,
             "channel": channel,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         try:
             text = json.dumps(payload, default=str)
@@ -248,7 +251,7 @@ class WebSocketManager:
 
         # Reap disconnected clients
         disconnected: list[str] = []
-        for client, result in zip(targets, results):
+        for client, result in zip(targets, results, strict=False):
             if result is False or isinstance(result, Exception):
                 disconnected.append(client.client_id)
 
@@ -263,7 +266,7 @@ class WebSocketManager:
         payload = {
             "event": event,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         if channel:
             payload["channel"] = channel
@@ -289,13 +292,13 @@ class WebSocketManager:
         )
 
         # Clean up failed clients
-        for client, result in zip(targets, results):
+        for client, result in zip(targets, results, strict=False):
             if result is False or isinstance(result, Exception):
                 await self.disconnect(client.client_id)
 
-    async def handle_heartbeat(self, client: WebSocketClient, data: Optional[dict] = None):
+    async def handle_heartbeat(self, client: WebSocketClient, data: dict | None = None):
         client.last_heartbeat = time.time()
-        response = {"server_time": datetime.now(timezone.utc).isoformat()}
+        response = {"server_time": datetime.now(UTC).isoformat()}
         if data and "t" in data:
             response["t"] = data["t"]
         await client.send_json({"event": "pong", "data": response})

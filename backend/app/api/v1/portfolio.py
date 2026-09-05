@@ -1,12 +1,14 @@
+from datetime import UTC, datetime, timedelta
+
 import numpy as np
-from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.user import User
 from app.models.trade import Trade, TradeHistory
+from app.models.user import User
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
@@ -84,7 +86,7 @@ async def get_portfolio_analytics(
         "win_rate": round(len(wins) / len(pnls) * 100, 1) if pnls else 0,
         "total_trades": len(trades),
         "avg_risk_reward": round(abs(np.mean([t.risk_reward for t in trades if t.risk_reward])) if trades else 0, 2),
-        "profit_factor": round(abs(sum(wins) / sum(abs(l) for l in losses)), 2) if losses else float("inf"),
+        "profit_factor": round(abs(sum(wins) / sum(abs(l) for l in losses)), 2) if losses else float("inf"),  # noqa: E741
         "best_trade": {"symbol": best_trade.symbol, "pnl": best_trade.pnl} if best_trade else None,
         "worst_trade": {"symbol": worst_trade.symbol, "pnl": worst_trade.pnl} if worst_trade else None,
         "avg_holding_time": round(np.mean(durations), 1) if durations else 0,
@@ -99,7 +101,7 @@ async def get_daily_pnl(
     days: int = Query(default=30, ge=1, le=365),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     result = await db.execute(
         select(TradeHistory).where(
             TradeHistory.user_id == user.id, TradeHistory.closed_at >= cutoff

@@ -1,11 +1,13 @@
 import asyncio
+from datetime import UTC, datetime
+
 import numpy as np
-from datetime import datetime, timezone
-from app.services.skhy_market_data import skhy_market_data, normalize_symbol
-from app.services.skhy_indicators import skhy_indicators
-from app.services.skhy_structure import skhy_structure
+
 from app.core.cache import cache_get, cache_set
 from app.core.logging import logger
+from app.services.skhy_indicators import skhy_indicators
+from app.services.skhy_market_data import normalize_symbol, skhy_market_data
+from app.services.skhy_structure import skhy_structure
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
@@ -18,12 +20,12 @@ class SkhyAnalysisEngine:
         if isinstance(cached, dict) and cached.get("scores"):
             return cached
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         snapshot = await skhy_market_data.get_snapshot(symbol)
         ohlcv_tasks = {tf: skhy_market_data.get_ohlcv(tf, 200, symbol=symbol) for tf in TIMEFRAMES}
         ohlcv_results = await asyncio.gather(*ohlcv_tasks.values(), return_exceptions=True)
         ohlcv_data = {}
-        for tf, result in zip(ohlcv_tasks.keys(), ohlcv_results):
+        for tf, result in zip(ohlcv_tasks.keys(), ohlcv_results, strict=False):
             if isinstance(result, Exception):
                 logger.warning(f"OHLCV fetch failed for {tf}: {result}")
                 ohlcv_data[tf] = []
@@ -37,7 +39,7 @@ class SkhyAnalysisEngine:
                 "timestamp": now_iso, "last_updated": now_iso, "active_timeframe": active_tf,
                 "snapshot": snapshot, "timeframes": {active_tf: {"error": f"Insufficient data ({len(active_data)} candles)", "signal": "WAIT"}},
                 "alignment": {"primary_direction": "neutral", "confidence": 0, "status": "NO_DATA"},
-                "scores": {k: 0 for k in ["trend_score","structure_score","momentum_score","volume_score","liquidity_score","pattern_score","futures_score","orderflow_score","multitimeframe_score","risk_score"]} | {"overall": 0, "status": "NO_DATA_"+active_tf, "long_probability": 50, "short_probability": 50, "signal_confidence": 0},
+                "scores": dict.fromkeys(["trend_score", "structure_score", "momentum_score", "volume_score", "liquidity_score", "pattern_score", "futures_score", "orderflow_score", "multitimeframe_score", "risk_score"], 0) | {"overall": 0, "status": "NO_DATA_"+active_tf, "long_probability": 50, "short_probability": 50, "signal_confidence": 0},
                 "triggers": {}, "patterns": [], "support_resistance": {}, "support_zone": {}, "resistance_zone": {},
                 "elliott_wave": {"status":"insufficient_data"}, "fibonacci": {"status":"insufficient_data"},
                 "fibonacci_levels": {"status":"insufficient_data"}, "detected_structure": {"status":"insufficient_data"},
@@ -121,32 +123,32 @@ class SkhyAnalysisEngine:
         return result
 
     def _analyze_timeframe(self, data, indicators, structure, tf):
-        if not data: return {"error": "No data", "signal": "WAIT"}
+        if not data: return {"error": "No data", "signal": "WAIT"}  # noqa: E701
         close = data[-1]["close"]
         interp = indicators.get("interpretation", {})
-        trend = interp.get("trend", {}); momentum = interp.get("momentum", {}); volume_info = interp.get("volume", {})
+        trend = interp.get("trend", {}); momentum = interp.get("momentum", {}); volume_info = interp.get("volume", {})  # noqa: E702
         overall = interp.get("overall", "neutral")
         bullish_score = bearish_score = 0
-        if trend.get("bias") == "bullish": bullish_score += 25
-        elif trend.get("bias") == "bearish": bearish_score += 25
-        if momentum.get("rsi") in ("bullish", "oversold"): bullish_score += 15
-        elif momentum.get("rsi") in ("bearish", "overbought"): bearish_score += 15
-        if momentum.get("macd") == "bullish": bullish_score += 10
-        elif momentum.get("macd") == "bearish": bearish_score += 10
-        if volume_info.get("cmf") == "bullish": bullish_score += 10
-        elif volume_info.get("cmf") == "bearish": bearish_score += 10
-        if trend.get("supertrend") == "up": bullish_score += 15
-        elif trend.get("supertrend") == "down": bearish_score += 15
+        if trend.get("bias") == "bullish": bullish_score += 25  # noqa: E701
+        elif trend.get("bias") == "bearish": bearish_score += 25  # noqa: E701
+        if momentum.get("rsi") in ("bullish", "oversold"): bullish_score += 15  # noqa: E701
+        elif momentum.get("rsi") in ("bearish", "overbought"): bearish_score += 15  # noqa: E701
+        if momentum.get("macd") == "bullish": bullish_score += 10  # noqa: E701
+        elif momentum.get("macd") == "bearish": bearish_score += 10  # noqa: E701
+        if volume_info.get("cmf") == "bullish": bullish_score += 10  # noqa: E701
+        elif volume_info.get("cmf") == "bearish": bearish_score += 10  # noqa: E701
+        if trend.get("supertrend") == "up": bullish_score += 15  # noqa: E701
+        elif trend.get("supertrend") == "down": bearish_score += 15  # noqa: E701
         ms = structure.get("market_structure", {})
-        if ms.get("trend") == "bullish": bullish_score += 15
-        elif ms.get("trend") == "bearish": bearish_score += 15
+        if ms.get("trend") == "bullish": bullish_score += 15  # noqa: E701
+        elif ms.get("trend") == "bearish": bearish_score += 15  # noqa: E701
         total = bullish_score + bearish_score
         bullish_pct = round(bullish_score / total * 100) if total > 0 else 50
         bearish_pct = round(bearish_score / total * 100) if total > 0 else 50
-        support = self._find_support(data); resistance = self._find_resistance(data)
+        support = self._find_support(data); resistance = self._find_resistance(data)  # noqa: E702
         signal = "STRONG_LONG" if bullish_pct >= 75 else "LONG" if bullish_pct >= 60 else "STRONG_SHORT" if bearish_pct >= 75 else "SHORT" if bearish_pct >= 60 else "WAIT"
         volatility = round(np.std([d["close"] for d in data[-20:]]) / np.mean([d["close"] for d in data[-20:]]), 4) if len(data) >= 20 else 0
-        bos = structure.get("break_of_structure", []); choch = structure.get("change_of_character", [])
+        bos = structure.get("break_of_structure", []); choch = structure.get("change_of_character", [])  # noqa: E702
         liquidity = structure.get("liquidity", {})
         return {
             "signal": signal, "trend": overall, "market_structure": ms.get("trend", "undefined"),
@@ -163,37 +165,37 @@ class SkhyAnalysisEngine:
         }
 
     def _find_support(self, data):
-        if len(data) < 20: return min(d["low"] for d in data) if data else 0
+        if len(data) < 20: return min(d["low"] for d in data) if data else 0  # noqa: E701
         lows = [d["low"] for d in data[-50:]]
-        return sorted(set(round(l, 2) for l in lows))[0] if sorted(set(round(l, 2) for l in lows)) else min(lows)
+        return sorted({round(l, 2) for l in lows})[0] if sorted({round(l, 2) for l in lows}) else min(lows)  # noqa: E741
 
     def _find_resistance(self, data):
-        if len(data) < 20: return max(d["high"] for d in data) if data else 0
+        if len(data) < 20: return max(d["high"] for d in data) if data else 0  # noqa: E701
         highs = [d["high"] for d in data[-50:]]
-        return sorted(set(round(h, 2) for h in highs))[-1] if sorted(set(round(h, 2) for h in highs)) else max(highs)
+        return sorted({round(h, 2) for h in highs})[-1] if sorted({round(h, 2) for h in highs}) else max(highs)
 
     def _detect_tf_pattern(self, data, tf):
-        if len(data) < 30: return {"name": "none", "status": "insufficient_data"}
-        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; lows = [d["low"] for d in data[-30:]]
+        if len(data) < 30: return {"name": "none", "status": "insufficient_data"}  # noqa: E701
+        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; lows = [d["low"] for d in data[-30:]]  # noqa: E702
         mid = len(closes) // 2
-        first_half = np.mean(closes[:mid]); second_half = np.mean(closes[mid:])
-        if second_half > first_half * 1.03 and max(highs[-5:]) > max(highs[-10:-5]): return {"name": "ascending", "status": "forming"}
-        if second_half < first_half * 0.97 and min(lows[-5:]) < min(lows[-10:-5]): return {"name": "descending", "status": "forming"}
+        first_half = np.mean(closes[:mid]); second_half = np.mean(closes[mid:])  # noqa: E702
+        if second_half > first_half * 1.03 and max(highs[-5:]) > max(highs[-10:-5]): return {"name": "ascending", "status": "forming"}  # noqa: E701
+        if second_half < first_half * 0.97 and min(lows[-5:]) < min(lows[-10:-5]): return {"name": "descending", "status": "forming"}  # noqa: E701
         return {"name": "ranging", "status": "neutral"}
 
     def _compute_alignment(self, tf_analysis):
         signals = [v.get("signal", "WAIT") for v in tf_analysis.values() if "signal" in v]
-        if not signals: return {"confidence": 0, "status": "NO_DATA"}
+        if not signals: return {"confidence": 0, "status": "NO_DATA"}  # noqa: E701
         long_count = sum(1 for s in signals if s in ("LONG","STRONG_LONG"))
         short_count = sum(1 for s in signals if s in ("SHORT","STRONG_SHORT"))
         total = len(signals)
-        h4 = tf_analysis.get("4h", {}).get("signal", "WAIT"); h1 = tf_analysis.get("1h", {}).get("signal", "WAIT")
+        h4 = tf_analysis.get("4h", {}).get("signal", "WAIT"); h1 = tf_analysis.get("1h", {}).get("signal", "WAIT")  # noqa: E702
         h4_h1_aligned = (h4 in ("LONG","STRONG_LONG") and h1 in ("LONG","STRONG_LONG")) or (h4 in ("SHORT","STRONG_SHORT") and h1 in ("SHORT","STRONG_SHORT"))
         d1 = tf_analysis.get("1d", {}).get("signal", "WAIT")
         conflicts = []
-        if h4 in ("LONG","STRONG_LONG") and h1 in ("SHORT","STRONG_SHORT"): conflicts.append("4H yüksəlir, 1H isə enir")
-        if h4 in ("SHORT","STRONG_SHORT") and h1 in ("LONG","STRONG_LONG"): conflicts.append("4H enir, 1H isə yüksəlir")
-        if d1 == "WAIT" and h4 != "WAIT": conflicts.append("Günlük trend neytraldır")
+        if h4 in ("LONG","STRONG_LONG") and h1 in ("SHORT","STRONG_SHORT"): conflicts.append("4H yüksəlir, 1H isə enir")  # noqa: E701
+        if h4 in ("SHORT","STRONG_SHORT") and h1 in ("LONG","STRONG_LONG"): conflicts.append("4H enir, 1H isə yüksəlir")  # noqa: E701
+        if d1 == "WAIT" and h4 != "WAIT": conflicts.append("Günlük trend neytraldır")  # noqa: E701
         primary_direction = "long" if long_count > short_count else "short" if short_count > long_count else "neutral"
         confidence = round((max(long_count, short_count) / total) * 100) if total > 0 else 0
         return {
@@ -205,7 +207,7 @@ class SkhyAnalysisEngine:
 
     def _compute_scores(self, tf_analysis, alignment, snapshot):
         valid = [v for v in tf_analysis.values() if "trend" in v and "signal" in v]
-        if not valid: return {"overall": 0, "status": "NO_DATA"}
+        if not valid: return {"overall": 0, "status": "NO_DATA"}  # noqa: E701
 
         def average_score(values):
             return round(sum(values) / len(values)) if values else 0
@@ -224,9 +226,9 @@ class SkhyAnalysisEngine:
         funding = snapshot.get("funding", {})
         if funding:
             fr = funding.get("funding_rate", 0)
-            if fr is not None: futures_score = 50 if abs(fr) < 0.0001 else 60 if fr > 0 else 40
+            if fr is not None: futures_score = 50 if abs(fr) < 0.0001 else 60 if fr > 0 else 40  # noqa: E701
         oi = snapshot.get("open_interest", {})
-        if oi.get("open_interest"): futures_score = min(futures_score + 10, 100)
+        if oi.get("open_interest"): futures_score = min(futures_score + 10, 100)  # noqa: E701
         ls = snapshot.get("long_short_ratio", {})
         lsr = ls.get("long_short_ratio", 1)
         orderflow_score += 15 if lsr > 1.5 or lsr < 0.7 else 5
@@ -241,9 +243,9 @@ class SkhyAnalysisEngine:
         multitimeframe_score = alignment["confidence"]
         risk_score = 50
         risk_score = risk_score - (10 if alignment.get("conflicts") else 0) + (10 if alignment.get("h4_h1_aligned") else 0)
-        overall = round((trend_score*0.15 + structure_score*0.12 + momentum_score*0.12 + volume_score*0.10 +
+        overall = round(trend_score*0.15 + structure_score*0.12 + momentum_score*0.12 + volume_score*0.10 +
                          liquidity_score*0.10 + pattern_score*0.08 + futures_score*0.10 + orderflow_score*0.08 +
-                         multitimeframe_score*0.10 + risk_score*0.05))
+                         multitimeframe_score*0.10 + risk_score*0.05)
         timeframe_weights = {"1d": 2.0, "4h": 1.8, "1h": 1.5, "30m": 1.0, "15m": 0.8, "5m": 0.6, "1m": 0.4}
         evidence = [
             (timeframe_weights.get(tf, 1.0), data)
@@ -272,30 +274,30 @@ class SkhyAnalysisEngine:
         }
 
     def _compute_triggers(self, tf_analysis, alignment, scores, snapshot):
-        h4 = tf_analysis.get("4h", {}); h1 = tf_analysis.get("1h", {}); m15 = tf_analysis.get("15m", {})
-        close_4h = h4.get("close",0); close_1h = h1.get("close",0)
-        res_1h = h1.get("resistance",0); sup_1h = h1.get("support",0)
-        h4_trend = h4.get("trend","neutral"); h1_trend = h1.get("trend","neutral")
+        h4 = tf_analysis.get("4h", {}); h1 = tf_analysis.get("1h", {}); tf_analysis.get("15m", {})  # noqa: E702
+        close_4h = h4.get("close",0); close_1h = h1.get("close",0)  # noqa: E702
+        res_1h = h1.get("resistance",0); sup_1h = h1.get("support",0)  # noqa: E702
+        h4_trend = h4.get("trend","neutral"); h1_trend = h1.get("trend","neutral")  # noqa: E702
         long_trigger_price = round(res_1h*1.005,2) if res_1h else round(close_1h*1.02,2)
         short_trigger_price = round(sup_1h*0.995,2) if sup_1h else round(close_1h*0.98,2)
-        long_conditions = []; short_conditions = []
-        if h4_trend in ("bullish","neutral"): long_conditions.append("4H strukturu alışı dəstəkləyir")
-        else: long_conditions.append("4H trendi aşağı - təsdiq üçün GÖZLƏ")
-        if h1_trend in ("bullish","neutral"): long_conditions.append("1H momentum alışı dəstəkləyir")
-        else: long_conditions.append("1H aşağı trenddə - dönüş gözlənilir")
-        if res_1h: long_conditions.append(f"1H şamı ${long_trigger_price} üzərində bağlanmalı")
+        long_conditions = []; short_conditions = []  # noqa: E702
+        if h4_trend in ("bullish","neutral"): long_conditions.append("4H strukturu alışı dəstəkləyir")  # noqa: E701
+        else: long_conditions.append("4H trendi aşağı - təsdiq üçün GÖZLƏ")  # noqa: E701
+        if h1_trend in ("bullish","neutral"): long_conditions.append("1H momentum alışı dəstəkləyir")  # noqa: E701
+        else: long_conditions.append("1H aşağı trenddə - dönüş gözlənilir")  # noqa: E701
+        if res_1h: long_conditions.append(f"1H şamı ${long_trigger_price} üzərində bağlanmalı")  # noqa: E701
         long_conditions.append("Partlayış şamında həcm 1.5x ortalamadan yuxarı")
         long_conditions.append("Partlayışda OI artmalı")
         taker = snapshot.get("taker_buy_sell_ratio", {})
-        if taker.get("buy_sell_ratio",1) < 1.0: long_conditions.append("Taker alış nisbəti 1.0 üzərində güclənməlidir")
-        if h4_trend in ("bearish","neutral"): short_conditions.append("4H strukturu satışı dəstəkləyir")
-        else: short_conditions.append("4H trendi yuxarı - dönüş üçün GÖZLƏ")
-        if h1_trend in ("bearish","neutral"): short_conditions.append("1H momentum satışı dəstəkləyir")
-        else: short_conditions.append("1H yuxarı trenddə - dönüş gözlənilir")
-        if sup_1h: short_conditions.append(f"1H şamı ${short_trigger_price} altında bağlanmalı")
+        if taker.get("buy_sell_ratio",1) < 1.0: long_conditions.append("Taker alış nisbəti 1.0 üzərində güclənməlidir")  # noqa: E701
+        if h4_trend in ("bearish","neutral"): short_conditions.append("4H strukturu satışı dəstəkləyir")  # noqa: E701
+        else: short_conditions.append("4H trendi yuxarı - dönüş üçün GÖZLƏ")  # noqa: E701
+        if h1_trend in ("bearish","neutral"): short_conditions.append("1H momentum satışı dəstəkləyir")  # noqa: E701
+        else: short_conditions.append("1H yuxarı trenddə - dönüş gözlənilir")  # noqa: E701
+        if sup_1h: short_conditions.append(f"1H şamı ${short_trigger_price} altında bağlanmalı")  # noqa: E701
         short_conditions.append("Qırılma şamında həcm 1.5x ortalamadan yuxarı")
         short_conditions.append("Qırılmada OI artmalı")
-        if taker.get("buy_sell_ratio",1) > 1.0: short_conditions.append("Taker satış nisbəti 1.0 üzərində güclənməlidir")
+        if taker.get("buy_sell_ratio",1) > 1.0: short_conditions.append("Taker satış nisbəti 1.0 üzərində güclənməlidir")  # noqa: E701
         bullish_invalidation = round(close_1h*0.98,2) if close_1h else 0
         bearish_invalidation = round(close_1h*1.02,2) if close_1h else 0
         if h4_trend == "bullish":
@@ -313,22 +315,22 @@ class SkhyAnalysisEngine:
         patterns = []
         for tf in TIMEFRAMES:
             data = ohlcv_data.get(tf, [])
-            if len(data) < 50: continue
+            if len(data) < 50: continue  # noqa: E701
             recent = data[-30:]
             for check in [self._check_bull_flag, self._check_bear_flag, self._check_double_top,
                           self._check_double_bottom, self._check_triangle, self._check_abcd,
                           self._check_rectangle, self._check_wedge, self._check_head_shoulders,
                           self._check_cup_handle]:
                 p = check(recent, tf)
-                if p: patterns.append(p)
+                if p: patterns.append(p)  # noqa: E701
         return patterns
 
     def _check_bull_flag(self, data, tf):
-        if len(data) < 15: return None
-        pole = data[:8]; flag = data[8:]
+        if len(data) < 15: return None  # noqa: E701
+        pole = data[:8]; flag = data[8:]  # noqa: E702
         pole_rise = pole[-1]["close"] - pole[0]["close"]
         if pole_rise > 0 and pole_rise / pole[0]["close"] > 0.03:
-            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
+            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]  # noqa: E702
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
                 flag_price = data[-1]["close"]
                 near_breakout = flag_price >= max(flag_highs) * 0.98
@@ -343,11 +345,11 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_bear_flag(self, data, tf):
-        if len(data) < 15: return None
-        pole = data[:8]; flag = data[8:]
+        if len(data) < 15: return None  # noqa: E701
+        pole = data[:8]; flag = data[8:]  # noqa: E702
         pole_drop = pole[0]["close"] - pole[-1]["close"]
         if pole_drop > 0 and pole_drop / pole[0]["close"] > 0.03:
-            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]
+            flag_highs = [d["high"] for d in flag]; flag_lows = [d["low"] for d in flag]  # noqa: E702
             if max(flag_highs) - min(flag_lows) < (max(d["high"] for d in pole) - min(d["low"] for d in pole)) * 0.5:
                 flag_price = data[-1]["close"]
                 near_breakdown = flag_price <= min(flag_lows) * 1.02
@@ -362,9 +364,9 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_double_top(self, data, tf):
-        if len(data) < 20: return None
-        highs = [d["high"] for d in data]; mid = len(highs)//2
-        left = max(highs[:mid]); right = max(highs[mid:])
+        if len(data) < 20: return None  # noqa: E701
+        highs = [d["high"] for d in data]; mid = len(highs)//2  # noqa: E702
+        left = max(highs[:mid]); right = max(highs[mid:])  # noqa: E702
         if abs(left-right)/left < 0.015:
             neckline = min(d["low"] for d in data)
             dt_price = data[-1]["close"]
@@ -382,9 +384,9 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_double_bottom(self, data, tf):
-        if len(data) < 20: return None
-        lows = [d["low"] for d in data]; mid = len(lows)//2
-        left = min(lows[:mid]); right = min(lows[mid:])
+        if len(data) < 20: return None  # noqa: E701
+        lows = [d["low"] for d in data]; mid = len(lows)//2  # noqa: E702
+        left = min(lows[:mid]); right = min(lows[mid:])  # noqa: E702
         if abs(left-right)/left < 0.015:
             neckline = max(d["high"] for d in data)
             db_price = data[-1]["close"]
@@ -402,9 +404,9 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_triangle(self, data, tf):
-        if len(data) < 15: return None
-        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
-        h_slope = (highs[-1]-highs[0])/len(highs); l_slope = (lows[-1]-lows[0])/len(lows)
+        if len(data) < 15: return None  # noqa: E701
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]  # noqa: E702
+        h_slope = (highs[-1]-highs[0])/len(highs); l_slope = (lows[-1]-lows[0])/len(lows)  # noqa: E702
         tr_price = data[-1]["close"]
         tr_range = max(highs) - min(lows)
         initial_range = max(highs[:5]) - min(lows[:5])
@@ -437,11 +439,11 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_abcd(self, data, tf):
-        if len(data) < 20: return None
+        if len(data) < 20: return None  # noqa: E701
         closes = [d["close"] for d in data[-20:]]
-        if len(closes) < 10: return None
+        if len(closes) < 10: return None  # noqa: E701
         a,b,c,dv = closes[0],closes[5],closes[10],closes[-1]
-        ab = abs(b-a); bc = abs(c-b)
+        ab = abs(b-a); bc = abs(c-b)  # noqa: E702
         if ab > 0 and bc/ab > 0.6 and bc/ab < 0.9:
             target = dv + (ab-bc)*(1 if b>a else -1)
             cd_len = abs(closes[-1] - c)
@@ -457,9 +459,9 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_rectangle(self, data, tf):
-        if len(data) < 15: return None
-        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
-        top = max(highs); bottom = min(lows)
+        if len(data) < 15: return None  # noqa: E701
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]  # noqa: E702
+        top = max(highs); bottom = min(lows)  # noqa: E702
         if abs(top-np.mean(highs[-5:]))/top < 0.01 and abs(bottom-np.mean(lows[-5:]))/bottom < 0.01:
             rect_price = data[-1]["close"]
             rect_dist = min(abs(rect_price - top), abs(rect_price - bottom)) / max(top - bottom, 0.01)
@@ -474,8 +476,8 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_wedge(self, data, tf):
-        if len(data) < 15: return None
-        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]
+        if len(data) < 15: return None  # noqa: E701
+        highs = [d["high"] for d in data[-15:]]; lows = [d["low"] for d in data[-15:]]  # noqa: E702
         h_slope = (highs[-1]-highs[0])/len(highs) if len(highs)>1 else 0
         l_slope = (lows[-1]-lows[0])/len(lows) if len(lows)>1 else 0
         wedge_initial = max(highs[:5]) - min(lows[:5])
@@ -500,10 +502,10 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_cup_handle(self, data, tf):
-        if len(data) < 30: return None
-        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; lows = [d["low"] for d in data[-30:]]
-        mid = len(closes)//2; cup_start = closes[0]; cup_bottom = min(closes[:mid])
-        cup_rnd = closes[:mid]; handle_rnd = closes[mid:]
+        if len(data) < 30: return None  # noqa: E701
+        closes = [d["close"] for d in data[-30:]]; highs = [d["high"] for d in data[-30:]]; [d["low"] for d in data[-30:]]  # noqa: E702
+        mid = len(closes)//2; cup_start = closes[0]; cup_bottom = min(closes[:mid])  # noqa: E702
+        closes[:mid]; handle_rnd = closes[mid:]  # noqa: E702
         cup_depth = (cup_start - cup_bottom) / cup_start
         if 0.05 <= cup_depth <= 0.35:
             handle_high = max(handle_rnd[:len(handle_rnd)//2]) if handle_rnd else 0
@@ -527,8 +529,8 @@ class SkhyAnalysisEngine:
         return None
 
     def _check_head_shoulders(self, data, tf):
-        if len(data) < 20: return None
-        highs = [d["high"] for d in data[-20:]]; mid = len(highs)//2
+        if len(data) < 20: return None  # noqa: E701
+        highs = [d["high"] for d in data[-20:]]; mid = len(highs)//2  # noqa: E702
         ls = max(highs[:mid//2]) if highs[:mid//2] else 0
         hd = max(highs[mid//2:mid+mid//2]) if highs[mid//2:mid+mid//2] else 0
         rs = max(highs[mid+mid//2:]) if highs[mid+mid//2:] else 0
@@ -594,14 +596,14 @@ class SkhyAnalysisEngine:
 
     # ─── SUPPORT / RESISTANCE ───
     def _compute_support_resistance(self, ohlcv_data, snapshot):
-        all_lows = []; all_highs = []
+        all_lows = []; all_highs = []  # noqa: E702
         for data in ohlcv_data.values():
-            if len(data) < 20: continue
+            if len(data) < 20: continue  # noqa: E701
             all_lows.extend(d["low"] for d in data[-50:])
             all_highs.extend(d["high"] for d in data[-50:])
-        if not all_lows or not all_highs: return {"error":"Insufficient data"}
+        if not all_lows or not all_highs: return {"error":"Insufficient data"}  # noqa: E701
         price = snapshot.get("ticker",{}).get("price",0) or all_highs[-1] if all_highs else 0
-        nearest_support = max([l for l in all_lows if l < price], default=min(all_lows)) if all_lows else 0
+        nearest_support = max([l for l in all_lows if l < price], default=min(all_lows)) if all_lows else 0  # noqa: E741
         strongest_support = min(all_lows) if all_lows else 0
         nearest_resistance = min([h for h in all_highs if h > price], default=max(all_highs)) if all_highs else 0
         strongest_resistance = max(all_highs) if all_highs else 0
@@ -610,24 +612,24 @@ class SkhyAnalysisEngine:
             "nearest_resistance":round(nearest_resistance,2),"strongest_resistance":round(strongest_resistance,2),
             "distance_to_support":round(price-nearest_support,2) if price else 0,
             "distance_to_resistance":round(nearest_resistance-price,2) if price else 0,
-            "liquidity_above":[{"price":round(h,2),"strength":2} for h in sorted(set(round(h,1) for h in all_highs[-10:]),reverse=True)[:5]],
-            "liquidity_below":[{"price":round(l,2),"strength":2} for l in sorted(set(round(l,1) for l in all_lows[-10:]))[:5]],
+            "liquidity_above":[{"price":round(h,2),"strength":2} for h in sorted({round(h,1) for h in all_highs[-10:]},reverse=True)[:5]],
+            "liquidity_below":[{"price":round(l,2),"strength":2} for l in sorted({round(l,1) for l in all_lows[-10:]})[:5]],  # noqa: E741
         }
 
     # ─── ELLIOTT WAVE ───
     def _detect_elliott_wave(self, ohlcv_data):
         data_1h = ohlcv_data.get("1h", [])
-        if len(data_1h) < 100: return {"status":"insufficient_data","waves":[]}
-        highs = [d["high"] for d in data_1h]; lows = [d["low"] for d in data_1h]
-        waves = []; i = 0
+        if len(data_1h) < 100: return {"status":"insufficient_data","waves":[]}  # noqa: E701
+        highs = [d["high"] for d in data_1h]; lows = [d["low"] for d in data_1h]  # noqa: E702
+        waves = []; i = 0  # noqa: E702
         while i < len(highs)-20:
             i += 10
-            local_h = max(highs[max(0,i-10):i+10]); local_l = min(lows[max(0,i-10):i+10])
+            local_h = max(highs[max(0,i-10):i+10]); local_l = min(lows[max(0,i-10):i+10])  # noqa: E702
             hi = highs.index(local_h) if local_h in highs else i
             li = lows.index(local_l) if local_l in lows else i
             waves.append({"type":"wave_up" if hi > li else "wave_down","start":local_l if hi > li else local_h,
                           "end":local_h if hi > li else local_l,"index":hi if hi > li else li})
-            if len(waves) >= 8: break
+            if len(waves) >= 8: break  # noqa: E701
         impulse = sum(1 for w in waves if abs(w["end"]-w["start"])/w["start"] > 0.03)
         corrective = len(waves) - impulse
         direction = "impulsive_up" if impulse > corrective*1.5 else "impulsive_down" if corrective > impulse*1.5 else "corrective"
@@ -641,11 +643,11 @@ class SkhyAnalysisEngine:
     # ─── FIBONACCI ───
     def _compute_fibonacci_levels(self, ohlcv_data, snapshot):
         data_1h = ohlcv_data.get("1h", [])
-        if len(data_1h) < 30: return {"status":"insufficient_data"}
+        if len(data_1h) < 30: return {"status":"insufficient_data"}  # noqa: E701
         recent = data_1h[-50:]
-        high = max(d["high"] for d in recent); low = min(d["low"] for d in recent)
+        high = max(d["high"] for d in recent); low = min(d["low"] for d in recent)  # noqa: E702
         rg = high - low
-        if rg <= 0: return {"status":"insufficient_range"}
+        if rg <= 0: return {"status":"insufficient_range"}  # noqa: E701
         price = snapshot.get("ticker",{}).get("price",0) or recent[-1]["close"]
         levels = {}
         for lev in [0,0.236,0.382,0.5,0.618,0.786,1,1.272,1.414,1.618,2.0,2.272,2.618,3.618]:
@@ -670,13 +672,13 @@ class SkhyAnalysisEngine:
     def _detect_dominant_structure(self, ohlcv_data, snapshot):
         data_1h = ohlcv_data.get("1h", [])
         data_4h = ohlcv_data.get("4h", [])
-        data_15m = ohlcv_data.get("15m", [])
+        ohlcv_data.get("15m", [])
         primary = data_4h if len(data_4h)>=50 else data_1h
-        if len(primary) < 50: return {"status":"insufficient_data","type":"none"}
-        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]
+        if len(primary) < 50: return {"status":"insufficient_data","type":"none"}  # noqa: E701
+        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]  # noqa: E702
         closes = [d["close"] for d in primary[-60:]]
 
-        swing_highs = []; swing_lows = []
+        swing_highs = []; swing_lows = []  # noqa: E702
         for i in range(2, len(highs)-2):
             if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
                 swing_highs.append({"price":highs[i],"index":i})
@@ -710,7 +712,7 @@ class SkhyAnalysisEngine:
             structure_type = "descending_triangle"
             structure_label_az = "Enən üçbucaq"
         elif len(swing_highs) >= 4 and len(swing_lows) >= 4:
-            h_recent = swing_highs[-4:]; l_recent = swing_lows[-4:]
+            h_recent = swing_highs[-4:]; l_recent = swing_lows[-4:]  # noqa: E702
             h_bias = sum(1 for i in range(1,len(h_recent)) if h_recent[i]["price"] < h_recent[i-1]["price"])
             l_bias = sum(1 for i in range(1,len(l_recent)) if l_recent[i]["price"] < l_recent[i-1]["price"])
             if h_bias >= 3 and l_bias >= 3:
@@ -720,21 +722,21 @@ class SkhyAnalysisEngine:
                 structure_type = "ascending_channel"
                 structure_label_az = "Yüksələn kanal"
 
-        bull_flag = None; bear_flag = None
+        bull_flag = None; bear_flag = None  # noqa: E702
         for tf_check in ["15m","1h","4h"]:
             d = ohlcv_data.get(tf_check, [])
-            if len(d) < 30: continue
-            pole = d[:10]; flag = d[10:25]
+            if len(d) < 30: continue  # noqa: E701
+            pole = d[:10]; flag = d[10:25]  # noqa: E702
             pole_rise = pole[-1]["close"] - pole[0]["close"]
             pole_drop = pole[0]["close"] - pole[-1]["close"]
             if len(flag) >= 5:
-                flag_highs = [x["high"] for x in flag]; flag_lows = [x["low"] for x in flag]
+                flag_highs = [x["high"] for x in flag]; flag_lows = [x["low"] for x in flag]  # noqa: E702
                 flag_narrow = (max(flag_highs)-min(flag_lows)) < (max(x["high"] for x in pole)-min(x["low"] for x in pole))*0.5
                 if pole_rise > 0 and pole_rise/pole[0]["close"] > 0.02 and flag_narrow:
                     bull_flag = {"timeframe":tf_check,"breakout_level":max(flag_highs),"flag_low":min(flag_lows),"pole_height":pole_rise}
                 if pole_drop > 0 and pole_drop/pole[0]["close"] > 0.02 and flag_narrow:
                     bear_flag = {"timeframe":tf_check,"breakdown_level":min(flag_lows),"flag_high":max(flag_highs),"pole_height":pole_drop}
-            if bull_flag and bear_flag: break
+            if bull_flag and bear_flag: break  # noqa: E701
         if bull_flag and not structure_type.startswith("ascending") and not structure_type.startswith("descending"):
             structure_type = "bull_flag"
             structure_label_az = "Yüksələn bayraq"
@@ -742,12 +744,12 @@ class SkhyAnalysisEngine:
             structure_type = "bear_flag"
             structure_label_az = "Enən bayraq"
 
-        ch_top = max(h_prices); ch_bottom = min(l_prices)
+        ch_top = max(h_prices); ch_bottom = min(l_prices)  # noqa: E702
         price = snapshot.get("ticker",{}).get("price",0) or closes[-1]
 
         breakout_status = "daxilində"
-        if price > ch_top * 1.01: breakout_status = "yuxarı breakout"
-        elif price < ch_bottom * 0.99: breakout_status = "aşağı breakout"
+        if price > ch_top * 1.01: breakout_status = "yuxarı breakout"  # noqa: E701
+        elif price < ch_bottom * 0.99: breakout_status = "aşağı breakout"  # noqa: E701
 
         obs = 0
         for i in range(1, len(closes)):
@@ -783,10 +785,10 @@ class SkhyAnalysisEngine:
         data_4h = ohlcv_data.get("4h", [])
         data_1h = ohlcv_data.get("1h", [])
         primary = data_4h if len(data_4h) >= 60 else data_1h
-        if len(primary) < 50: return {"status":"insufficient_data","upper":[],"lower":[],"mid":[]}
-        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]
+        if len(primary) < 50: return {"status":"insufficient_data","upper":[],"lower":[],"mid":[]}  # noqa: E701
+        highs = [d["high"] for d in primary[-60:]]; lows = [d["low"] for d in primary[-60:]]  # noqa: E702
 
-        swing_highs = []; swing_lows = []
+        swing_highs = []; swing_lows = []  # noqa: E702
         for i in range(2, len(highs)-2):
             if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
                 swing_highs.append({"price":highs[i],"time":primary[i]["time"],"index":i})
@@ -796,7 +798,7 @@ class SkhyAnalysisEngine:
         if len(swing_highs) < 3 or len(swing_lows) < 3:
             return {"status":"partial","upper":[],"lower":[],"mid":[]}
 
-        sh = swing_highs[:5]; sl = swing_lows[:5]
+        sh = swing_highs[:5]; sl = swing_lows[:5]  # noqa: E702
         x_h = np.array([s["index"] for s in sh])
         y_h = np.array([s["price"] for s in sh])
         x_l = np.array([s["index"] for s in sl])
@@ -807,7 +809,7 @@ class SkhyAnalysisEngine:
             l_slope, l_intercept = np.polyfit(x_l, y_l, 1)
             mid_slope = (h_slope + l_slope) / 2
             mid_intercept = (h_intercept + l_intercept) / 2
-        except:
+        except:  # noqa: E722
             return {"status":"error","upper":[],"lower":[],"mid":[]}
 
         def project(slope, intercept, idx):
@@ -832,14 +834,14 @@ class SkhyAnalysisEngine:
         h1 = ohlcv_data.get("1h", [])
         h4 = ohlcv_data.get("4h", [])
         primary = h4 if len(h4) >= 50 else h1
-        if len(primary) < 40: return {"status":"insufficient_data"}
+        if len(primary) < 40: return {"status":"insufficient_data"}  # noqa: E701
         price = snapshot.get("ticker",{}).get("price",0) or primary[-1]["close"]
-        highs = [d["high"] for d in primary[-40:]]; lows = [d["low"] for d in primary[-40:]]
-        res = max(highs[:20]); sup = min(lows[:20])
-        zone_top = round(res*1.005,2); zone_bottom = round(sup*0.995,2)
+        highs = [d["high"] for d in primary[-40:]]; lows = [d["low"] for d in primary[-40:]]  # noqa: E702
+        res = max(highs[:20]); sup = min(lows[:20])  # noqa: E702
+        zone_top = round(res*1.005,2); zone_bottom = round(sup*0.995,2)  # noqa: E702
         test_count = sum(1 for d in primary[-40:] if d["high"] >= res*0.995 and d["high"] <= res*1.005) + \
                      sum(1 for d in primary[-40:] if d["low"] <= sup*1.005 and d["low"] >= sup*0.995)
-        h1_signal = tf_analysis.get("1h",{}).get("signal","WAIT")
+        tf_analysis.get("1h",{}).get("signal","WAIT")
         h4_signal = tf_analysis.get("4h",{}).get("signal","WAIT")
         is_bullish_breakout_ready = price >= zone_bottom * 0.995 and h4_signal in ("LONG","STRONG_LONG","WAIT")
         is_bearish_breakout_ready = price <= zone_top * 1.005 and h4_signal in ("SHORT","STRONG_SHORT","WAIT")
@@ -901,10 +903,10 @@ class SkhyAnalysisEngine:
             tp3 = round(price * (1 + atr * 5.0), 2)
             tp4 = round(price * (1 + atr * 7.5), 2)
             tp5 = round(price * (1 + atr * 10.0), 2)
-            if fib_up.get("1.272"): tp1 = round(fib_up["1.272"], 2)
-            if fib_up.get("1.618"): tp2 = round(fib_up["1.618"], 2)
-            if fib_up.get("2.618"): tp3 = round(fib_up["2.618"], 2)
-            if fib_up.get("3.618"): tp4 = round(fib_up["3.618"], 2)
+            if fib_up.get("1.272"): tp1 = round(fib_up["1.272"], 2)  # noqa: E701
+            if fib_up.get("1.618"): tp2 = round(fib_up["1.618"], 2)  # noqa: E701
+            if fib_up.get("2.618"): tp3 = round(fib_up["2.618"], 2)  # noqa: E701
+            if fib_up.get("3.618"): tp4 = round(fib_up["3.618"], 2)  # noqa: E701
             risk = abs(entry_price - sl)
             entry_zone_min = round(price * 0.995, 2)
             entry_zone_max = round(price * 1.005, 2)
@@ -916,10 +918,10 @@ class SkhyAnalysisEngine:
             tp3 = round(price * (1 - atr * 5.0), 2)
             tp4 = round(price * (1 - atr * 7.5), 2)
             tp5 = round(price * (1 - atr * 10.0), 2)
-            if fib_down.get("1.272"): tp1 = round(fib_down["1.272"], 2)
-            if fib_down.get("1.618"): tp2 = round(fib_down["1.618"], 2)
-            if fib_down.get("2.618"): tp3 = round(fib_down["2.618"], 2)
-            if fib_down.get("3.618"): tp4 = round(fib_down["3.618"], 2)
+            if fib_down.get("1.272"): tp1 = round(fib_down["1.272"], 2)  # noqa: E701
+            if fib_down.get("1.618"): tp2 = round(fib_down["1.618"], 2)  # noqa: E701
+            if fib_down.get("2.618"): tp3 = round(fib_down["2.618"], 2)  # noqa: E701
+            if fib_down.get("3.618"): tp4 = round(fib_down["3.618"], 2)  # noqa: E701
             risk = abs(entry_price - sl)
             entry_zone_min = round(price * 0.995, 2)
             entry_zone_max = round(price * 1.005, 2)
@@ -970,7 +972,7 @@ class SkhyAnalysisEngine:
     # ─── SCENARIO PATHS ───
     def _compute_scenario_paths(self, tf_analysis, scores, triggers, snapshot, ohlcv_data, fibonacci, detected_structure):
         price = snapshot.get("ticker",{}).get("price",0) or 155
-        h4_trend = tf_analysis.get("4h",{}).get("trend","neutral")
+        tf_analysis.get("4h",{}).get("trend","neutral")
         h1_trend = tf_analysis.get("1h",{}).get("trend","neutral")
         long_prob = scores.get("long_probability",50)
         short_prob = scores.get("short_probability",50)
@@ -994,12 +996,12 @@ class SkhyAnalysisEngine:
                 2,
             )
 
-        fib_1_272_up = fib_up.get("1.272", price*1.02) if (isinstance(fib_up, dict) and "1.272" in fib_up) else price*1.02
-        fib_1_618_up = fib_up.get("1.618", price*1.04) if (isinstance(fib_up, dict) and "1.618" in fib_up) else price*1.04
-        fib_2_618_up = fib_up.get("2.618", price*1.08) if (isinstance(fib_up, dict) and "2.618" in fib_up) else price*1.08
-        fib_1_272_dn = fib_down.get("1.272", price*0.98) if (isinstance(fib_down, dict) and "1.272" in fib_down) else price*0.98
-        fib_1_618_dn = fib_down.get("1.618", price*0.96) if (isinstance(fib_down, dict) and "1.618" in fib_down) else price*0.96
-        fib_2_618_dn = fib_down.get("2.618", price*0.92) if (isinstance(fib_down, dict) and "2.618" in fib_down) else price*0.92
+        fib_up.get("1.272", price*1.02) if (isinstance(fib_up, dict) and "1.272" in fib_up) else price*1.02
+        fib_up.get("1.618", price*1.04) if (isinstance(fib_up, dict) and "1.618" in fib_up) else price*1.04
+        fib_up.get("2.618", price*1.08) if (isinstance(fib_up, dict) and "2.618" in fib_up) else price*1.08
+        fib_down.get("1.272", price*0.98) if (isinstance(fib_down, dict) and "1.272" in fib_down) else price*0.98
+        fib_down.get("1.618", price*0.96) if (isinstance(fib_down, dict) and "1.618" in fib_down) else price*0.96
+        fib_down.get("2.618", price*0.92) if (isinstance(fib_down, dict) and "2.618" in fib_down) else price*0.92
 
         def path_points(start_price, direction):
             pts = [{"time_offset": 0, "price": start_price, "label": "Başlanğıc", "phase": "start", "probability": 100, "reason": "Cari qiymət"}]
@@ -1070,7 +1072,7 @@ class SkhyAnalysisEngine:
         alt_targets = [p for p in alt_path if p["phase"] in ("tp1","tp2","extension")]
 
         h4_sig = tf_analysis.get("4h",{}).get("signal","WAIT")
-        h1_sig = tf_analysis.get("1h",{}).get("signal","WAIT")
+        tf_analysis.get("1h",{}).get("signal","WAIT")
 
         def activation_text(label, direction, path):
             trigger_price = lt_price if direction == "up" else st_price
@@ -1150,12 +1152,12 @@ class SkhyAnalysisEngine:
         fib_ret = fibonacci.get("retracement_levels",{}) if isinstance(fibonacci.get("retracement_levels"), dict) else {}
         fib_up = fibonacci.get("extension_up",{}) if isinstance(fibonacci.get("extension_up"), dict) else {}
         fib_down = fibonacci.get("extension_down",{}) if isinstance(fibonacci.get("extension_down"), dict) else {}
-        sr_high = sr.get("strongest_resistance", price*1.1); sr_low = sr.get("strongest_support", price*0.9)
+        sr_high = sr.get("strongest_resistance", price*1.1); sr_low = sr.get("strongest_support", price*0.9)  # noqa: E702
         main = scenario_paths.get("main_scenario",{})
         main_dir = "up" if main.get("direction") == "LONG" else "down"
         ch_top = detected_structure.get("channel_top",0)
         ch_bottom = detected_structure.get("channel_bottom",0)
-        ch_mid = detected_structure.get("channel_mid",0)
+        detected_structure.get("channel_mid",0)
 
         targets = []
         retrace_targets = ["0.382","0.5","0.618","0.786","1.0"]
@@ -1178,7 +1180,7 @@ class SkhyAnalysisEngine:
             fib_vals = []
             for k in fib_ext_keys:
                 v = fib_up.get(k)
-                if v and v > price: fib_vals.append((k, v))
+                if v and v > price: fib_vals.append((k, v))  # noqa: E701
             for i, (k, v) in enumerate(fib_vals[:5]):
                 targets.append({
                     "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
@@ -1192,7 +1194,7 @@ class SkhyAnalysisEngine:
             fib_vals = []
             for k in fib_ext_keys:
                 v = fib_down.get(k)
-                if v and v < price: fib_vals.append((k, v))
+                if v and v < price: fib_vals.append((k, v))  # noqa: E701
             for i, (k, v) in enumerate(fib_vals[:5]):
                 targets.append({
                     "level":f"TP{i+1}","price":round(v,2),"type":f"Fib {k}",
@@ -1238,7 +1240,7 @@ class SkhyAnalysisEngine:
     # ─── TIME ESTIMATES ───
     def _compute_time_estimates(self, ohlcv_data):
         h1 = ohlcv_data.get("1h", [])
-        if len(h1) < 50: return {"status":"insufficient_data"}
+        if len(h1) < 50: return {"status":"insufficient_data"}  # noqa: E701
         closes = [d["close"] for d in h1[-100:]]
         daily_volatility = np.std(closes) / np.mean(closes) if closes else 0.02
         avg_range = np.mean([d["high"]-d["low"] for d in h1[-50:]]) if len(h1)>=50 else 0.1
@@ -1258,10 +1260,10 @@ class SkhyAnalysisEngine:
 
     # ─── ACTIVATION CONDITIONS ───
     def _compute_activation_conditions(self, triggers, tf_analysis, snapshot):
-        h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{})
+        tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{})  # noqa: E702
         price = snapshot.get("ticker",{}).get("price",0) or 155
         taker = snapshot.get("taker_buy_sell_ratio",{})
-        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)
+        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)  # noqa: E702
         vol = h1.get("volume","normal")
         return {
             "bullish":{
@@ -1356,30 +1358,30 @@ class SkhyAnalysisEngine:
 
         if taker_ratio > 1.2:
             signals.append(f"Taker alışları dominantdır (nisbət: {taker_ratio:.2f}) — alış təzyiqi")
-            whale_bias = "bullish"; whale_direction = "bullish"
+            whale_bias = "bullish"; whale_direction = "bullish"  # noqa: E702
             whale_desc = "Böyük oyunçular alış tərəfdədir"
         elif taker_ratio < 0.8:
             signals.append(f"Taker satışları dominantdır (nisbət: {taker_ratio:.2f}) — satış təzyiqi")
-            whale_bias = "bearish"; whale_direction = "bearish"
+            whale_bias = "bearish"; whale_direction = "bearish"  # noqa: E702
             whale_desc = "Böyük oyunçular satış tərəfdədir"
         else:
             signals.append(f"Taker alış/satış balanslıdır ({taker_ratio:.2f})")
 
         if bid_vol > ask_vol * 2 and bid_vol > 0 and ask_vol > 0:
             signals.append(f"Order book-da alış tərəfi güclüdür (bid:{bid_vol:.0f} > ask:{ask_vol:.0f})")
-            if whale_bias == "neutral": whale_bias = "bullish"; whale_direction = "bullish"
+            if whale_bias == "neutral": whale_bias = "bullish"; whale_direction = "bullish"  # noqa: E701, E702
         elif ask_vol > bid_vol * 2 and bid_vol > 0 and ask_vol > 0:
             signals.append(f"Order book-da satış tərəfi güclüdür (ask:{ask_vol:.0f} > bid:{bid_vol:.0f})")
-            if whale_bias == "neutral": whale_bias = "bearish"; whale_direction = "bearish"
+            if whale_bias == "neutral": whale_bias = "bearish"; whale_direction = "bearish"  # noqa: E701, E702
         else:
             signals.append("Order book balanslıdır")
 
         if ls_ratio > 1.5:
             signals.append(f"Long/Short nisbəti {ls_ratio:.1f} — bazarda alış üstünlüyü (retail long)")
-            if whale_bias == "neutral": whale_bias = "bearish"
+            if whale_bias == "neutral": whale_bias = "bearish"  # noqa: E701
         elif ls_ratio < 0.7:
             signals.append(f"Long/Short nisbəti {ls_ratio:.1f} — bazarda satış üstünlüyü (retail short)")
-            if whale_bias == "neutral": whale_bias = "bullish"
+            if whale_bias == "neutral": whale_bias = "bullish"  # noqa: E701
 
         if fr > 0.001:
             signals.append(f"Funding rate yüksək ({fr*100:.4f}%) — long tərəf bahalıdır, sıxışdırma riski")
@@ -1420,7 +1422,7 @@ class SkhyAnalysisEngine:
 
     # ─── TIME-BASED FORECAST ───
     def _compute_time_forecast(self, scores, triggers, snapshot, tf_analysis):
-        h4 = tf_analysis.get("4h", {})
+        tf_analysis.get("4h", {})
         h1 = tf_analysis.get("1h", {})
         price = snapshot.get("ticker", {}).get("price", 0) or 155
         lt = triggers.get("long_trigger_price", 0)
@@ -1429,7 +1431,7 @@ class SkhyAnalysisEngine:
         short_prob = scores.get("short_probability", 50)
         signal_conf = scores.get("signal_confidence", 0)
         vol = h1.get("volatility", 0.02) or 0.02
-        h1_range = price * vol
+        price * vol
 
         def period_forecast(hours, base_prob, volatility_decay):
             bull = max(min(int(base_prob * (1 - hours * 0.05)), 95), 5)
@@ -1469,27 +1471,27 @@ class SkhyAnalysisEngine:
 
     # ─── EXPLANATION ───
     def _generate_explanation(self, symbol, tf_analysis, alignment, scores, triggers, detected_structure, breakout_zone):
-        h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{}); d1 = tf_analysis.get("1d",{})
-        h4_trend = h4.get("trend","məlum deyil"); h1_trend = h1.get("trend","məlum deyil"); d1_trend = d1.get("trend","məlum deyil")
+        h4 = tf_analysis.get("4h",{}); h1 = tf_analysis.get("1h",{}); d1 = tf_analysis.get("1d",{})  # noqa: E702
+        h4_trend = h4.get("trend","məlum deyil"); h1_trend = h1.get("trend","məlum deyil"); d1_trend = d1.get("trend","məlum deyil")  # noqa: E702
         trend_az = {"bullish": "yüksələn", "bearish": "enən", "neutral": "neytral"}
         lines = [f"{normalize_symbol(symbol)} analizi:"]
         struct_label = detected_structure.get("label_az","")
-        if struct_label: lines.append(f"Aşkarlanan struktur: {struct_label}.")
-        if d1_trend in trend_az: lines.append(f"Günlük trend {trend_az[d1_trend]} istiqamətdədir.")
-        if h4_trend in trend_az: lines.append(f"4H struktur {trend_az[h4_trend]} istiqamətdədir.")
+        if struct_label: lines.append(f"Aşkarlanan struktur: {struct_label}.")  # noqa: E701
+        if d1_trend in trend_az: lines.append(f"Günlük trend {trend_az[d1_trend]} istiqamətdədir.")  # noqa: E701
+        if h4_trend in trend_az: lines.append(f"4H struktur {trend_az[h4_trend]} istiqamətdədir.")  # noqa: E701
         h1_dir = trend_az.get(h1_trend, "məlum deyil")
         lines.append(f"1H {h1_dir}.")
         bz = breakout_zone
         if bz.get("status")=="calculated":
             lines.append(f"Breakout zonası: ${bz['zone_bottom']}-${bz['zone_top']}, {bz['test_count']} dəfə test edilib.")
-        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)
+        lt = triggers.get("long_trigger_price",0); st = triggers.get("short_trigger_price",0)  # noqa: E702
         if lt and alignment.get("primary_direction") != "short":
             lines.append(f"${lt} üzərində 1H bağlanış və artan həcm gəlmədən ALIŞ təsdiqlənmir.")
         if st and alignment.get("primary_direction") != "long":
             lines.append(f"${st} aşağı qırılarsa və OI artarsa SATIŞ ssenarisi güclənəcək.")
-        if scores.get("status")=="WAIT": lines.append("Gözləmə tövsiyə olunur - təsdiq gözlənilir.")
-        elif scores.get("status")=="WATCHLIST": lines.append("İzləmə siyahısı - trigger yaxınlaşdıqda dəyərləndir.")
-        if alignment.get("conflicts"): lines.append(f"Ziddiyyət: {'; '.join(alignment['conflicts'])}")
+        if scores.get("status")=="WAIT": lines.append("Gözləmə tövsiyə olunur - təsdiq gözlənilir.")  # noqa: E701
+        elif scores.get("status")=="WATCHLIST": lines.append("İzləmə siyahısı - trigger yaxınlaşdıqda dəyərləndir.")  # noqa: E701
+        if alignment.get("conflicts"): lines.append(f"Ziddiyyət: {'; '.join(alignment['conflicts'])}")  # noqa: E701
         return "\n".join(lines) if lines else "Məlumat yoxdur."
 
     # ─── SCENARIOS ENDPOINT ───

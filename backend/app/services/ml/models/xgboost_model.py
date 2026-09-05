@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -40,9 +39,9 @@ class XGBoostSignalModel:
         "verbosity": 0,
     }
 
-    def __init__(self, params: Optional[dict] = None):
+    def __init__(self, params: dict | None = None):
         self.params = {**self.DEFAULT_PARAMS, **(params or {})}
-        self.model: Optional[xgb.XGBClassifier] = None
+        self.model: xgb.XGBClassifier | None = None
         self.feature_names: list[str] = []
         self.metrics: dict = {}
 
@@ -129,7 +128,6 @@ class XGBoostSignalModel:
     ) -> dict:
         from sklearn.metrics import (
             accuracy_score,
-            classification_report,
             log_loss,
         )
 

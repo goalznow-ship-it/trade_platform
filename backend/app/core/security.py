@@ -1,19 +1,20 @@
 import json
 import secrets
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Set
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import UTC, datetime, timedelta
+
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
-from starlette.middleware.base import BaseHTTPMiddleware
-from sqlalchemy.ext.asyncio import AsyncSession
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.client_ip import get_client_ip
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import logger
-from app.core.client_ip import get_client_ip
 from app.core.redis import redis_client
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -37,14 +38,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "type": "access", "jti": secrets.token_urlsafe(24)})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh", "jti": secrets.token_urlsafe(24)})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -114,7 +115,7 @@ async def revoke_token(token: str):
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         jti = payload.get("jti")
         if jti:
-            expires_in = max(1, int(payload["exp"] - datetime.now(timezone.utc).timestamp()))
+            expires_in = max(1, int(payload["exp"] - datetime.now(UTC).timestamp()))
             await redis_client.setex(f"auth:revoked:{jti}", expires_in, "1")
     except JWTError:
         pass
@@ -134,7 +135,7 @@ async def revoke_all_user_tokens(user_id: int):
     "log out everywhere", and admin force-revoke.
     """
     try:
-        now = int(datetime.now(timezone.utc).timestamp())
+        now = int(datetime.now(UTC).timestamp())
         # Keep marker for the max possible token lifetime so an old
         # session can't slip through after the marker expires.
         marker_ttl = (
@@ -188,8 +189,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise HTTPException(401, "User not found or inactive")
     expires_at = user.subscription_expires
     if expires_at and expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at and expires_at < datetime.now(timezone.utc):
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at and expires_at < datetime.now(UTC):
         if user.subscription_tier != "free":
             user.subscription_tier = "free"
             user.subscription_expires = None

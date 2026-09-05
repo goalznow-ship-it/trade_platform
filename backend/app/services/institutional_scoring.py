@@ -18,8 +18,9 @@ Classification:
   70-79:  Watchlist
   <70:    Reject
 """
+
 import numpy as np
-from typing import Optional
+
 from app.services.indicators import indicator_service
 
 
@@ -33,13 +34,13 @@ class InstitutionalScorer:
         self.risk_weight = 15
 
     async def score(self, symbol: str, data: list, timeframe: str = "1h",
-                    smc_data: Optional[dict] = None,
-                    futures_data: Optional[dict] = None) -> dict:
+                    smc_data: dict | None = None,
+                    futures_data: dict | None = None) -> dict:
         return self.score_sync(symbol, data, timeframe, smc_data, futures_data)
 
     def score_sync(self, symbol: str, data: list, timeframe: str = "1h",
-                   smc_data: Optional[dict] = None,
-                   futures_data: Optional[dict] = None) -> dict:
+                   smc_data: dict | None = None,
+                   futures_data: dict | None = None) -> dict:
         if len(data) < 50:
             return self._empty(symbol, timeframe, "Insufficient data")
 
@@ -276,7 +277,7 @@ class InstitutionalScorer:
 
         return max(-self.volume_weight, min(self.volume_weight, score))
 
-    def _score_liquidity(self, data: list, futures: Optional[dict] = None) -> float:
+    def _score_liquidity(self, data: list, futures: dict | None = None) -> float:
         score = 0.0
         closes = [d["close"] for d in data]
 
@@ -320,7 +321,7 @@ class InstitutionalScorer:
 
         return max(-self.liquidity_weight, min(self.liquidity_weight, score))
 
-    def _score_smc(self, data: list, smc_data: Optional[dict] = None) -> float:
+    def _score_smc(self, data: list, smc_data: dict | None = None) -> float:
         score = 0.0
         highs = [d["high"] for d in data]
         lows = [d["low"] for d in data]
@@ -370,12 +371,10 @@ class InstitutionalScorer:
         else:
             for i in range(2, min(10, len(data))):
                 if lows[-i] > highs[-(i + 1)]:
-                    fvg_bullish = True
                     if closes[-1] > lows[-i]:
                         score += 3
                     break
                 if highs[-i] < lows[-(i + 1)]:
-                    fvg_bearish = True
                     if closes[-1] < highs[-i]:
                         score -= 3
                     break
@@ -399,7 +398,7 @@ class InstitutionalScorer:
 
         return max(-self.smc_weight, min(self.smc_weight, score))
 
-    def _score_risk(self, data: list, futures: Optional[dict] = None) -> float:
+    def _score_risk(self, data: list, futures: dict | None = None) -> float:
         score = 0.0
         closes = [d["close"] for d in data]
         highs = [d["high"] for d in data]
@@ -471,7 +470,7 @@ class InstitutionalScorer:
         rsi = indicator_service.rsi(data)
         macd = indicator_service.macd(data)
         adx = indicator_service.adx(data)
-        bb = indicator_service.bollinger(data)
+        indicator_service.bollinger(data)
 
         return {
             "rsi": round(rsi.get("current", 50), 1) if isinstance(rsi, dict) else None,

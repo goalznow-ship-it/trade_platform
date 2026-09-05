@@ -9,7 +9,7 @@ Weighted scoring formula:
   News Impact            15%
 """
 
-from typing import Optional
+
 
 class SignalScorer:
     WEIGHTS = {
@@ -56,8 +56,8 @@ class SignalScorer:
         news = analysis.get('scores', {}).get('news_sentiment', 0)
         return max(-1, min(1, fg * 0.5 + news * 0.5))
 
-    def calculate(self, analysis: dict, futures_data: Optional[dict] = None,
-                  news_data: Optional[dict] = None) -> dict:
+    def calculate(self, analysis: dict, futures_data: dict | None = None,
+                  news_data: dict | None = None) -> dict:
         tech_score = self.score_technical(analysis)
         struct_score = self.score_market_structure(analysis)
         sent_score = self.score_sentiment(analysis)

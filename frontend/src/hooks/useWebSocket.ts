@@ -180,7 +180,7 @@ export function useWebSocketV2(token?: string) {
     return () => {
       disconnect()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [token])
 
   const send = useCallback((message: Record<string, unknown>, priority = 0) => {

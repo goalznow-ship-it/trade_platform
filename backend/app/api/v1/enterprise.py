@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, Query
+
 from app.core.security import require_subscription
 from app.models.user import User
 from app.services.enterprise_signals import enterprise_signal_engine
-from app.services.prediction import prediction_engine
-from app.services.news_intelligence_v2 import news_intelligence_engine
 from app.services.market import market_service
+from app.services.news_intelligence_v2 import news_intelligence_engine
+from app.services.prediction import prediction_engine
 from app.services.scanner import scanner_service
 
 router = APIRouter(prefix="/enterprise", tags=["Enterprise"])

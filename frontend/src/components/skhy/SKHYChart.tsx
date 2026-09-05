@@ -1437,7 +1437,7 @@ function drawSMCPrimitive(
     ...norm.smc.near_liq.map(s2 => ({ cat: "LIQ", price: n(s2.price) })),
     ...norm.smc.near_eq.map(s2 => ({ cat: "EQ", price: n(s2.price) })),
   ]
-  let dc = allItems.length
+  const dc = allItems.length
   let vc = 0; let ec = 0
   for (const item of allItems) {
     if (item.price <= 0) continue

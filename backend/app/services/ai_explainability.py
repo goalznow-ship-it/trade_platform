@@ -1,4 +1,4 @@
-from typing import Optional
+
 from app.core.logging import logger
 
 
@@ -6,7 +6,7 @@ class AIExplainabilityEngine:
     def __init__(self):
         self.logger = logger
 
-    def explain(self, data: list, analysis: dict, profile: Optional[dict] = None) -> dict:
+    def explain(self, data: list, analysis: dict, profile: dict | None = None) -> dict:
         reasons = []
         warnings = []
         suggestions = {}
@@ -146,7 +146,7 @@ class AIExplainabilityEngine:
             return {"score": round(score, 3), "signal": "bearish_liquidity_grab", "description": "Liquidity sweep to upside, bearish reversal expected"}
         return {"score": 0, "signal": "neutral", "description": "No significant SMC pattern detected"}
 
-    def _explain_risk(self, risk_level: Optional[str], volatility_score: float) -> dict:
+    def _explain_risk(self, risk_level: str | None, volatility_score: float) -> dict:
         level = risk_level or "medium"
         return {
             "level": level,

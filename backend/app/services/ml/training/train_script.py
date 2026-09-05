@@ -19,8 +19,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 # Add project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
@@ -29,7 +28,6 @@ import ccxt.async_support as ccxt
 
 from app.core.logging import logger
 from app.services.ml import MLSignalEngine
-
 
 # Default top-30 Binance perpetual symbols
 DEFAULT_SYMBOLS = [
@@ -54,8 +52,8 @@ class _CcxtClient:
     def __init__(self, client):
         self._client = client
         # Public Binance market data — no auth needed.
-        self.api_key: Optional[str] = None
-        self.secret: Optional[str] = None
+        self.api_key: str | None = None
+        self.secret: str | None = None
 
     async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 500):
         return await self._client.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -77,17 +75,17 @@ async def _build_public_exchange() -> _CcxtClient:
 
 
 async def run_training(
-    symbols: List[str],
+    symbols: list[str],
     timeframe: str = "15m",
     include_transformer: bool = True,
     save: bool = True,
 ) -> dict:
     """Async training entry point. Returns the training-results dict."""
-    print(f"🚀 Starting ML training")
+    print("🚀 Starting ML training")
     print(f"   Symbols: {len(symbols)}")
     print(f"   Timeframe: {timeframe}")
     print(f"   Transformer: {include_transformer}")
-    print(f"   Timestamp: {datetime.now(timezone.utc).isoformat()}")
+    print(f"   Timestamp: {datetime.now(UTC).isoformat()}")
     print()
 
     engine = MLSignalEngine()

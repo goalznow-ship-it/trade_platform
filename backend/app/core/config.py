@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings
+
 from pydantic import model_validator
-from typing import Optional
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -24,25 +24,25 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CORS_ORIGINS: str = "*"
-    EXCHANGE_ENCRYPTION_KEY: Optional[str] = None
+    EXCHANGE_ENCRYPTION_KEY: str | None = None
     ENABLE_BACKGROUND_SERVICES: bool = True
     TRADING_ENABLED: bool = False
 
     RATE_LIMIT_MAX: int = 60
     RATE_LIMIT_WINDOW: int = 60
 
-    BINANCE_API_KEY: Optional[str] = None
-    BINANCE_SECRET_KEY: Optional[str] = None
-    BYBIT_API_KEY: Optional[str] = None
-    BYBIT_SECRET_KEY: Optional[str] = None
-    COINGECKO_API_KEY: Optional[str] = None
+    BINANCE_API_KEY: str | None = None
+    BINANCE_SECRET_KEY: str | None = None
+    BYBIT_API_KEY: str | None = None
+    BYBIT_SECRET_KEY: str | None = None
+    COINGECKO_API_KEY: str | None = None
 
-    TELEGRAM_BOT_TOKEN: Optional[str] = None
-    DISCORD_BOT_TOKEN: Optional[str] = None
-    SENDGRID_API_KEY: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    DISCORD_BOT_TOKEN: str | None = None
+    SENDGRID_API_KEY: str | None = None
 
-    SSL_CERT_PATH: Optional[str] = None
-    SSL_KEY_PATH: Optional[str] = None
+    SSL_CERT_PATH: str | None = None
+    SSL_KEY_PATH: str | None = None
 
     @model_validator(mode="after")
     def validate_production_settings(self):

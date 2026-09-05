@@ -1,6 +1,6 @@
+
 import numpy as np
-from typing import List, Tuple, Optional
-from app.core.logging import logger
+
 
 class SkhyStructureEngine:
     def analyze(self, data: list) -> dict:
@@ -10,8 +10,8 @@ class SkhyStructureEngine:
         closes = [d["close"] for d in data]
         highs = [d["high"] for d in data]
         lows = [d["low"] for d in data]
-        opens = [d["open"] for d in data]
-        volumes = [d["volume"] for d in data]
+        [d["open"] for d in data]
+        [d["volume"] for d in data]
 
         swings = self._find_swing_points(highs, lows)
         structure = self._market_structure(swings)
@@ -164,11 +164,11 @@ class SkhyStructureEngine:
     def _detect_liquidity(self, highs: list, lows: list, swings: list) -> dict:
         eq_highs = self._find_eq_levels(highs)
         eq_lows = self._find_eq_levels(lows)
-        recent_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-        recent_low = min(lows[-20:]) if len(lows) >= 20 else min(lows)
+        max(highs[-20:]) if len(highs) >= 20 else max(highs)
+        min(lows[-20:]) if len(lows) >= 20 else min(lows)
 
         liquidity_above = []
-        for i, eh in enumerate(eq_highs):
+        for _i, eh in enumerate(eq_highs):
             liquidity_above.append({"price": eh, "type": "equal_highs", "strength": min(3, eq_highs.count(eh))})
         liquidity_above.append({"price": max(highs[-50:]) if len(highs) >= 50 else max(highs), "type": "swing_high", "strength": 2})
 
@@ -178,10 +178,10 @@ class SkhyStructureEngine:
         liquidity_below.append({"price": min(lows[-50:]) if len(lows) >= 50 else min(lows), "type": "swing_low", "strength": 2})
 
         return {
-            "above": [l for l in liquidity_above if l["price"] > highs[-1]],
-            "below": [l for l in liquidity_below if l["price"] < lows[-1]],
-            "nearest_above": min([l for l in liquidity_above if l["price"] > highs[-1]], key=lambda x: x["price"] - highs[-1]) if any(l["price"] > highs[-1] for l in liquidity_above) else None,
-            "nearest_below": max([l for l in liquidity_below if l["price"] < lows[-1]], key=lambda x: x["price"]) if any(l["price"] < lows[-1] for l in liquidity_below) else None,
+            "above": [l for l in liquidity_above if l["price"] > highs[-1]],  # noqa: E741
+            "below": [l for l in liquidity_below if l["price"] < lows[-1]],  # noqa: E741
+            "nearest_above": min([l for l in liquidity_above if l["price"] > highs[-1]], key=lambda x: x["price"] - highs[-1]) if any(l["price"] > highs[-1] for l in liquidity_above) else None,  # noqa: E741
+            "nearest_below": max([l for l in liquidity_below if l["price"] < lows[-1]], key=lambda x: x["price"]) if any(l["price"] < lows[-1] for l in liquidity_below) else None,  # noqa: E741
         }
 
     def _find_eq_levels(self, values: list, tolerance: float = 0.002) -> list:
@@ -192,7 +192,7 @@ class SkhyStructureEngine:
                     levels.append(round((values[i] + values[j]) / 2, 2))
         return levels
 
-    def _detect_equal_highs_lows(self, highs: list, lows: list) -> Tuple[list, list]:
+    def _detect_equal_highs_lows(self, highs: list, lows: list) -> tuple[list, list]:
         return self._find_eq_levels(highs), self._find_eq_levels(lows)
 
     def _premium_discount_zones(self, highs: list, lows: list, closes: list) -> dict:

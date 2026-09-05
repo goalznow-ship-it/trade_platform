@@ -1,36 +1,38 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from contextlib import asynccontextmanager
-from app.core.config import settings
+
+from app.api.v1 import admin, analysis, auth, backtest, market, news, portfolio, scanner, signals, trading
+from app.api.v1 import alerts as alerts_router
+from app.api.v1 import auto_scalper as auto_scalper_router
+from app.api.v1 import enterprise as enterprise_router
+from app.api.v1 import institutional as institutional_router
+from app.api.v1 import journal as journal_router
+from app.api.v1 import notifications as notifications_router
+from app.api.v1 import paper_trading as paper_router
+from app.api.v1 import performance as performance_router
+from app.api.v1 import risk as risk_router
+from app.api.v1 import skhy as skhy_router
+from app.api.v1 import watchlists as watchlists_router
+from app.api.v1 import whales as whales_router
+from app.api.v1.ml import router as ml_router
+from app.api.v1.websocket_v2 import router as ws_v2_router
 from app.core.bootstrap import ensure_default_admin
+from app.core.config import settings
 from app.core.database import async_session_factory, init_db
 from app.core.logging import logger
 from app.core.rate_limiter import RateLimitMiddleware
 from app.core.security import AuditMiddleware
 from app.core.websocket_manager import ws_manager
-from app.api.v1 import auth, market, analysis, signals, trading, news, admin, scanner, backtest, portfolio
-from app.api.v1 import performance as performance_router
-from app.api.v1 import whales as whales_router
-from app.api.v1 import watchlists as watchlists_router
-from app.api.v1 import alerts as alerts_router
-from app.api.v1 import risk as risk_router
-from app.api.v1 import journal as journal_router
-from app.api.v1 import paper_trading as paper_router
-from app.api.v1 import notifications as notifications_router
-from app.api.v1 import enterprise as enterprise_router
-from app.api.v1 import institutional as institutional_router
-from app.api.v1 import skhy as skhy_router
-from app.api.v1 import auto_scalper as auto_scalper_router
-from app.api.v1.websocket_v2 import router as ws_v2_router
-from app.api.v1.ml import router as ml_router
 from app.services.alert import alert_service
 from app.services.binance_ws import binance_ws
-from app.services.market_coverage import market_coverage
-from app.services.streaming import streaming_service
 from app.services.exchange.manager import exchange_manager
+from app.services.market_coverage import market_coverage
 from app.services.paper_trading import paper_trading_service
 from app.services.skhy_market_data import skhy_market_data
+from app.services.streaming import streaming_service
 
 
 @asynccontextmanager
@@ -106,7 +108,10 @@ app.add_middleware(RateLimitMiddleware, max_requests=settings.RATE_LIMIT_MAX, wi
 # Security headers (X-Frame-Options, HSTS, etc.) — added last so
 # they wrap everything (including 429s from the rate limiter and
 # 401s from auth) and the browser receives a consistent policy.
-from app.core.security_headers import SecurityHeadersMiddleware
+from datetime import UTC  # noqa: E402
+
+from app.core.security_headers import SecurityHeadersMiddleware  # noqa: E402
+
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -143,7 +148,8 @@ async def root():
 
 @app.get("/health")
 async def health():
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.core.provider_health import provider_health
 
     stream_stats = streaming_service.get_stats()
@@ -179,7 +185,7 @@ async def health():
                 "affects_readiness": False,
             },
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 

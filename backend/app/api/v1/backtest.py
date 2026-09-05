@@ -1,16 +1,17 @@
-from datetime import datetime, timezone
-from fastapi import APIRouter, Query, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.portfolio import BacktestResult
+from app.models.user import User
 from app.services.backtest import backtest_service
 from app.services.market import market_service
-from app.core.security import get_current_user
-from app.models.user import User
-from app.models.portfolio import BacktestResult
-from pydantic import BaseModel
-from typing import Optional
-import httpx
 
 router = APIRouter(prefix="/backtest", tags=["Backtest"])
 
@@ -18,7 +19,7 @@ class SaveBacktestRequest(BaseModel):
     symbol: str
     timeframe: str = "1h"
     strategy_name: str = "Default"
-    parameters: Optional[dict] = None
+    parameters: dict | None = None
 
 @router.get("/run")
 async def run_backtest(
@@ -101,8 +102,8 @@ async def save_backtest(
     bt = BacktestResult(
         user_id=user.id, symbol=sym, timeframe=req.timeframe,
         strategy_name=req.strategy_name, parameters=parameters,
-        start_date=datetime.fromtimestamp(data[0]["time"], tz=timezone.utc).replace(tzinfo=None),
-        end_date=datetime.fromtimestamp(data[-2]["time"], tz=timezone.utc).replace(tzinfo=None),
+        start_date=datetime.fromtimestamp(data[0]["time"], tz=UTC).replace(tzinfo=None),
+        end_date=datetime.fromtimestamp(data[-2]["time"], tz=UTC).replace(tzinfo=None),
         total_trades=result.get("total_trades", 0),
         win_rate=result.get("win_rate", 0),
         profit_factor=result.get("profit_factor", 0),

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from typing import Optional
 
 from fastapi import Request
 

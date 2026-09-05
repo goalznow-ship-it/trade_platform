@@ -1,5 +1,7 @@
 import ccxt
+
 from app.core.logging import logger
+
 
 class TradingService:
     def __init__(self):
@@ -71,7 +73,7 @@ class TradingService:
         if not ex:
             return {'error': 'Exchange not supported'}
         try:
-            result = ex.cancel_order(order_id, symbol)
+            ex.cancel_order(order_id, symbol)
             return {'success': True, 'order_id': order_id}
         except Exception as e:
             return {'error': str(e)}

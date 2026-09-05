@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, BigInteger
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.sql import func
+
 from app.core.database import Base
+
 
 class Symbol(Base):
     __tablename__ = "symbols"

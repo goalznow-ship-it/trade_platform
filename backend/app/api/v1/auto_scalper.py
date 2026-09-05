@@ -61,7 +61,7 @@ async def arm(
                 select(ExchangeCredentials.id).where(
                     ExchangeCredentials.user_id == user.id,
                     ExchangeCredentials.exchange == "binance",
-                    ExchangeCredentials.is_active == True,
+                    ExchangeCredentials.is_active,
                 )
             )
             if credentials.scalar_one_or_none() is None:

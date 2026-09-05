@@ -15,10 +15,10 @@ Outputs: overall score, bull/bear/crash/squeeze probabilities, regime,
          contributing factors, alt season signal.
 """
 
-from typing import List, Dict
-from datetime import datetime, timezone
 import asyncio
 import math
+from datetime import UTC, datetime
+
 from app.core.logging import logger
 
 try:
@@ -95,13 +95,13 @@ class AICentralBrain:
 
     def __init__(self):
         self._logger = logger
-        self._assessment_cache: Dict[str, Dict] = {}
-        self._last_update: Dict[str, datetime] = {}
+        self._assessment_cache: dict[str, dict] = {}
+        self._last_update: dict[str, datetime] = {}
         self._cache_ttl_seconds = 30
 
-    async def assess_market(self, symbol: str) -> Dict:
+    async def assess_market(self, symbol: str) -> dict:
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if symbol in self._assessment_cache:
                 elapsed = (now - self._last_update.get(symbol, now)).total_seconds()
                 if elapsed < self._cache_ttl_seconds:
@@ -129,7 +129,7 @@ class AICentralBrain:
                 "macro", "onchain", "sentiment", "whale", "risk",
             ]
 
-            for label, result in zip(labels, results):
+            for label, result in zip(labels, results, strict=False):
                 if isinstance(result, Exception):
                     self._logger.warning(f"Brain {symbol} {label} error: {result}")
                     scores[label] = 50.0
@@ -207,7 +207,7 @@ class AICentralBrain:
             self._logger.error(f"Brain assess_market failed for {symbol}: {e}")
             return self._empty_assessment(symbol, str(e))
 
-    def get_weighted_score(self, scores: Dict) -> float:
+    def get_weighted_score(self, scores: dict) -> float:
         weights = {
             "technical": self.TECHNICAL_WEIGHT,
             "smc": self.SMC_WEIGHT,
@@ -260,10 +260,10 @@ class AICentralBrain:
 
     async def get_crash_risk(
         self,
-        technical: Dict,
-        onchain: Dict,
-        macro: Dict,
-        derivatives: Dict,
+        technical: dict,
+        onchain: dict,
+        macro: dict,
+        derivatives: dict,
     ) -> float:
         signals = []
         weights = []
@@ -356,15 +356,15 @@ class AICentralBrain:
                     weights.append(0.15)
 
         total_weight = sum(weights) if weights else 1
-        crash_prob = sum(s * w for s, w in zip(signals, weights)) / total_weight
+        crash_prob = sum(s * w for s, w in zip(signals, weights, strict=False)) / total_weight
         return max(0, min(100, crash_prob))
 
     async def get_squeeze_risk(
         self,
-        derivatives: Dict,
-        orderflow: Dict,
-        sentiment: Dict,
-    ) -> Dict:
+        derivatives: dict,
+        orderflow: dict,
+        sentiment: dict,
+    ) -> dict:
         short_squeeze_signals = []
         long_squeeze_signals = []
         weights = []
@@ -395,7 +395,7 @@ class AICentralBrain:
             if isinstance(funding, dict):
                 funding_raw = funding.get("funding_rate_raw") or 0
                 annualized_raw = funding.get("annualized_rate") or 0
-                funding_rate = abs(funding_raw) if isinstance(funding_raw, (int, float)) else 0
+                abs(funding_raw) if isinstance(funding_raw, (int, float)) else 0
                 annualized = annualized_raw if isinstance(annualized_raw, (int, float)) else 0
                 if abs(annualized) > 50:
                     if funding.get("signal") == "bullish":
@@ -439,11 +439,11 @@ class AICentralBrain:
 
         total_w = sum(weights) / len(short_squeeze_signals) if short_squeeze_signals else 1
         short_squeeze_prob = (
-            sum(s * (w / len(short_squeeze_signals)) for s, w in zip(short_squeeze_signals, weights[:len(short_squeeze_signals)]))
+            sum(s * (w / len(short_squeeze_signals)) for s, w in zip(short_squeeze_signals, weights[:len(short_squeeze_signals)], strict=False))
             / total_w if total_w > 0 else 10
         )
         long_squeeze_prob = (
-            sum(s * (w / len(long_squeeze_signals)) for s, w in zip(long_squeeze_signals, weights[:len(long_squeeze_signals)]))
+            sum(s * (w / len(long_squeeze_signals)) for s, w in zip(long_squeeze_signals, weights[:len(long_squeeze_signals)], strict=False))
             / (sum(weights[:len(long_squeeze_signals)]) / max(len(long_squeeze_signals), 1)) if sum(weights[:len(long_squeeze_signals)]) > 0 else 10
         )
 
@@ -454,7 +454,7 @@ class AICentralBrain:
 
     def get_alt_season_signal(
         self,
-        top_symbols_scores: List[float],
+        top_symbols_scores: list[float],
         btc_dominance: float,
     ) -> float:
         if not top_symbols_scores:
@@ -473,11 +473,11 @@ class AICentralBrain:
         signal = alt_score_normalized * 60 + dom_factor * 40
         return max(0, min(100, signal * 100))
 
-    def get_explanation(self, factors: Dict) -> List[str]:
+    def get_explanation(self, factors: dict) -> list[str]:
         explanations = []
         scores = factors.get("scores", {})
         regime = factors.get("regime", "neutral")
-        overall = factors.get("overall", 50)
+        factors.get("overall", 50)
 
         if regime == "strong_bullish":
             explanations.append("Aggregate market structure strongly bullish across all timeframes")
@@ -532,7 +532,7 @@ class AICentralBrain:
 
     async def stream_brain_updates(
         self,
-        symbols: List[str],
+        symbols: list[str],
         interval: int = 60,
     ):
         while True:
@@ -546,7 +546,7 @@ class AICentralBrain:
                     batch.append({
                         "symbol": symbol,
                         "error": str(e),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
 
             has_errors = any("error" in a for a in batch)
@@ -555,21 +555,21 @@ class AICentralBrain:
                 "data": batch,
                 "has_errors": has_errors,
                 "batch_size": len(batch),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             await asyncio.sleep(interval)
 
     def _compute_dynamic_weights(
         self,
-        scores: Dict,
-        base_weights: Dict,
-    ) -> Dict:
+        scores: dict,
+        base_weights: dict,
+    ) -> dict:
         dynamic = dict(base_weights)
         total = len(scores)
         if total < 3:
             return dynamic
 
-        values = [v for v in scores.values()]
+        values = list(scores.values())
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
         std_dev = math.sqrt(variance)
@@ -586,8 +586,8 @@ class AICentralBrain:
 
     def _score_variance(
         self,
-        scores: Dict,
-        weights: Dict,
+        scores: dict,
+        weights: dict,
         weighted_mean: float,
     ) -> float:
         values = []
@@ -601,8 +601,8 @@ class AICentralBrain:
 
     def _compute_bull_probability(
         self,
-        scores: Dict,
-        engine_results: Dict,
+        scores: dict,
+        engine_results: dict,
     ) -> float:
         raw_bull = 50.0
 
@@ -648,7 +648,7 @@ class AICentralBrain:
 
     def _compute_bear_probability(
         self,
-        scores: Dict,
+        scores: dict,
         bull_prob: float,
     ) -> float:
         bear_prob = 100 - bull_prob
@@ -657,7 +657,7 @@ class AICentralBrain:
         bear_prob += negative_scores * 3 + very_negative * 2
         return max(0, min(100, bear_prob))
 
-    def _compute_confidence(self, scores: Dict) -> float:
+    def _compute_confidence(self, scores: dict) -> float:
         values = list(scores.values())
         if not values:
             return 0
@@ -684,7 +684,7 @@ class AICentralBrain:
 
         return max(0, min(100, confidence))
 
-    async def _get_technical_score(self, symbol: str) -> Dict:
+    async def _get_technical_score(self, symbol: str) -> dict:
         try:
             data = None
             if market_service:
@@ -716,7 +716,7 @@ class AICentralBrain:
             self._logger.warning(f"Technical score error for {symbol}: {e}")
             return {"score": 50.0, "direction": "neutral", "error": str(e)}
 
-    async def _get_smc_score(self, symbol: str) -> Dict:
+    async def _get_smc_score(self, symbol: str) -> dict:
         try:
             data = None
             if market_service:
@@ -780,7 +780,7 @@ class AICentralBrain:
             self._logger.warning(f"SMC score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_orderflow_score(self, symbol: str) -> Dict:
+    async def _get_orderflow_score(self, symbol: str) -> dict:
         try:
             if not orderflow_engine:
                 return {"score": 50.0, "factors": ["Order flow engine unavailable"]}
@@ -848,12 +848,12 @@ class AICentralBrain:
             self._logger.warning(f"Orderflow score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_derivatives_score(self, symbol: str) -> Dict:
+    async def _get_derivatives_score(self, symbol: str) -> dict:
         try:
             if not derivatives_engine:
                 return {"score": 50.0, "factors": ["Derivatives engine unavailable"]}
 
-            raw_symbol = symbol.replace("/USDT", "USDT")
+            symbol.replace("/USDT", "USDT")
 
             funding_data = None
             oi_data = None
@@ -877,7 +877,7 @@ class AICentralBrain:
             if ticker_data and isinstance(ticker_data, dict):
                 price_change_24h = (ticker_data.get("change_percent", 0) or 0) / 100.0
 
-            nft = datetime.now(timezone.utc)
+            nft = datetime.now(UTC)
 
             snapshot = derivatives_engine.get_aggregated_derivatives_snapshot(
                 symbol=symbol,
@@ -951,7 +951,7 @@ class AICentralBrain:
             self._logger.warning(f"Derivatives score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_macro_score(self) -> Dict:
+    async def _get_macro_score(self) -> dict:
         try:
             if not macro_engine:
                 return {"score": 50.0, "factors": ["Macro engine unavailable"]}
@@ -1035,7 +1035,7 @@ class AICentralBrain:
             self._logger.warning(f"Macro score error: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_onchain_score(self, symbol: str) -> Dict:
+    async def _get_onchain_score(self, symbol: str) -> dict:
         try:
             if not onchain_engine:
                 return {"score": 50.0, "factors": ["On-chain engine unavailable"]}
@@ -1100,7 +1100,7 @@ class AICentralBrain:
             self._logger.warning(f"On-chain score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_sentiment_score(self, symbol: str) -> Dict:
+    async def _get_sentiment_score(self, symbol: str) -> dict:
         try:
             if not social_sentiment:
                 return {"score": 50.0, "factors": ["Social sentiment engine unavailable"]}
@@ -1146,7 +1146,7 @@ class AICentralBrain:
             self._logger.warning(f"Sentiment score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_whale_score(self, symbol: str) -> Dict:
+    async def _get_whale_score(self, symbol: str) -> dict:
         try:
             if not whale_tracker:
                 return {"score": 50.0, "factors": ["Whale tracker unavailable"]}
@@ -1193,7 +1193,7 @@ class AICentralBrain:
             self._logger.warning(f"Whale score error for {symbol}: {e}")
             return {"score": 50.0, "error": str(e)}
 
-    async def _get_risk_score(self) -> Dict:
+    async def _get_risk_score(self) -> dict:
         try:
             return {"score": 50.0, "factors": ["Portfolio risk: neutral (no active session)"]}
         except Exception as e:
@@ -1204,9 +1204,9 @@ class AICentralBrain:
         self,
         symbol: str,
         side: str,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         try:
-            raw_symbol = symbol.replace("/", "").upper()
+            symbol.replace("/", "").upper()
             if market_service:
                 ob = await market_service.get_orderbook(symbol)
                 if isinstance(ob, dict):
@@ -1220,7 +1220,7 @@ class AICentralBrain:
         except Exception:
             return []
 
-    async def _get_recent_trades(self, symbol: str) -> List[Dict]:
+    async def _get_recent_trades(self, symbol: str) -> list[dict]:
         try:
             if market_service:
                 data = await market_service.get_recent_trades(symbol, limit=100)
@@ -1230,7 +1230,7 @@ class AICentralBrain:
         except Exception:
             return []
 
-    async def _get_top_symbols_scores(self) -> List[float]:
+    async def _get_top_symbols_scores(self) -> list[float]:
         try:
             if not market_coverage or not market_service:
                 return []
@@ -1239,7 +1239,7 @@ class AICentralBrain:
                 *(market_service.get_ticker(symbol) for symbol in symbols),
                 return_exceptions=True,
             )
-            scores: List[float] = []
+            scores: list[float] = []
             for ticker in tickers:
                 if isinstance(ticker, dict):
                     change = ticker.get("change_percent")
@@ -1259,7 +1259,7 @@ class AICentralBrain:
         except Exception:
             return 55.0
 
-    def _empty_assessment(self, symbol: str, error: str) -> Dict:
+    def _empty_assessment(self, symbol: str, error: str) -> dict:
         return {
             "symbol": symbol,
             "overall_market_score": 50.0,
@@ -1274,7 +1274,7 @@ class AICentralBrain:
             "contributing_factors": [f"Assessment failed: {error}"],
             "sub_scores": {},
             "engine_results": {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "error": error,
         }
 

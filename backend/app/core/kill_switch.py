@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Tuple
 
 from app.core.redis import redis_client
 
@@ -81,7 +80,7 @@ async def is_kill_switch_active() -> bool:
         return active
 
 
-async def get_kill_switch_status() -> Tuple[str, str | None]:
+async def get_kill_switch_status() -> tuple[str, str | None]:
     """
     Best-effort status for admin UIs. Returns (state, reason) where
     state is one of 'active', 'inactive', 'unknown'. 'unknown' means

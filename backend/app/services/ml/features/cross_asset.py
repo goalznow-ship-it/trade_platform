@@ -5,8 +5,6 @@ Captures correlation and lead-lag relationships with broader market.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import numpy as np
 import pandas as pd
 
@@ -46,7 +44,7 @@ class CrossAssetFeatures:
 
     @staticmethod
     def regime_features(
-        target: pd.DataFrame, benchmark_df: Optional[pd.DataFrame] = None
+        target: pd.DataFrame, benchmark_df: pd.DataFrame | None = None
     ) -> pd.DataFrame:
         """
         Build cross-asset features for a single symbol.
@@ -80,7 +78,7 @@ class CrossAssetFeatures:
         return feats
 
     @staticmethod
-    def market_breadth(market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    def market_breadth(market_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
         Compute market-wide breadth from a basket of symbols.
         Returns: % of symbols above EMA20, EMA50, EMA200, etc.

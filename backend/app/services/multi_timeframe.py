@@ -19,9 +19,9 @@ Rules:
 - 5M gives execution timing
 """
 import asyncio
-from typing import List, Optional
-from app.services.market import market_service
+
 from app.services.institutional_scoring import institutional_scorer
+from app.services.market import market_service
 from app.services.smc_engine import smc_engine
 
 TIMEFRAMES = ["1w", "1d", "4h", "1h", "15m", "5m"]
@@ -46,7 +46,7 @@ TIMEFRAME_LIMITS = {
 
 
 class MultiTimeframeAnalyzer:
-    async def analyze(self, symbol: str, timeframes: Optional[List[str]] = None) -> dict:
+    async def analyze(self, symbol: str, timeframes: list[str] | None = None) -> dict:
         if timeframes is None:
             timeframes = TIMEFRAMES
 
@@ -92,7 +92,7 @@ class MultiTimeframeAnalyzer:
         analyzed = await asyncio.gather(
             *(analyze_timeframe(tf) for tf in timeframes),
         )
-        for tf, (result, error) in zip(timeframes, analyzed):
+        for tf, (result, error) in zip(timeframes, analyzed, strict=False):
             if result is not None:
                 results[tf] = result
             if error:
@@ -117,7 +117,7 @@ class MultiTimeframeAnalyzer:
             "errors": errors if errors else None,
         }
 
-    def _aggregate(self, results: dict, timeframes: List[str]) -> dict:
+    def _aggregate(self, results: dict, timeframes: list[str]) -> dict:
         weighted_score = 0.0
         total_weight = 0.0
         long_count = 0
@@ -211,11 +211,11 @@ class MultiTimeframeAnalyzer:
         }
 
     def _classify(self, score: float) -> str:
-        if score >= 95: return "institutional_grade"
-        elif score >= 90: return "excellent"
-        elif score >= 85: return "very_strong"
-        elif score >= 80: return "strong"
-        elif score >= 70: return "watchlist"
+        if score >= 95: return "institutional_grade"  # noqa: E701
+        elif score >= 90: return "excellent"  # noqa: E701
+        elif score >= 85: return "very_strong"  # noqa: E701
+        elif score >= 80: return "strong"  # noqa: E701
+        elif score >= 70: return "watchlist"  # noqa: E701
         return "reject"
 
 

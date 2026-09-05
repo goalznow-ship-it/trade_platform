@@ -6,11 +6,10 @@ Prevents look-ahead bias, gives realistic performance estimates.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import TimeSeriesSplit
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +46,8 @@ class WalkForwardValidator:
         train_fn: Callable,
         X: pd.DataFrame,
         y: pd.Series,
-        metric_fns: Dict[str, Callable] = None,
-    ) -> Dict:
+        metric_fns: dict[str, Callable] = None,
+    ) -> dict:
         """
         train_fn(X_train, y_train) -> fitted model with .predict(X)
         Returns aggregated metrics across all folds.
@@ -81,7 +80,7 @@ class WalkForwardValidator:
 
                 for name, fn in metric_fns.items():
                     results[name].append(fn(y_te.values, preds, proba))
-            except Exception as e:
+            except Exception:
                 # Use logger.exception so the traceback is captured —
                 # 'print' swallowed the type and lost the stack, which
                 # made fold failures (data shape mismatch, NaN

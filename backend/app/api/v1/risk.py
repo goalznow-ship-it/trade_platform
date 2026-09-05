@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.risk import risk_service
 from app.schemas.risk import RiskProfileCreate, RiskProfileResponse, RiskSnapshotResponse
+from app.services.risk import risk_service
 
 router = APIRouter(prefix="/risk", tags=["Risk Management"])
 
@@ -28,9 +29,10 @@ async def update_risk_profile(req: RiskProfileCreate,
 @router.get("/exposure")
 async def get_exposure(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from sqlalchemy import select
+
     from app.models.trade import Position
     result = await db.execute(
-        select(Position).where(Position.user_id == user.id, Position.is_open == True)
+        select(Position).where(Position.user_id == user.id, Position.is_open)
     )
     positions = result.scalars().all()
     total = sum(p.size * p.mark_price for p in positions if p.size and p.mark_price) if positions else 0

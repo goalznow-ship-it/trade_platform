@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+# Pragmatic rule set focused on real issues. Categories intentionally
+# excluded:
+# - BLE001: blind except Exception. We do this deliberately in
+#   worker loops where a transient network blip shouldn't poison
+#   the whole loop; the comment explains why in each case.
+# - S110/S112: try-except-pass / try-except-continue. We use this
+#   in cleanup paths and rate-limit recovery where logging would
+#   be more noise than signal.
+# - LOG015: 'logger' call on root logger. We always use a module
+#   logger in code we own; the few stragglers in worker top-level
+#   try-blocks are deliberate.
+# - S105: hardcoded password-looking strings. Catches the default
+#   SECRET_KEY / POSTGRES_PASSWORD values, which are real prod
+#   config and should NOT be flagged.
+# - S314: defusedxml. We don't parse untrusted XML anywhere.
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+ignore = [
+    "B008",  # FastAPI Depends() in default args — false positive
+    "E501",  # line too long — we use 120 and accept slightly longer
+    "B904",  # raise ... from err — already follows but harmless
+]

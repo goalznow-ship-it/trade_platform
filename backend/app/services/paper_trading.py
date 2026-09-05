@@ -1,13 +1,14 @@
 import asyncio
-from typing import Optional, Dict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select, func
 from sqlalchemy.orm import selectinload
-from app.models.paper_trading import PaperAccount, PaperPosition, PaperOrder
-from app.models.trade import TradeHistory
+
 from app.core.logging import logger
-from app.core.websocket_manager import ws_manager, Channel
+from app.core.websocket_manager import Channel, ws_manager
+from app.models.paper_trading import PaperAccount, PaperOrder, PaperPosition
+from app.models.trade import TradeHistory
 from app.services.market import market_service
 
 try:
@@ -27,8 +28,8 @@ class PaperTradingService:
     def __init__(self):
         self.logger = logger
         self._monitoring = False
-        self._monitor_task: Optional[asyncio.Task] = None
-        self._price_cache: Dict[str, float] = {}
+        self._monitor_task: asyncio.Task | None = None
+        self._price_cache: dict[str, float] = {}
 
     async def start_monitoring(self):
         if self._monitoring:
@@ -44,7 +45,7 @@ class PaperTradingService:
             self._monitor_task = None
         logger.info("Paper trading monitoring stopped")
 
-    async def _get_live_price(self, symbol: str) -> Optional[float]:
+    async def _get_live_price(self, symbol: str) -> float | None:
         if symbol in self._price_cache:
             return self._price_cache[symbol]
         try:
@@ -92,7 +93,7 @@ class PaperTradingService:
         account.best_trade = 0.0
         account.worst_trade = 0.0
         account.profit_factor = 0.0
-        account.last_reset_at = datetime.now(timezone.utc)
+        account.last_reset_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(account)
         return account
@@ -157,7 +158,7 @@ class PaperTradingService:
                     await redis_client.incr("execution:total_approved")
                 else:
                     await redis_client.incr("execution:total_rejected")
-                await redis_client.set("execution:last_validation", datetime.now(timezone.utc).isoformat())
+                await redis_client.set("execution:last_validation", datetime.now(UTC).isoformat())
             except Exception:
                 pass
             if not validation.get("passed", False):
@@ -189,7 +190,7 @@ class PaperTradingService:
             return {"order": order, "position": None, "error": f"Unsupported order type: {order_type}"}
 
     async def _fill_market_order(self, account: PaperAccount, order: PaperOrder,
-                                  live_price: Optional[float], db: AsyncSession) -> dict:
+                                  live_price: float | None, db: AsyncSession) -> dict:
         price = live_price
         if not price:
             price = order.price
@@ -217,7 +218,7 @@ class PaperTradingService:
         order.status = "filled"
         order.filled_quantity = order.quantity
         order.executed_price = fill_price
-        order.executed_at = datetime.now(timezone.utc)
+        order.executed_at = datetime.now(UTC)
 
         account.free_margin -= margin_required
         account.used_margin += margin_required
@@ -241,7 +242,7 @@ class PaperTradingService:
         pnl_result = await db.execute(
             select(func.coalesce(func.sum(PaperPosition.unrealized_pnl), 0.0)).where(
                 PaperPosition.account_id == account.id,
-                PaperPosition.is_open == True,
+                PaperPosition.is_open,
             )
         )
         account.equity = account.balance + float(pnl_result.scalar_one())
@@ -251,7 +252,7 @@ class PaperTradingService:
         return {"order": order, "position": position}
 
     async def _fill_limit_order_immediate(self, account: PaperAccount, order: PaperOrder,
-                                           live_price: Optional[float], db: AsyncSession) -> dict:
+                                           live_price: float | None, db: AsyncSession) -> dict:
         price = order.price or live_price
         if not price:
             order.status = "pending"
@@ -276,13 +277,13 @@ class PaperTradingService:
         return await self._fill_market_order(account, order, price, db)
 
     async def close_position(self, user_id: int, position_id: int, db: AsyncSession,
-                             exit_price: Optional[float] = None) -> Optional[dict]:
+                             exit_price: float | None = None) -> dict | None:
         account = await self.get_or_create_account(user_id, db)
         result = await db.execute(
             select(PaperPosition).where(
                 PaperPosition.id == position_id,
                 PaperPosition.account_id == account.id,
-                PaperPosition.is_open == True,
+                PaperPosition.is_open,
             )
         )
         position = result.scalar_one_or_none()
@@ -304,7 +305,7 @@ class PaperTradingService:
         position.is_open = False
         position.realized_pnl = pnl
         position.mark_price = exit_price
-        position.closed_at = datetime.now(timezone.utc)
+        position.closed_at = datetime.now(UTC)
 
         account.balance += pnl
         account.used_margin -= position.margin
@@ -323,7 +324,7 @@ class PaperTradingService:
         account.win_rate = (account.win_count / account.total_trades * 100) if account.total_trades > 0 else 0
         opened_at = position.opened_at
         if opened_at and opened_at.tzinfo is None:
-            opened_at = opened_at.replace(tzinfo=timezone.utc)
+            opened_at = opened_at.replace(tzinfo=UTC)
         duration_minutes = int(
             (position.closed_at - opened_at).total_seconds() / 60
         ) if opened_at else 0
@@ -414,7 +415,7 @@ class PaperTradingService:
                 from app.core.database import async_session_factory
                 async with async_session_factory() as db:
                     result = await db.execute(
-                        select(PaperPosition).where(PaperPosition.is_open == True)
+                        select(PaperPosition).where(PaperPosition.is_open)
                         .options(selectinload(PaperPosition.account))
                     )
                     positions = result.scalars().all()
@@ -441,7 +442,7 @@ class PaperTradingService:
                                 liq_pnl = -(pos.margin * 0.9)
                                 pos.is_open = False
                                 pos.realized_pnl = liq_pnl
-                                pos.closed_at = datetime.now(timezone.utc)
+                                pos.closed_at = datetime.now(UTC)
                                 account.balance += liq_pnl
                                 account.used_margin = max(0.0, account.used_margin - pos.margin)
                                 account.equity = account.balance
@@ -471,10 +472,10 @@ class PaperTradingService:
                                 continue
 
                         funding_hours = FUNDING_INTERVAL_HOURS
-                        now = datetime.now(timezone.utc)
+                        now = datetime.now(UTC)
                         funding_anchor = pos.last_funding_at or pos.opened_at
                         if funding_anchor.tzinfo is None:
-                            funding_anchor = funding_anchor.replace(tzinfo=timezone.utc)
+                            funding_anchor = funding_anchor.replace(tzinfo=UTC)
                         funding_age = (now - funding_anchor).total_seconds() / 3600
                         if funding_age >= funding_hours:
                             funding_fee = self._compute_funding_fee(pos, live_price)
@@ -489,8 +490,8 @@ class PaperTradingService:
             await asyncio.sleep(2)
 
     async def _broadcast_update(self, account: PaperAccount,
-                                 position: Optional[PaperPosition],
-                                 order: Optional[PaperOrder],
+                                 position: PaperPosition | None,
+                                 order: PaperOrder | None,
                                  event: str = "update"):
         try:
             data = {
@@ -502,7 +503,7 @@ class PaperTradingService:
                     "used_margin": account.used_margin,
                     "total_pnl": account.total_pnl,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             if position:
                 data["position"] = {

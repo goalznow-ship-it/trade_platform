@@ -1,9 +1,10 @@
 import numpy as np
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.risk import RiskProfile, RiskSnapshot
-from app.models.trade import TradeHistory, Position
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.logging import logger
+from app.models.risk import RiskProfile, RiskSnapshot
+from app.models.trade import Position, TradeHistory
 
 
 class RiskService:
@@ -43,7 +44,7 @@ class RiskService:
         trades = trades_result.scalars().all()
 
         positions_result = await db.execute(
-            select(Position).where(Position.user_id == user_id, Position.is_open == True)
+            select(Position).where(Position.user_id == user_id, Position.is_open)
         )
         positions = positions_result.scalars().all()
 
@@ -70,7 +71,7 @@ class RiskService:
             total_balance=profile.max_daily_loss * 10,
             open_position_count=len(positions),
             portfolio_risk_score=risk_score,
-            profit_factor=abs(sum(wins) / sum(abs(l) for l in losses)) if losses and sum(abs(l) for l in losses) > 0 else (len(wins) * 10 if wins else 0),
+            profit_factor=abs(sum(wins) / sum(abs(l) for l in losses)) if losses and sum(abs(l) for l in losses) > 0 else (len(wins) * 10 if wins else 0),  # noqa: E741
             sharpe_ratio=np.mean(pnls) / np.std(pnls) * np.sqrt(365) if len(pnls) > 1 and np.std(pnls) > 0 else 0,
             sortino_ratio=np.mean(pnls) / np.std([p for p in pnls if p < 0]) * np.sqrt(365) if any(p < 0 for p in pnls) and np.std([p for p in pnls if p < 0]) > 0 else 0,
             win_rate=len(wins) / len(pnls) * 100 if pnls else 0,
@@ -87,7 +88,7 @@ class RiskService:
         current = await self.compute_snapshot(user_id, db)
 
         positions_result = await db.execute(
-            select(Position).where(Position.user_id == user_id, Position.is_open == True)
+            select(Position).where(Position.user_id == user_id, Position.is_open)
         )
         positions = positions_result.scalars().all()
 

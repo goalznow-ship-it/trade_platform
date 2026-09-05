@@ -1,9 +1,6 @@
-import json
-import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
 from app.core.cache import cache_get, cache_set
-from app.core.logging import logger
 from app.services.skhy_market_data import normalize_symbol
 
 HISTORY_KEY = "skhy:signal_history"
@@ -13,7 +10,7 @@ class SkhySignalHistory:
     async def record_signal(self, signal: dict) -> None:
         history = await self._get_all()
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "signal": signal,
         }
         history.insert(0, entry)

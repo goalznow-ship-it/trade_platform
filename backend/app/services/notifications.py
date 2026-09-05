@@ -3,9 +3,11 @@ Multi-channel Notification Service
 Supports: in-app WebSocket, Telegram, email
 """
 
-from datetime import datetime, timezone
-from app.core.websocket_manager import ws_manager
+from datetime import UTC, datetime
+
 from app.core.logging import logger
+from app.core.websocket_manager import ws_manager
+
 
 class NotificationsService:
     async def send_signal_alert(self, user_id: int, signal: dict):
@@ -27,7 +29,7 @@ class NotificationsService:
             "title": title,
             "message": message,
             "signal": signal,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
         logger.info(f"Signal alert sent to user {user_id}: {signal['symbol']} {signal['direction']} {conf}%")
 
@@ -43,7 +45,7 @@ class NotificationsService:
             "title": title,
             "message": message,
             "whale": whale,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def send_breakout_alert(self, user_id: int, symbol: str, price: float, direction: str):
@@ -51,7 +53,7 @@ class NotificationsService:
         message = f"{symbol} broke {direction.upper()} at ${price:.0f}"
         await ws_manager.send_to_user(user_id, "breakout_alert", {
             "type": "breakout_alert", "title": title, "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     async def send_tp_alert(self, user_id: int, symbol: str, tp_level: int, price: float):
@@ -59,7 +61,7 @@ class NotificationsService:
         message = f"{symbol} reached TP{tp_level} at ${price:.0f}"
         await ws_manager.send_to_user(user_id, "tp_alert", {
             "type": "tp_alert", "title": title, "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
 notifications_service = NotificationsService()

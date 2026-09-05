@@ -5,10 +5,7 @@ Standard accuracy is misleading in trading — these are what actually matter.
 
 from __future__ import annotations
 
-from typing import Dict
-
 import numpy as np
-import pandas as pd
 
 
 class TradingMetrics:
@@ -25,7 +22,7 @@ class TradingMetrics:
         return float((y_true[mask] == y_pred[mask]).mean())
 
     @staticmethod
-    def precision_recall(y_true: np.ndarray, y_pred: np.ndarray) -> Dict:
+    def precision_recall(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         """Per-class precision/recall."""
         out = {}
         for cls in (-1, 0, 1):
@@ -43,7 +40,7 @@ class TradingMetrics:
     @staticmethod
     def simulate_returns(
         y_pred: np.ndarray, returns: np.ndarray, fee: float = 0.001
-    ) -> Dict:
+    ) -> dict:
         """
         Simulate PnL from signals.
         y_pred: -1, 0, 1

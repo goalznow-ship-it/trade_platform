@@ -4,8 +4,8 @@ Future Projection Engine
 - Projected 10-20 future candles based on pattern + trend + momentum + liquidity + volume + fib + EW + SMC + FVG
 - Arrow indicators for expected movement
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _convert(obj):
@@ -26,15 +26,15 @@ def _convert(obj):
 
 class FutureProjectionEngine:
     def project(self, data: list, direction: str, confidence: float,
-                pattern_data: Optional[dict] = None,
-                trend_data: Optional[dict] = None,
-                momentum_data: Optional[dict] = None,
-                liquidity_data: Optional[dict] = None,
-                volume_data: Optional[dict] = None,
-                fib_data: Optional[dict] = None,
-                ew_data: Optional[dict] = None,
-                smc_data: Optional[dict] = None,
-                fvg_data: Optional[dict] = None) -> dict:
+                pattern_data: dict | None = None,
+                trend_data: dict | None = None,
+                momentum_data: dict | None = None,
+                liquidity_data: dict | None = None,
+                volume_data: dict | None = None,
+                fib_data: dict | None = None,
+                ew_data: dict | None = None,
+                smc_data: dict | None = None,
+                fvg_data: dict | None = None) -> dict:
         if not data or len(data) < 20:
             return {"projected_candles": [], "direction": direction, "arrows": []}
         closes = np.array([d["close"] for d in data])
@@ -45,7 +45,7 @@ class FutureProjectionEngine:
         current_low = float(lows[-1])
 
         avg_candle_range = float(np.mean(highs[-20:] - lows[-20:])) if len(highs) >= 20 else 0.01
-        price_volatility = avg_candle_range / current_price if current_price > 0 else 0.01
+        avg_candle_range / current_price if current_price > 0 else 0.01
         candle_count = 15
 
         if direction == "neutral":

@@ -1,18 +1,19 @@
 import asyncio
-from typing import Optional
-from datetime import datetime, timezone, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.alert import Alert, AlertTrigger
+
 from app.core.logging import logger
 from app.core.websocket_manager import ws_manager
+from app.models.alert import Alert, AlertTrigger
 
 
 class AlertService:
     def __init__(self):
         self.logger = logger
-        self._check_task: Optional[asyncio.Task] = None
+        self._check_task: asyncio.Task | None = None
 
     async def start(self):
         self._check_task = asyncio.create_task(self._periodic_check())
@@ -25,12 +26,12 @@ class AlertService:
     async def get_alerts(self, user_id: int, db: AsyncSession, active_only: bool = False) -> list:
         q = select(Alert).where(Alert.user_id == user_id).options(selectinload(Alert.triggers))
         if active_only:
-            q = q.where(Alert.is_active == True)
+            q = q.where(Alert.is_active)
         q = q.order_by(Alert.created_at.desc())
         result = await db.execute(q)
         return result.scalars().all()
 
-    async def get_alert(self, alert_id: int, user_id: int, db: AsyncSession) -> Optional[Alert]:
+    async def get_alert(self, alert_id: int, user_id: int, db: AsyncSession) -> Alert | None:
         result = await db.execute(
             select(Alert).where(Alert.id == alert_id, Alert.user_id == user_id)
             .options(selectinload(Alert.triggers))
@@ -44,7 +45,7 @@ class AlertService:
         await db.refresh(alert)
         return alert
 
-    async def update_alert(self, alert_id: int, user_id: int, data: dict, db: AsyncSession) -> Optional[Alert]:
+    async def update_alert(self, alert_id: int, user_id: int, data: dict, db: AsyncSession) -> Alert | None:
         alert = await self.get_alert(alert_id, user_id, db)
         if not alert:
             return None
@@ -63,7 +64,7 @@ class AlertService:
         await db.commit()
         return True
 
-    async def trigger_alert(self, alert: Alert, triggered_value: float, price: Optional[float], db: AsyncSession):
+    async def trigger_alert(self, alert: Alert, triggered_value: float, price: float | None, db: AsyncSession):
         channels = alert.channels if isinstance(alert.channels, list) else ["in_app"]
         for channel in channels:
             trigger = AlertTrigger(
@@ -75,9 +76,9 @@ class AlertService:
             db.add(trigger)
 
         alert.trigger_count += 1
-        alert.last_triggered_at = datetime.now(timezone.utc)
+        alert.last_triggered_at = datetime.now(UTC)
         if alert.cooldown_minutes > 0:
-            alert.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=alert.cooldown_minutes)
+            alert.cooldown_until = datetime.now(UTC) + timedelta(minutes=alert.cooldown_minutes)
         if alert.max_triggers > 0 and alert.trigger_count >= alert.max_triggers:
             alert.is_active = False
 
@@ -108,13 +109,13 @@ class AlertService:
         loop doesn't spam the same alert every 10s.
         """
         from app.core.database import async_session_factory
-        from app.services.market import market_service
         from app.services.indicators import indicator_service
+        from app.services.market import market_service
 
         while True:
             await asyncio.sleep(10)
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 async with async_session_factory() as db:
                     q = (
                         select(Alert)

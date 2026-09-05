@@ -1,16 +1,16 @@
 import asyncio
 import json
 import math
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func, select
+
+from app.core.database import async_session_factory
 from app.core.logging import logger
 from app.core.redis import redis_client
-from app.core.database import async_session_factory
 from app.models.paper_trading import PaperAccount, PaperPosition
 from app.services.institutional_signals import institutional_signal_engine
 from app.services.market import market_service
-from sqlalchemy import func, select
 
 
 class AutoScalperService:
@@ -65,7 +65,7 @@ class AutoScalperService:
         soak = await self._get_soak(user_id)
         if soak and soak.get("status") == "running":
             soak["status"] = "stopped"
-            soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+            soak["stopped_at"] = datetime.now(UTC).isoformat()
             await self._save_soak(user_id, soak)
         task = self._tasks.pop(user_id, None)
         if task:
@@ -80,9 +80,9 @@ class AutoScalperService:
                     return
                 soak = await self._get_soak(user_id)
                 if soak and soak.get("status") == "running":
-                    if datetime.now(timezone.utc) >= datetime.fromisoformat(soak["ends_at"]):
+                    if datetime.now(UTC) >= datetime.fromisoformat(soak["ends_at"]):
                         soak["status"] = "completed"
-                        soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+                        soak["stopped_at"] = datetime.now(UTC).isoformat()
                         await self._save_soak(user_id, soak)
                         state["armed"] = False
                         await self._save_state(user_id, state)
@@ -121,7 +121,7 @@ class AutoScalperService:
         if account is None:
             from app.services.paper_trading import paper_trading_service
             account = await paper_trading_service.get_or_create_account(user_id, db)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         soak = {
             "status": "running",
             "duration_hours": duration_hours,
@@ -144,7 +144,7 @@ class AutoScalperService:
             return {"status": "not_started"}
         if soak.get("status") == "running":
             soak["status"] = "stopped"
-            soak["stopped_at"] = datetime.now(timezone.utc).isoformat()
+            soak["stopped_at"] = datetime.now(UTC).isoformat()
             await self._save_soak(user_id, soak)
         await self.disarm(user_id)
         return await self.get_soak_status(user_id, db)
@@ -153,7 +153,7 @@ class AutoScalperService:
         soak = await self._get_soak(user_id)
         if not soak:
             return {"status": "not_started", "mode": "paper", "data_source": "paper_orders_real_market_data"}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         started_at = datetime.fromisoformat(soak["started_at"])
         ends_at = datetime.fromisoformat(soak["ends_at"])
         if soak.get("status") == "running" and now >= ends_at:
@@ -326,7 +326,7 @@ class AutoScalperService:
         )
         state.update({
             "config": config,
-            "last_scan": datetime.now(timezone.utc).isoformat(),
+            "last_scan": datetime.now(UTC).isoformat(),
             "market_count": len(universe),
             "deep_analyzed": len(candidates),
             "eligible_count": sum(1 for item in candidates if item["eligible"]),
@@ -367,7 +367,7 @@ class AutoScalperService:
             else:
                 result = await self._execute_live(user_id, candidate, config, quantity)
             state["last_execution"] = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "symbol": candidate["symbol"],
                 "direction": candidate["direction"],
                 "quantity": quantity,
@@ -395,7 +395,7 @@ class AutoScalperService:
             count_result = await db.execute(
                 select(func.count(PaperPosition.id)).where(
                     PaperPosition.account_id == account.id,
-                    PaperPosition.is_open == True,
+                    PaperPosition.is_open,
                 )
             )
             if int(count_result.scalar_one()) >= int(config["max_positions"]):
@@ -441,11 +441,11 @@ class AutoScalperService:
                 take_profit=candidate["take_profit"],
                 leverage=config["max_leverage"],
                 margin_mode="isolated",
-                client_order_id=f"scalp_{user_id}_{int(datetime.now(timezone.utc).timestamp())}",
+                client_order_id=f"scalp_{user_id}_{int(datetime.now(UTC).timestamp())}",
             )
             entry = await create_order(request, None, user, db)
             close_side = "sell" if candidate["direction"] == "long" else "buy"
-            base_id = f"scalp_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+            base_id = f"scalp_{user_id}_{int(datetime.now(UTC).timestamp())}"
             stop = None
             try:
                 stop = await create_order(OrderRequest(

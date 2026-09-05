@@ -42,7 +42,6 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.config import settings
-from app.core.logging import logger
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

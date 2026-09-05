@@ -590,7 +590,7 @@ export function AIChart({ analysis: _analysis, explain: _explain, signal, livePr
       candleSeriesRef.current = null
       lineSeriesRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [candleData, signal, aiAnalysis, selectedTimeframe, overlays])
 
   // ── Canvas zone drawing ──

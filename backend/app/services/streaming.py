@@ -1,8 +1,8 @@
 import asyncio
-from typing import List, Optional
-from datetime import datetime, timezone
-from app.core.websocket_manager import ws_manager, Channel
+from datetime import UTC, datetime
+
 from app.core.logging import logger
+from app.core.websocket_manager import Channel, ws_manager
 from app.services.market_coverage import market_coverage
 
 
@@ -23,10 +23,10 @@ class StreamingService:
     }
 
     def __init__(self):
-        self._tasks: List[asyncio.Task] = []
+        self._tasks: list[asyncio.Task] = []
         self._running = False
         self._heartbeats: dict[str, float] = {}
-        self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_task: asyncio.Task | None = None
         self._stale_workers: set[str] = set()
         # Per-worker error counters. The previous code did
         # `except Exception: pass` inside every worker, which made
@@ -77,7 +77,7 @@ class StreamingService:
 
     async def _run_worker(self, name: str, coro):
         try:
-            self._heartbeats[name] = datetime.now(timezone.utc).timestamp()
+            self._heartbeats[name] = datetime.now(UTC).timestamp()
             await coro
         except asyncio.CancelledError:
             raise
@@ -94,7 +94,7 @@ class StreamingService:
                 )
 
     def _beat(self, name: str) -> None:
-        self._heartbeats[name] = datetime.now(timezone.utc).timestamp()
+        self._heartbeats[name] = datetime.now(UTC).timestamp()
 
     def _stale_after(self, name: str) -> int:
         return self.WORKER_INTERVALS.get(name, 60) + 90
@@ -102,7 +102,7 @@ class StreamingService:
     async def _watchdog(self):
         while self._running:
             await asyncio.sleep(30)
-            now = datetime.now(timezone.utc).timestamp()
+            now = datetime.now(UTC).timestamp()
             for name, last in list(self._heartbeats.items()):
                 if now - last > self._stale_after(name):
                     if name not in self._stale_workers:
@@ -113,17 +113,17 @@ class StreamingService:
                     logger.info("Streaming worker %s recovered", name)
             await ws_manager.broadcast(Channel.MARKET, "streaming_heartbeat", {
                 "workers": {k: round(now - v, 1) for k, v in self._heartbeats.items()},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
 
     async def _stream_heartbeat(self):
         while self._running:
             await asyncio.sleep(5)
-            self._heartbeats["heartbeat"] = datetime.now(timezone.utc).timestamp()
+            self._heartbeats["heartbeat"] = datetime.now(UTC).timestamp()
 
-    async def _stream_orderflow(self, symbols: List[str]):
-        from app.services.orderflow import orderflow_engine
+    async def _stream_orderflow(self, symbols: list[str]):
         from app.services.market import market_service
+        from app.services.orderflow import orderflow_engine
         while self._running:
             for sym in symbols:
                 self._beat("orderflow")
@@ -148,7 +148,7 @@ class StreamingService:
                     await ws_manager.broadcast(Channel.ORDERFLOW, "orderflow_update", {
                         "symbol": sym,
                         "data": snapshot,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception as exc:
                     # Per-symbol failures must not silently kill the
@@ -158,7 +158,7 @@ class StreamingService:
             self._beat("orderflow")
             await asyncio.sleep(2)
 
-    async def _stream_derivatives(self, symbols: List[str]):
+    async def _stream_derivatives(self, symbols: list[str]):
         from app.services.derivatives import derivatives_engine
         from app.services.market import market_service
         while self._running:
@@ -174,7 +174,7 @@ class StreamingService:
                         continue
                     funding_time = funding.get("funding_time")
                     next_funding = (
-                        datetime.fromtimestamp(funding_time / 1000, tz=timezone.utc)
+                        datetime.fromtimestamp(funding_time / 1000, tz=UTC)
                         if isinstance(funding_time, (int, float))
                         else None
                     )
@@ -196,7 +196,7 @@ class StreamingService:
                     await ws_manager.broadcast(Channel.DERIVATIVES, "derivatives_update", {
                         "symbol": sym,
                         "data": snapshot,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception as exc:
                     self._record_inner_error("derivatives", exc, sym)
@@ -215,14 +215,14 @@ class StreamingService:
                 for article in articles[:5]:
                     await ws_manager.broadcast(Channel.NEWS, "news_article", {
                         "data": article,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
             except Exception as exc:
                 self._record_inner_error("news", exc)
             self._beat("news")
             await asyncio.sleep(60)
 
-    async def _stream_sentiment(self, symbols: List[str]):
+    async def _stream_sentiment(self, symbols: list[str]):
         from app.services.social_sentiment import social_sentiment
         while self._running:
             for sym in symbols:
@@ -232,7 +232,7 @@ class StreamingService:
                     await ws_manager.broadcast(Channel.SENTIMENT, "sentiment_update", {
                         "symbol": sym,
                         "data": snapshot,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception as exc:
                     self._record_inner_error("sentiment", exc, sym)
@@ -240,14 +240,14 @@ class StreamingService:
                 narratives = social_sentiment.get_trending_narratives()
                 await ws_manager.broadcast(Channel.SENTIMENT, "trending_narratives", {
                     "data": narratives,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception as exc:
                 self._record_inner_error("sentiment", exc, "narratives")
             self._beat("sentiment")
             await asyncio.sleep(120)
 
-    async def _stream_onchain(self, symbols: List[str]):
+    async def _stream_onchain(self, symbols: list[str]):
         from app.services.onchain import onchain_engine
         while self._running:
             for sym in symbols:
@@ -256,7 +256,7 @@ class StreamingService:
                     await ws_manager.broadcast(Channel.ONCHAIN, "onchain_update", {
                         "symbol": sym,
                         "data": snapshot,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception as exc:
                     self._record_inner_error("onchain", exc, sym)
@@ -274,14 +274,14 @@ class StreamingService:
                 )
                 await ws_manager.broadcast(Channel.MACRO, "macro_update", {
                     "data": snapshot,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception as exc:
                 self._record_inner_error("macro", exc)
             self._beat("macro")
             await asyncio.sleep(300)
 
-    async def _stream_brain(self, symbols: List[str]):
+    async def _stream_brain(self, symbols: list[str]):
         from app.services.brain import ai_brain
         while self._running:
             for sym in symbols:
@@ -291,7 +291,7 @@ class StreamingService:
                     await ws_manager.broadcast(Channel.BRAIN, "brain_assessment", {
                         "symbol": sym,
                         "data": assessment,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception as exc:
                     self._record_inner_error("brain", exc, sym)
@@ -309,7 +309,7 @@ class StreamingService:
                 if data:
                     await ws_manager.broadcast(Channel.FEAR_GREED, "fear_greed_update", {
                         "data": data,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
             except Exception as exc:
                 self._record_inner_error("fear_greed", exc)
@@ -317,7 +317,7 @@ class StreamingService:
             self._beat("fear_greed")
             await asyncio.sleep(60)
 
-    async def _stream_breadth(self, symbols: List[str]):
+    async def _stream_breadth(self, symbols: list[str]):
         while self._running:
             try:
                 tickers = await asyncio.gather(
@@ -342,7 +342,7 @@ class StreamingService:
                         "breadth_ratio": round(breadth_ratio, 2),
                         "total_symbols": len(symbols),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception as exc:
                 self._record_inner_error("breadth", exc)
@@ -357,9 +357,9 @@ class StreamingService:
         except Exception:
             return None
 
-    async def _stream_signals(self, symbols: List[str]):
-        from app.services.institutional_signals import institutional_signal_engine
+    async def _stream_signals(self, symbols: list[str]):
         from app.services.early_signal_monitor import early_signal_monitor
+        from app.services.institutional_signals import institutional_signal_engine
         while self._running:
             self._beat("signals")
             try:
@@ -385,7 +385,7 @@ class StreamingService:
                 await ws_manager.broadcast(Channel.SIGNALS, "signal_update", {
                     "data": visible[:10],
                     "transitions": transitions,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             self._beat("signals")
             await asyncio.sleep(60)
@@ -404,7 +404,7 @@ class StreamingService:
 
 
     def get_stats(self) -> dict:
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         return {
             "running": self._running,
             "workers": {
@@ -418,7 +418,7 @@ class StreamingService:
             },
             "worker_count": len(self._tasks),
             "total_errors": sum(self._error_counts.values()),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     def _record_inner_error(self, worker: str, exc: Exception, context: str = "") -> None:

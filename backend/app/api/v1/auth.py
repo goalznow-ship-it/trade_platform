@@ -1,11 +1,20 @@
+from datetime import UTC
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, or_, select
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.security import (
-    create_access_token, create_refresh_token, decode_token, get_current_user,
-    hash_password, is_token_revoked, revoke_token, verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    get_current_user,
+    hash_password,
+    is_token_revoked,
+    revoke_token,
+    verify_password,
 )
 from app.models.user import User
 
@@ -67,8 +76,8 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(401, "Account disabled")
 
-    from datetime import datetime, timezone
-    user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+    from datetime import datetime
+    user.last_login = datetime.now(UTC).replace(tzinfo=None)
     await db.commit()
 
     return TokenResponse(

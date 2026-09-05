@@ -8,14 +8,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from .xgboost_model import XGBoostSignalModel
 from .lightgbm_model import LightGBMSignalModel
 from .transformer import TransformerSignalWrapper
+from .xgboost_model import XGBoostSignalModel
 
 
 class EnsemblePredictor:
@@ -30,11 +29,11 @@ class EnsemblePredictor:
         "transformer": 0.20,
     }
 
-    def __init__(self, weights: Optional[dict] = None):
+    def __init__(self, weights: dict | None = None):
         self.weights = weights or self.DEFAULT_WEIGHTS
-        self.xgb: Optional[XGBoostSignalModel] = None
-        self.lgb: Optional[LightGBMSignalModel] = None
-        self.transformer: Optional[TransformerSignalWrapper] = None
+        self.xgb: XGBoostSignalModel | None = None
+        self.lgb: LightGBMSignalModel | None = None
+        self.transformer: TransformerSignalWrapper | None = None
         self.is_trained: bool = False
 
     def add_xgboost(self, model: XGBoostSignalModel):

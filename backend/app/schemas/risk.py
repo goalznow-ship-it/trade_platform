@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class RiskProfileCreate(BaseModel):
@@ -33,7 +33,7 @@ class RiskProfileResponse(BaseModel):
     take_profit_default: float
     risk_score_threshold: float
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True
@@ -69,6 +69,6 @@ class RiskSnapshotResponse(BaseModel):
 class RiskDashboardResponse(BaseModel):
     profile: RiskProfileResponse
     current: RiskSnapshotResponse
-    exposure_by_symbol: List[dict]
-    risk_signals: List[str]
-    warnings: List[str]
+    exposure_by_symbol: list[dict]
+    risk_signals: list[str]
+    warnings: list[str]

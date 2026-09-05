@@ -3,7 +3,7 @@
 import asyncio
 import json
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -49,7 +49,7 @@ class MarketIntelligenceService:
                 raise ValueError("CoinGecko response did not contain BTC dominance")
             updated = datetime.fromtimestamp(
                 payload.get("data", {}).get("updated_at", datetime.now().timestamp()),
-                tz=timezone.utc,
+                tz=UTC,
             ).isoformat()
             source = "CoinGecko Global"
             provider_health.success("coingecko_global")
@@ -120,7 +120,7 @@ class MarketIntelligenceService:
         premium_by_symbol = {row["symbol"]: row for row in premium if row.get("symbol") in self.SYMBOLS}
         ticker_by_symbol = {row["symbol"]: row for row in ticker_rows if row.get("symbol") in self.SYMBOLS}
         items = []
-        for symbol, oi, ratios in zip(self.SYMBOLS, oi_rows, ratio_rows):
+        for symbol, oi, ratios in zip(self.SYMBOLS, oi_rows, ratio_rows, strict=False):
             mark = premium_by_symbol.get(symbol, {})
             ticker = ticker_by_symbol.get(symbol, {})
             price = float(mark["markPrice"]) if mark.get("markPrice") else None
@@ -138,7 +138,7 @@ class MarketIntelligenceService:
                 "symbol": symbol,
                 "exchange": "Binance Futures",
                 "funding_rate": float(mark["lastFundingRate"]) if mark.get("lastFundingRate") is not None else None,
-                "next_funding_time": datetime.fromtimestamp(int(mark["nextFundingTime"]) / 1000, tz=timezone.utc).isoformat() if mark.get("nextFundingTime") else None,
+                "next_funding_time": datetime.fromtimestamp(int(mark["nextFundingTime"]) / 1000, tz=UTC).isoformat() if mark.get("nextFundingTime") else None,
                 "open_interest": oi_amount,
                 "open_interest_usd": oi_amount * price if oi_amount is not None and price is not None else None,
                 "oi_change": round(oi_change, 3) if oi_change is not None else None,

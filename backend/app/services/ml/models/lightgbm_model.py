@@ -9,7 +9,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 import lightgbm as lgb
 import numpy as np
@@ -39,9 +38,9 @@ class LightGBMSignalModel:
         "verbosity": -1,
     }
 
-    def __init__(self, params: Optional[dict] = None):
+    def __init__(self, params: dict | None = None):
         self.params = {**self.DEFAULT_PARAMS, **(params or {})}
-        self.model: Optional[lgb.LGBMClassifier] = None
+        self.model: lgb.LGBMClassifier | None = None
         self.feature_names: list[str] = []
         self.metrics: dict = {}
 

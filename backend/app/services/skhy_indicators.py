@@ -1,6 +1,6 @@
+
 import numpy as np
-import math
-from typing import Tuple, Optional
+
 
 def calculate_ema(data: list, period: int) -> list:
     if len(data) < period:
@@ -64,9 +64,9 @@ def calculate_adx(high: list, low: list, close: list, period: int = 14) -> list:
     tr_smooth = _smooth(tr, period)
     plus_smooth = _smooth(plus_dm, period)
     minus_smooth = _smooth(minus_dm, period)
-    plus_di = [100 * p / t if t != 0 else 0 for p, t in zip(plus_smooth, tr_smooth)]
-    minus_di = [100 * m / t if t != 0 else 0 for m, t in zip(minus_smooth, tr_smooth)]
-    dx = [100 * abs(p - m) / (p + m) if (p + m) != 0 else 0 for p, m in zip(plus_di, minus_di)]
+    plus_di = [100 * p / t if t != 0 else 0 for p, t in zip(plus_smooth, tr_smooth, strict=False)]
+    minus_di = [100 * m / t if t != 0 else 0 for m, t in zip(minus_smooth, tr_smooth, strict=False)]
+    dx = [100 * abs(p - m) / (p + m) if (p + m) != 0 else 0 for p, m in zip(plus_di, minus_di, strict=False)]
     adx = calculate_ema(dx, period)
     return adx
 
@@ -223,7 +223,7 @@ class SkhyIndicators:
         highs = [d["high"] for d in data]
         lows = [d["low"] for d in data]
         volumes = [d["volume"] for d in data]
-        opens = [d["open"] for d in data]
+        [d["open"] for d in data]
 
         ema9 = calculate_ema(closes, 9)
         ema20 = calculate_ema(closes, 20)

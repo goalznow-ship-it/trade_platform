@@ -1,6 +1,6 @@
 """Stateful early-signal transition monitor backed only by real analysis data."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -61,7 +61,7 @@ class EarlySignalMonitor:
         if not self._initialized:
             self._previous = current
             self._initialized = True
-            self._last_updated = datetime.now(timezone.utc).isoformat()
+            self._last_updated = datetime.now(UTC).isoformat()
             return []
 
         transitions = []
@@ -84,7 +84,7 @@ class EarlySignalMonitor:
                 transitions.append({**state, "symbol": symbol, "type": "signal_watch"})
 
         self._previous = current
-        self._last_updated = datetime.now(timezone.utc).isoformat()
+        self._last_updated = datetime.now(UTC).isoformat()
         self._last_transitions = transitions
         if transitions:
             await self._notify_active_users(transitions)
@@ -114,7 +114,7 @@ class EarlySignalMonitor:
 
     async def _notify_active_users(self, transitions: list[dict]) -> None:
         async with async_session_factory() as db:
-            result = await db.execute(select(User).where(User.is_active == True))
+            result = await db.execute(select(User).where(User.is_active))
             users = result.scalars().all()
             pending = []
             for user in users:
@@ -156,7 +156,7 @@ class EarlySignalMonitor:
                         "type": transition["type"],
                         "title": title,
                         "message": message,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     },
                     channel="notifications",
                 )

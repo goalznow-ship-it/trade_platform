@@ -10,8 +10,9 @@ Advanced chart pattern recognition:
 - Liquidity zone aggregation from SMC data
 - Future direction projection with entry/SL/TP
 """
+
 import numpy as np
-from typing import Optional
+
 from app.services.chart_patterns import chart_pattern_engine
 
 
@@ -57,7 +58,7 @@ class PatternAnalysisEngine:
 
         for i in range(last_idx, max(last_idx - 3, 2), -1):
             c, o = closes[i], opens[i]
-            h, l = highs[i], lows[i]
+            _h, _l = highs[i], lows[i]
             tr = total_range[i]
             b = body[i]
 
@@ -81,7 +82,7 @@ class PatternAnalysisEngine:
             if i >= 1:
                 prev_c, prev_o = closes[i - 1], opens[i - 1]
                 prev_b = abs(prev_c - prev_o)
-                prev_body_ratio = prev_b / total_range[i - 1] if total_range[i - 1] > 0 else 0
+                prev_b / total_range[i - 1] if total_range[i - 1] > 0 else 0
 
                 if b > avg_body * 1.3:
                     if upper_wick[i] < b * 0.3 and lower_wick[i] < b * 0.3:
@@ -163,8 +164,8 @@ class PatternAnalysisEngine:
 
             if i >= 3:
                 c1, o1, h1, l1 = closes[i - 1], opens[i - 1], highs[i - 1], lows[i - 1]
-                c2, o2, h2, l2 = closes[i - 2], opens[i - 2], highs[i - 2], lows[i - 2]
-                c3, o3 = closes[i - 3], opens[i - 3]
+                c2, o2, _h2, _l2 = closes[i - 2], opens[i - 2], highs[i - 2], lows[i - 2]
+                _c3, _o3 = closes[i - 3], opens[i - 3]
 
                 if c > o and c2 < o2:
                     if body[i] > avg_body and body[i - 2] > avg_body * 0.5:
@@ -388,8 +389,8 @@ class PatternAnalysisEngine:
             return {"count": "unknown", "waves": [], "current_phase": "insufficient_data"}
 
         closes = np.array([d["close"] for d in data])
-        highs = np.array([d["high"] for d in data])
-        lows = np.array([d["low"] for d in data])
+        np.array([d["high"] for d in data])
+        np.array([d["low"] for d in data])
 
         def find_swings(values, window=8):
             peaks = []

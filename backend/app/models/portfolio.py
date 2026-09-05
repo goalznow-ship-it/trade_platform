@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlalchemy.sql import func
+
 from app.core.database import Base
+
 
 class Portfolio(Base):
     __tablename__ = "portfolios"

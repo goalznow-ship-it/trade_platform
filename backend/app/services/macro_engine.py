@@ -4,9 +4,10 @@ Economic releases and ETF flows remain explicitly unavailable until authoritativ
 providers are configured; no estimated or random values are returned.
 """
 import asyncio
-from datetime import datetime, timezone
-from typing import Dict
+from datetime import UTC, datetime
+
 import yfinance as yf
+
 from app.core.provider_health import provider_health
 from app.services.data_contract import data_meta
 
@@ -23,9 +24,9 @@ class MacroEngine:
     }
 
     def __init__(self) -> None:
-        self._last_valid: dict[str, Dict] = {}
+        self._last_valid: dict[str, dict] = {}
 
-    def _quote(self, key: str) -> Dict:
+    def _quote(self, key: str) -> dict:
         symbol = self.SYMBOLS[key]
         if not provider_health.allow_request("yahoo_finance"):
             cached = self._last_valid.get(key)
@@ -44,7 +45,7 @@ class MacroEngine:
             return {
                 "available": False, "source": "yahoo_finance", "symbol": symbol,
                 "reason": "Provider circuit breaker is open",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 **data_meta(
                     "Yahoo Finance",
                     error_reason="Provider circuit breaker is open",
@@ -64,7 +65,7 @@ class MacroEngine:
                 "value": close,
                 "daily_change_pct": change,
                 "trend": "bullish" if change > 0 else "bearish" if change < 0 else "neutral",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             result.update(data_meta("Yahoo Finance", max_age_seconds=900))
             self._last_valid[key] = dict(result)
@@ -90,37 +91,37 @@ class MacroEngine:
                 "source": "yahoo_finance",
                 "symbol": symbol,
                 "reason": str(exc),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 **data_meta("Yahoo Finance", error_reason=str(exc)),
             }
 
-    def get_dxy(self) -> Dict: return self._quote("dxy")
-    def get_nasdaq(self) -> Dict: return self._quote("nasdaq")
-    def get_sp500(self) -> Dict: return self._quote("sp500")
-    def get_gold(self) -> Dict: return self._quote("gold")
-    def get_oil(self) -> Dict: return self._quote("oil")
-    def get_us10y(self) -> Dict: return self._quote("us10y")
-    def get_vix(self) -> Dict: return self._quote("vix")
+    def get_dxy(self) -> dict: return self._quote("dxy")
+    def get_nasdaq(self) -> dict: return self._quote("nasdaq")
+    def get_sp500(self) -> dict: return self._quote("sp500")
+    def get_gold(self) -> dict: return self._quote("gold")
+    def get_oil(self) -> dict: return self._quote("oil")
+    def get_us10y(self) -> dict: return self._quote("us10y")
+    def get_vix(self) -> dict: return self._quote("vix")
 
     @staticmethod
-    def _unavailable(source: str) -> Dict:
+    def _unavailable(source: str) -> dict:
         return {
             "available": False,
             "source": source,
             "reason": "Authoritative economic data provider not configured",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    def get_cpi(self) -> Dict: return self._unavailable("cpi")
-    def get_ppi(self) -> Dict: return self._unavailable("ppi")
-    def get_fomc_schedule(self) -> Dict: return self._unavailable("fomc")
-    def get_interest_rate(self) -> Dict: return self._unavailable("fed_funds")
-    def get_etf_flows(self) -> Dict: return self._unavailable("etf_flows")
+    def get_cpi(self) -> dict: return self._unavailable("cpi")
+    def get_ppi(self) -> dict: return self._unavailable("ppi")
+    def get_fomc_schedule(self) -> dict: return self._unavailable("fomc")
+    def get_interest_rate(self) -> dict: return self._unavailable("fed_funds")
+    def get_etf_flows(self) -> dict: return self._unavailable("etf_flows")
 
-    def estimate_crypto_impact(self) -> Dict:
+    def estimate_crypto_impact(self) -> dict:
         return self._unavailable("macro_impact")
 
-    def get_macro_snapshot(self) -> Dict:
+    def get_macro_snapshot(self) -> dict:
         indicators = {name: self._quote(name) for name in self.SYMBOLS}
         available = [item for item in indicators.values() if item.get("available")]
         return {
@@ -137,7 +138,7 @@ class MacroEngine:
             "risk_environment": "unavailable",
             "risk_score": None,
             "crypto_outlook": "unavailable",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **data_meta(
                 "Yahoo Finance",
                 error_reason=None if available else "No macro quotes available",

@@ -13,8 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,7 +41,7 @@ class PredictionResponse(BaseModel):
 
 
 class BatchPredictionRequest(BaseModel):
-    symbols: List[str]
+    symbols: list[str]
     timeframe: str = "15m"
 
 
@@ -140,7 +139,7 @@ async def predict_batch(req: BatchPredictionRequest, user=Depends(get_current_us
 
     symbols = req.symbols[:30]  # cap to 30
     if not symbols:
-        return {"count": 0, "results": [], "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {"count": 0, "results": [], "timestamp": datetime.now(UTC).isoformat()}
 
     # Fetch BTC context + all symbol DataFrames in parallel. Network I/O
     # only — never blocks the event loop.
@@ -155,7 +154,7 @@ async def predict_batch(req: BatchPredictionRequest, user=Depends(get_current_us
     # the event loop with them.
     def _infer_all() -> list:
         out: list = []
-        for sym, df in zip(symbols, dfs):
+        for sym, df in zip(symbols, dfs, strict=False):
             if df is None or df.empty or len(df) < 200:
                 continue
             ctx = btc_df if (btc_df is not None and not btc_df.empty) else df
@@ -171,7 +170,7 @@ async def predict_batch(req: BatchPredictionRequest, user=Depends(get_current_us
     return {
         "count": len(results),
         "results": results,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -250,7 +249,7 @@ async def augment_score(req: AugmentScoreRequest, user=Depends(get_current_user)
 
 @router.post("/retrain")
 async def trigger_retrain(
-    symbols: Optional[List[str]] = None,
+    symbols: list[str] | None = None,
     timeframe: str = "15m",
     include_transformer: bool = True,
     user=Depends(get_current_user),
