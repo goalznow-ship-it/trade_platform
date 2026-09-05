@@ -20,6 +20,23 @@ from app.services.signal_pipeline import (
 )
 
 
+# Phase 7: ``SignalPipeline.persist_composed`` opens its own
+# ``async_session_factory()`` rather than accepting a session for
+# the persist path. Patch the reference to the test factory so the
+# integration tests below hit the in-memory SQLite instead of
+# attempting a PostgreSQL connection that isn't running.
+@pytest.fixture(autouse=True)
+def _patch_pipeline_session_factory():
+    from app.services import signal_pipeline
+    from tests.conftest import db_session_factory as _test_factory
+    original = signal_pipeline.async_session_factory
+    signal_pipeline.async_session_factory = _test_factory
+    try:
+        yield
+    finally:
+        signal_pipeline.async_session_factory = original
+
+
 def test_is_persistable_rejects_neutral() -> None:
     assert signal_pipeline._is_persistable({"direction": "neutral", "confidence": 80}) is False
 

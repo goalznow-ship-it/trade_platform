@@ -34,13 +34,16 @@ class Trade(Base):
     existing accuracy math keeps working without re-derivation.
     """
 
-    __tablename__ = "trades"
-    # ``app.models.trade.Trade`` also declares ``__tablename__ =
-    # "trades"``; we share that table so the resolver's rows show up
-    # in the same place operators see in /admin. ``extend_existing``
-    # tells SQLAlchemy to merge the two declarations rather than
-    # raise on duplicate-table registration.
-    __table_args__ = {"extend_existing": True}
+    # Phase 7: live as its own table (``feedback_trades``) instead
+    # of sharing the user-facing ``trades`` table with
+    # ``app.models.trade.Trade``. Two model classes declaring the
+    # same table name merge via ``extend_existing=True`` produced a
+    # single table with both schemas' columns interleaved, which
+    # made ``source_trade_id`` lookups return rows from the older
+    # ``Trade`` model — every ``record_trade`` call thought the
+    # trade was a duplicate and returned None. A separate table
+    # keeps the feedback-loop schema isolated.
+    __tablename__ = "feedback_trades"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_trade_id = Column(String(80), nullable=True, index=True)

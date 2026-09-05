@@ -12,12 +12,33 @@ Covers:
 import pytest
 from sqlalchemy import select
 
-from app.models.persistence import AdjustmentRun
+from app.models.persistence import AdjustmentRun, Trade
 from app.services.weight_orchestrator import (
     DEFAULT_WEIGHTS,
     WeightOrchestrator,
     weight_orchestrator,
 )
+
+
+# Phase 7: ``trade_store`` constructs its own ``async_session_factory``
+# at import time, so without this fixture it would point at the live
+# PostgreSQL URL and the integration tests below would try to connect
+# to a database that isn't running. We swap the factory for the test
+# engine's, then restore it so other test files aren't affected.
+@pytest.fixture(autouse=True)
+def _patch_trade_store_factory():
+    from app.core import persistence
+    from tests.conftest import db_session_factory as _test_factory
+    original = persistence.trade_store._session_factory
+    persistence.trade_store._session_factory = _test_factory
+    # Clear any session override the test body may have set so the
+    # next test starts from a clean slate.
+    persistence.trade_store.clear_session_override()
+    try:
+        yield
+    finally:
+        persistence.trade_store._session_factory = original
+        persistence.trade_store.clear_session_override()
 
 
 # ── Unit: apply_to_score scaling ────────────────────────────────
@@ -113,9 +134,15 @@ async def test_adjust_weights_promotes_trend_over_smc(db_session) -> None:
     """
     from app.core.persistence import trade_store
 
-    # Wipe any runs left from earlier tests so the assertion is
-    # clean.
+    # Wipe any runs and trades left from earlier tests so the
+    # assertion is clean. ``source_trade_id`` collisions are
+    # silently treated as a no-op in ``record_trade`` so without
+    # this the inserts would be skipped and the orchestrator
+    # would see 0 trades.
+    from app.models.persistence import Trade
+    (await db_session.execute(Trade.__table__.delete()))
     (await db_session.execute(AdjustmentRun.__table__.delete()))
+    await db_session.commit()
 
     for i in range(20):
         await trade_store.record_trade(
@@ -144,6 +171,13 @@ async def test_adjust_weights_promotes_trend_over_smc(db_session) -> None:
             },
             db=db_session,
         )
+    # Phase 7: pin the trade_store's internal session opens to the
+    # test session so the orchestrator's downstream
+    # ``list_recent_trades(limit=100)`` reads the rows we just wrote
+    # (SQLite + StaticPool would otherwise hand out a fresh
+    # connection that can't see uncommitted rows from another
+    # session).
+    trade_store.bind_session_for_test(db_session)
 
     # Force hydration of trade_history on the engine so adjust_weights
     # can read the freshly written rows.
@@ -192,6 +226,10 @@ async def test_hydrate_from_db_picks_up_latest_weights(db_session) -> None:
         avg_accuracy=0.55,
         db=db_session,
     )
+    # Same Session-pinning as the trade-write tests above so the
+    # orchestrator's downstream ``latest_successful_weights()`` can
+    # see the row.
+    trade_store.bind_session_for_test(db_session)
 
     # Reset engine state to defaults so we can prove hydrate moves it.
     weight_orchestrator.engine.current_weights = dict(DEFAULT_WEIGHTS)

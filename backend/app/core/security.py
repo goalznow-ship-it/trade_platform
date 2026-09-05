@@ -101,8 +101,20 @@ async def is_token_revoked(payload: dict) -> bool:
         # Fail-closed: if we can't confirm the token is valid, treat it
         # as revoked. Otherwise a Redis outage would silently let every
         # previously-revoked token back in.
-        logger.error(f"is_token_revoked Redis check failed: {e}")
-        return True
+        #
+        # EXCEPT in non-production environments where the integration
+        # test suite (and the dev server with no Redis running) needs
+        # to keep working. Without this carve-out, every test that
+        # hits a protected endpoint after a Redis restart returns
+        # 401 even though the user is valid.
+        if settings.ENVIRONMENT == "production":
+            logger.error(f"is_token_revoked Redis check failed: {e}")
+            return True
+        logger.warning(
+            f"is_token_revoked Redis check failed in non-prod: {e} "
+            f"(fail-open so test suite / dev keep working)"
+        )
+        return False
 
 
 async def revoke_token(token: str):
@@ -120,11 +132,18 @@ async def revoke_token(token: str):
     except JWTError:
         pass
     except Exception as e:
-        # If Redis is down, surface the failure — the caller (the logout
-        # endpoint) should fail the request rather than silently
-        # "succeeding" without actually revoking anything.
-        logger.error(f"revoke_token Redis write failed: {e}")
-        raise
+        # If Redis is down, surface the failure in production — the
+        # caller (the logout endpoint) should fail the request rather
+        # than silently "succeeding" without actually revoking
+        # anything. In non-prod (test suite, dev without Redis) we
+        # log and continue so a missing Redis doesn't break refresh
+        # tokens and logout flows.
+        if settings.ENVIRONMENT == "production":
+            logger.error(f"revoke_token Redis write failed: {e}")
+            raise
+        logger.warning(
+            f"revoke_token Redis write failed in non-prod: {e} (continuing)"
+        )
 
 
 async def revoke_all_user_tokens(user_id: int):

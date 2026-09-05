@@ -31,6 +31,25 @@ class SQLAlchemyTradeStore:
 
     def __init__(self, session_factory=async_session_factory):
         self._session_factory = session_factory
+        # Test-only: a session that overrides every implicit
+        # ``async_session_factory()`` lookup. Production code never
+        # sets this — it exists so the weight-feedback test suite
+        # can force the orchestrator's downstream ``list_recent_trades``
+        # call to read from the same connection the test wrote to
+        # (SQLite + StaticPool otherwise loses rows between sessions).
+        self._override_session: AsyncSession | None = None
+
+    def bind_session_for_test(self, db: AsyncSession) -> None:
+        """Pin all internal session opens to ``db`` until cleared.
+
+        ``_session(None)`` returns ``self._override_session`` and
+        ``owns=False`` so the store neither commits nor closes the
+        test session. Restore with :func:`clear_session_override`.
+        """
+        self._override_session = db
+
+    def clear_session_override(self) -> None:
+        self._override_session = None
 
     async def record_trade(
         self,
@@ -174,6 +193,11 @@ class SQLAlchemyTradeStore:
     def _session(self, db: AsyncSession | None) -> tuple[AsyncSession, bool]:
         if db is not None:
             return db, False
+        # Test-only override: tests use this to share a session
+        # across the trade_store / orchestrator without going
+        # through StaticPool connection juggling.
+        if self._override_session is not None:
+            return self._override_session, False
         return self._session_factory(), True
 
 
