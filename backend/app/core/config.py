@@ -46,7 +46,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self):
-        if self.ENVIRONMENT.lower() == "production":
+        # Use exact comparison for production gating — previous
+        # implementation used .lower() which let ENVIRONMENT=Production
+        # slip through, defeating the check.
+        if self.ENVIRONMENT == "production":
             errors = []
             if self.SECRET_KEY == "ta-pro-secret-key-change-in-production" or len(self.SECRET_KEY) < 32:
                 errors.append("SECRET_KEY must be unique and at least 32 characters")
@@ -58,6 +61,18 @@ class Settings(BaseSettings):
                 errors.append("EXCHANGE_ENCRYPTION_KEY is required")
             if errors:
                 raise ValueError("Invalid production configuration: " + "; ".join(errors))
+        else:
+            # In development, warn loudly if someone is running with the
+            # well-known default secret key — this exact string appears
+            # in the repo and is on every attacker's wordlist.
+            if self.SECRET_KEY == "ta-pro-secret-key-change-in-production":
+                import warnings
+                warnings.warn(
+                    "SECRET_KEY is set to the public default. "
+                    "Tokens signed with this key are forgeable. "
+                    "Set a unique SECRET_KEY (>= 32 chars) in .env.",
+                    stacklevel=2,
+                )
         return self
 
     @property
