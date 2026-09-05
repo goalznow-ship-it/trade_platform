@@ -448,12 +448,14 @@ class ExecutionEngine:
             return {"check": "exchange_filters", "passed": False, "reason": "Market service unavailable"}
 
         try:
-            import ccxt
-            ex = ccxt.binance({
-                'enableRateLimit': True,
-                'options': {'defaultType': 'future'}
-            })
-            markets = ex.load_markets()
+            exchange_id = market_service._resolve_exchange(symbol)
+            ex = market_service.exchanges[exchange_id]
+            # _call_exchange ensures markets are loaded once (cached),
+            # dispatches the sync ccxt call to a worker thread, and
+            # applies a shared rate-limit semaphore + timeout. This
+            # avoids creating a fresh ccxt client + re-downloading
+            # ~3000 markets on every trade validation.
+            markets = await market_service._call_exchange(ex.load_markets)
 
             if symbol not in markets:
                 return {"check": "exchange_filters", "passed": False, "reason": f"Symbol {symbol} not found in exchange markets"}
