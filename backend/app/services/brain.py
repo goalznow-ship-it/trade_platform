@@ -146,7 +146,7 @@ class AICentralBrain:
                         factors.extend(result["factors"])
                 else:
                     scores[label] = 50.0
-                    engine_results[label] = {"score": 50.0}
+                    engine_results[label] = {"score": "50.0"}
 
             overall_score = self.get_weighted_score(scores)
 
