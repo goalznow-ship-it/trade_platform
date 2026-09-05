@@ -116,6 +116,14 @@ class TransformerSignalWrapper:
         return np.array(xs, dtype=np.float32), np.array(ys, dtype=np.int64)
 
     def train(self, X: pd.DataFrame, y: pd.Series) -> dict:
+        # Phase 3: seed every RNG the training loop touches — see
+        # ``app/services/ml/seed.py``. Without this the transformer's
+        # dropout, DataLoader shuffle, and weight init diverge
+        # between runs and the byte-identical reproducibility test
+        # in ``tests/test_ml_reproducibility.py`` fails.
+        from app.services.ml.seed import set_seed
+        set_seed()
+
         self.feature_names = list(X.columns)
         Xv = X.values.astype(np.float32)
         yv = y.map({-1: 0, 0: 1, 1: 2}).values

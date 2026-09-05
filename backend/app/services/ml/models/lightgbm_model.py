@@ -47,6 +47,11 @@ class LightGBMSignalModel:
     def train(
         self, X: pd.DataFrame, y: pd.Series, n_splits: int = 5
     ) -> dict:
+        # Phase 3: same reproducibility contract as XGBoost — see
+        # ``app/services/ml/seed.py`` for the rationale.
+        from app.services.ml.seed import set_seed
+        set_seed(self.params.get("random_state", 42))
+
         self.feature_names = list(X.columns)
         y_mapped = y.map({-1: 0, 0: 1, 1: 2})
 

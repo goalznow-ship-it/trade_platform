@@ -14,6 +14,7 @@ from app.services.indicators import indicator_service  # noqa: F401
 from app.services.market import market_service
 from app.services.news import news_service
 from app.services.notifications import notifications_service
+from app.services.signal_outcome import signal_outcome_resolver
 from app.services.signal_pipeline import signal_pipeline
 from app.services.signals import signal_service
 
@@ -177,6 +178,23 @@ def adjust_scoring_weights(self):
 
         async def _run():
             return await weight_orchestrator.adjust_weights()
+
+        return run_async(_run())
+    except Exception as exc:
+        self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=120)
+def resolve_signal_outcomes(self):
+    """Resolve every active signal that has no ``signal_outcomes``
+    row yet. Phase 3: writes both ``signals.result`` and
+    ``signal_outcomes`` so the quality gate in Phase 5 has
+    forward-return / MAE / MFE telemetry to act on.
+    """
+    try:
+
+        async def _run():
+            return await signal_outcome_resolver.resolve_all()
 
         return run_async(_run())
     except Exception as exc:

@@ -52,6 +52,14 @@ class XGBoostSignalModel:
         n_splits: int = 5,
         early_stopping_rounds: int = 30,
     ) -> dict:
+        # Phase 3: seed every RNG the training loop touches so two
+        # ``train()`` calls with the same data produce the same
+        # OOF predictions. The ``random_state`` in ``self.params``
+        # covers XGBoost's own RNG; ``set_seed`` covers NumPy /
+        # Python / PyTorch globals that the fit path may hit.
+        from app.services.ml.seed import set_seed
+        set_seed(self.params.get("random_state", 42))
+
         self.feature_names = list(X.columns)
         y_mapped = y.map({-1: 0, 0: 1, 1: 2})
 

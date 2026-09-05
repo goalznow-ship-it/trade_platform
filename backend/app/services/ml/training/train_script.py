@@ -28,6 +28,13 @@ import ccxt.async_support as ccxt
 
 from app.core.logging import logger
 from app.services.ml import MLSignalEngine
+from app.services.ml.seed import set_seed
+
+# Phase 3: seed the world before any model touches an RNG. The same
+# seed is read by XGBoost / LightGBM / Transformer at their own
+# ``train()`` entry points, but the dataset builder and any helper
+# code that runs here also benefits from a deterministic start.
+set_seed()
 
 # Default top-30 Binance perpetual symbols
 DEFAULT_SYMBOLS = [
