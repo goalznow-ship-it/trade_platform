@@ -111,7 +111,17 @@ async def predict_symbol(
     # ML inference is CPU-bound (XGBoost + LightGBM + Transformer) — run in thread
     pred = await asyncio.to_thread(engine.predict, symbol, df, btc_df)
     if "error" in pred:
-        raise HTTPException(500, pred["error"])
+        # Don't echo pred["error"] verbatim — that came from the
+        # inference layer and may include file paths or feature
+        # names. Log it server-side, return a generic message with
+        # a correlation id the user can quote to support.
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            RuntimeError(pred["error"]),
+            user_message="ML prediction failed",
+            context=f"ml.predict {symbol} {timeframe}",
+        )
+        raise HTTPException(500, detail={"error": msg, "correlation_id": corr})
 
     pred["symbol"] = symbol
     return pred

@@ -161,17 +161,27 @@ async def get_ohlcv(timeframe: str = "1h", limit: int = 200, symbol: str = "SKHY
             return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": f"{symbol} OHLCV məlumatı yoxdur ({timeframe})"}
         return {"symbol": symbol, "timeframe": timeframe, "data": ohlcv}
     except Exception as e:
-        return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": str(e)}
+        # safe_error_response: in DEBUG we include str(e) for the dev,
+        # in production we return a generic phrase + a correlation id
+        # so support can find the matching server log.
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="OHLCV məlumatı əldə edilə bilmir", context=f"skhy.ohlcv {symbol} {timeframe}",
+        )
+        return {"symbol": symbol, "timeframe": timeframe, "data": [], "error": msg, "correlation_id": corr}
 
 @router.get("/snapshot")
 async def get_snapshot(timeframe: str = Query(default="1h", pattern=TF_PATTERN), symbol: str = "SKHYUSDT"):
     try:
         return await _build_snapshot_payload(timeframe, symbol)
     except Exception as e:
-        logger.error(f"SKHY snapshot error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message=f"{normalize_symbol(symbol)} məlumatı əldə edilə bilmir", context=f"skhy.snapshot {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"{normalize_symbol(symbol)} məlumatı əldə edilə bilmir: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/analysis")
@@ -183,10 +193,13 @@ async def get_analysis(timeframe: str = Query(default=None, pattern=TF_PATTERN),
             return JSONResponse(status_code=503, content=result)
         return result
     except Exception as e:
-        logger.error(f"SKHY analysis error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Analiz xətası", context=f"skhy.analysis {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Analiz xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/scenarios")
@@ -195,10 +208,13 @@ async def get_scenarios(timeframe: str = Query(default=None, pattern=TF_PATTERN)
         symbol = await _allowed_symbol(symbol)
         return await skhy_analysis.get_scenarios(timeframe, symbol)
     except Exception as e:
-        logger.error(f"SKHY scenarios error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Ssenari xətası", context=f"skhy.scenarios {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Ssenari xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/history")
@@ -215,10 +231,13 @@ async def get_history(timeframe: str = Query(default="1h", pattern=TF_PATTERN), 
             "timeframe": timeframe,
         }
     except Exception as e:
-        logger.error(f"SKHY history error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Tarixçə xətası", context=f"skhy.history {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Tarixçə xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 @router.get("/backtest")
@@ -245,10 +264,13 @@ async def run_backtest(
             "results": results,
         }
     except Exception as e:
-        logger.error(f"SKHY backtest error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Backtest xətası", context=f"skhy.backtest {symbol} {timeframe} {mode}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Backtest xətası: {str(e)}"}
+            content={"error": msg, "correlation_id": corr}
         )
 
 @router.get("/diagnostics")
@@ -298,10 +320,13 @@ async def get_diagnostics(timeframe: str = Query(default="1h", pattern=TF_PATTER
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        logger.error(f"SKHY diagnostics error: {e}")
+        from app.core.error_helpers import safe_error_response
+        msg, corr = safe_error_response(
+            e, user_message="Diagnostics xətası", context=f"skhy.diagnostics {symbol} {timeframe}",
+        )
         return JSONResponse(
             status_code=503,
-            content={"error": f"Diagnostics xətası: {str(e)}", "status": "unavailable"}
+            content={"error": msg, "correlation_id": corr, "status": "unavailable"}
         )
 
 def _run_backtest_internal(ohlcv: list, timeframe: str, mode: str) -> dict:
