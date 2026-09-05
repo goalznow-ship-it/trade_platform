@@ -103,6 +103,11 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=settings.RATE_LIMIT_MAX, window_seconds=settings.RATE_LIMIT_WINDOW)
+# Security headers (X-Frame-Options, HSTS, etc.) — added last so
+# they wrap everything (including 429s from the rate limiter and
+# 401s from auth) and the browser receives a consistent policy.
+from app.core.security_headers import SecurityHeadersMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(market.router, prefix="/api/v1")
