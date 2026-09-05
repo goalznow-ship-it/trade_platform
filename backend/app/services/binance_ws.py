@@ -69,6 +69,13 @@ class BinanceWebSocketService:
             logger.error(f"Too many streams: {len(streams)}")
             return
 
+        # Exponential backoff with jitter. The previous implementation
+        # slept a flat 5s on every failure — when Binance had a brief
+        # outage, every stream retried at the same cadence, hammering
+        # their edge and frequently getting rate-limited into a longer
+        # outage. Cap at 60s so a permanently broken stream still
+        # recovers within a minute once the upstream is back.
+        backoff = 1.0
         while self.running:
             try:
                 async with self._session.ws_connect(url, heartbeat=30) as ws:
@@ -78,11 +85,18 @@ class BinanceWebSocketService:
                             await handler(data.get("data", data))
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             break
+                    # Clean break out of the inner for — reset backoff
+                    # because we just had a working connection.
+                    backoff = 1.0
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Binance WS stream error: {e}")
-                await asyncio.sleep(5)
+                # Jitter ±25% so multiple workers don't reconnect in lockstep.
+                jitter = backoff * 0.25 * (2 * (asyncio.get_event_loop().time() % 1) - 1)
+                sleep_for = min(60.0, max(1.0, backoff + jitter))
+                await asyncio.sleep(sleep_for)
+                backoff = min(backoff * 2, 60.0)
 
     async def _handle_ticker(self, data: dict):
         symbol = data.get("s", "")
