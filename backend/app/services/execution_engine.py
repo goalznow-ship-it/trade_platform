@@ -34,6 +34,15 @@ except ImportError:
     logger.warning("ExecutionEngine: market_service not available")
 
 
+def _service_unavailable(name: str) -> Dict:
+    """Helper to build a uniform 'service missing' check result."""
+    return {
+        "passed": False,
+        "reason": f"{name} unavailable",
+        "service_unavailable": True,
+    }
+
+
 class ExecutionEngine:
     MAX_SPREAD_PCT: float = 0.001
     MAX_LEVERAGE: int = 125
@@ -41,6 +50,27 @@ class ExecutionEngine:
     MIN_RISK_REWARD: float = 1.5
     MAX_CORRELATION_SCORE: float = 0.7
     MAX_FUNDING_RATE_ABS: float = 0.01
+
+    def _required_services_ok(self) -> bool:
+        """
+        Fail-closed guard for the critical path. If any service the
+        validator actually depends on is missing the runtime object
+        (not just the module import — e.g. the singleton was reset by a
+        hot-reload), we abort validation. The previous code crashed with
+        AttributeError: 'NoneType' object has no attribute 'get_ohlcv'
+        because the HAS_* flag is set at import time but the singleton
+        itself can be None at call time.
+        """
+        if not HAS_MARKET_SERVICE or market_service is None:
+            logger.error("ExecutionEngine: market_service not available, aborting validation")
+            return False
+        if not HAS_PROFESSIONAL_RISK or professional_risk is None:
+            logger.error("ExecutionEngine: professional_risk not available, aborting validation")
+            return False
+        if not HAS_SMC_ENGINE or smc_engine is None:
+            logger.error("ExecutionEngine: smc_engine not available, aborting validation")
+            return False
+        return True
 
     async def validate_trade(self, trade_request: Dict) -> Dict:
         symbol = trade_request.get("symbol", "")
@@ -54,6 +84,20 @@ class ExecutionEngine:
         price = trade_request.get("price", entry)
         portfolio = trade_request.get("portfolio", {})
         timeframe = trade_request.get("timeframe", "1h")
+
+        if not self._required_services_ok():
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "passed": False,
+                "checks": {},
+                "check_count": 0,
+                "passed_count": 0,
+                "failed_count": 0,
+                "rejected_at_guard": True,
+                "reason": "Required services unavailable — validation aborted",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
         checks = {}
 
