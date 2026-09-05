@@ -62,6 +62,13 @@ beat_schedule: dict = {
         "task": "app.workers.evaluate_quality",
         "schedule": crontab(minute="11,26,41,56"),
     },
+    # Generate live institutional signals for top 30 symbols every 15 min.
+    # Off-minute (03/18/33/48) so it doesn't race the 5-min outcome
+    # resolver or the 15-min quality evaluator.
+    "generate-live-signals": {
+        "task": "app.workers.generate_live_signals",
+        "schedule": crontab(minute="03,18,33,48"),
+    },
 }
 
 

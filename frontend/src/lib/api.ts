@@ -363,6 +363,14 @@ export const api = {
   scanAllV2: (minConfidence = 50) =>
     request<any>(`/api/v1/signals/scan?min_confidence=${minConfidence}`),
 
+  // Live auto-generated signals (from Celery task)
+  getLiveSignals: (limit = 20, minScore = 70) =>
+    request<any>(`/api/v1/signals/live?limit=${limit}&min_score=${minScore}`),
+
+  // Signal history from DB
+  getSignalHistory: (symbol?: string, limit = 50) =>
+    request<any>(`/api/v1/signals/history?${symbol ? `symbol=${symbol}&` : ''}limit=${limit}`),
+
   // Performance
   getPerformanceStats: (days = 30) =>
     request<any>(`/api/v1/performance/stats?days=${days}`),

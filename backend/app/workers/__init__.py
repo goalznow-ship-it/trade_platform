@@ -523,3 +523,92 @@ def retrain_ml_models(
         # operator inspect.
         logging.error(f"ML retrain failed: {exc}")
         return {"error": str(exc), "symbols": len(symbols)}
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=900)
+def generate_live_signals(self):
+    """Generate and persist institutional signals for top 30 symbols.
+
+    Runs every 15 minutes via Celery beat. For each top symbol:
+    1. Generate an institutional-grade signal using multi-TF + SMC + scoring
+    2. If score >= 70, persist to DB via signal_pipeline
+    3. Broadcast via WebSocket SIGNALS channel
+
+    This makes the platform a "real signal site" — signals are
+    auto-generated and stored, not just computed on-demand.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.websocket_manager import Channel, ws_manager
+    from app.services.institutional_signals import institutional_signal_engine
+    from app.services.market_coverage import market_coverage
+
+    async def _run():
+        # Get top 30 symbols
+        symbols = await market_coverage.get_top_symbols(count=30)
+        if not symbols:
+            symbols = [
+                "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+                "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+                "SUI/USDT", "ATOM/USDT", "UNI/USDT", "ARB/USDT", "OP/USDT",
+                "INJ/USDT", "SEI/USDT", "APT/USDT", "NEAR/USDT", "FIL/USDT",
+                "MATIC/USDT", "AAVE/USDT", "MKR/USDT", "SNX/USDT", "LDO/USDT",
+                "RENDER/USDT", "FET/USDT", "GRT/USDT", "STX/USDT", "TIA/USDT",
+            ]
+
+        generated = 0
+        persisted = 0
+        errors = []
+        latest_signals = []
+
+        for symbol in symbols:
+            try:
+                signal = await institutional_signal_engine.generate_signal(
+                    symbol=symbol,
+                    timeframe="1h",
+                    capital=10000,
+                    risk_percent=0.02,
+                )
+                generated += 1
+
+                # Only persist if score >= 70 (trade-ready or watchlist)
+                score = signal.get("institutional_score", {}).get("abs_score", 0)
+                direction = signal.get("direction")
+
+                if score >= 70 and direction in ("long", "short"):
+                    async with async_session_factory() as session:
+                        from app.services.signal_pipeline import signal_pipeline
+                        signal["symbol"] = symbol
+                        signal["timeframe"] = "1h"
+                        await signal_pipeline.persist_composed(signal, db=session)
+                        await session.commit()
+                        persisted += 1
+                        latest_signals.append(signal)
+
+            except Exception as exc:
+                errors.append(f"{symbol}: {str(exc)[:60]}")
+                continue
+
+        # Broadcast latest signals via WebSocket
+        if latest_signals:
+            try:
+                await ws_manager.broadcast(Channel.SIGNALS, "live_signals_generated", {
+                    "signals": latest_signals[:10],  # Top 10
+                    "generated": generated,
+                    "persisted": persisted,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                })
+            except Exception as exc:
+                logger.warning(f"WS broadcast failed: {exc}")
+
+        return {
+            "symbols_processed": generated,
+            "signals_persisted": persisted,
+            "errors": errors[:5],  # First 5 errors only
+        }
+
+    try:
+        return run_async(_run())
+    except Exception as exc:
+        logger.exception(f"generate_live_signals failed: {exc}")
+        self.retry(exc=exc)
