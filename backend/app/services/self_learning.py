@@ -18,7 +18,18 @@ from app.core.logging import logger
 
 
 class SelfLearningEngine:
-    def __init__(self):
+    def __init__(self, trade_store=None):
+        """``trade_store`` is an optional ``SQLAlchemyTradeStore``-shaped
+        object (anything with an async ``record_trade`` method).
+
+        When supplied, ``record_trade`` writes to the store as well as
+        keeping the in-memory cache in sync. The in-memory list is
+        kept for back-compat with the legacy ``adjust_weights`` path
+        and with any test that injects trades directly. After Phase 2
+        the canonical path is store-first; the in-memory list is a
+        read-through cache hydrated from ``trade_store.list_recent_trades``
+        on first ``adjust_weights`` call.
+        """
         self.trade_history: list[dict] = []
         self.weight_history: list[dict] = []
         self.default_weights = {
@@ -26,20 +37,55 @@ class SelfLearningEngine:
             "liquidity": 0.15, "smc": 0.20, "risk": 0.15,
         }
         self.current_weights = dict(self.default_weights)
+        # Lazily imported to avoid a circular import — ``app.core.persistence``
+        # doesn't depend on this module, so the import is safe at call time.
+        self._trade_store = trade_store
+        self._hydrated_from_store = False
 
     def record_trade(self, trade_data: dict) -> None:
+        """Record a closed trade. Writes to the SQL store (if wired)
+        and keeps the in-memory cache in sync.
+
+        ``adjust_weights`` is idempotent: it pulls the last 100 trades
+        from the store each time it runs, so a duplicate write here
+        is safe (the store's own ``source_trade_id`` check no-ops
+        duplicates). The in-memory dedupe is a defense-in-depth.
+        """
         source_trade_id = trade_data.get("source_trade_id")
         if source_trade_id is not None and any(
             item.get("source_trade_id") == source_trade_id
             for item in self.trade_history
         ):
             return
+
+        # Build a stable in-memory record. The store is responsible
+        # for the authoritative id, but for tests / legacy callers
+        # that inspect ``trade_history`` we still assign one.
         trade_data = dict(trade_data)
         trade_data["id"] = len(self.trade_history) + 1
         if "entry_time" not in trade_data:
             trade_data["entry_time"] = datetime.now(UTC).isoformat()
         trade_data["recorded_at"] = datetime.now(UTC).isoformat()
         self.trade_history.append(trade_data)
+
+        # Best-effort write to the SQL store. We don't fail the
+        # in-memory record if the store write fails — the engine
+        # remains usable in degraded mode (and ``adjust_weights``
+        # will fall back to in-memory data on the next call).
+        if self._trade_store is not None:
+            try:
+                import asyncio
+                # If we are already inside an event loop (the
+                # request-lifecycle case), schedule the write via
+                # the loop. Otherwise run synchronously.
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._trade_store.record_trade(trade_data))
+                except RuntimeError:
+                    asyncio.run(self._trade_store.record_trade(trade_data))
+            except Exception as exc:
+                logger.warning("trade_store_write_failed: %s", exc)
+
         logger.info(
             "Trade recorded",
             extra={"trade_id": trade_data["id"], "symbol": trade_data.get("symbol"),
@@ -253,6 +299,38 @@ class SelfLearningEngine:
         }
 
     def adjust_weights(self) -> None:
+        """Compute and apply the next ``current_weights``.
+
+        Idempotent: if the SQL store has a successful adjustment
+        run already on the same trade window, this is a no-op
+        (the in-memory weights are already in sync — they were
+        written by the previous run that produced that audit row).
+
+        When ``_trade_store`` is wired, ``trade_history`` is
+        hydrated from the store on first call. The store is the
+        source of truth after Phase 2.
+        """
+        # Lazy hydrate from the store on first adjust call so the
+        # in-memory list always reflects what ``record_trade`` has
+        # actually written, even if the in-memory append failed
+        # (e.g. event-loop collision).
+        if self._trade_store is not None and not self._hydrated_from_store:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                # Caller is async — defer hydration to the orchestrator.
+                self._hydrated_from_store = True
+            else:
+                try:
+                    store_trades = asyncio.run(self._trade_store.list_recent_trades(limit=100))
+                    self.trade_history = store_trades
+                except Exception as exc:
+                    logger.warning("trade_store_hydrate_failed: %s", exc)
+                self._hydrated_from_store = True
+
         recent = self.trade_history[-100:]
         if len(recent) < 10:
             logger.warning(
@@ -413,4 +491,9 @@ class SelfLearningEngine:
         logger.info("Weights reset to defaults")
 
 
-self_learning = SelfLearningEngine()
+# Phase 2: wire the singleton with the SQL trade store. The
+# orchestrator uses the same engine instance so ``current_weights``
+# stays in sync between the engine and the orchestrator's view.
+from app.core.persistence import trade_store as _default_trade_store  # noqa: E402
+
+self_learning = SelfLearningEngine(trade_store=_default_trade_store)

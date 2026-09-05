@@ -76,7 +76,17 @@ class InstitutionalSignalEngine:
         current_price = data[-1]["close"]
 
         smc_data = smc_engine.analyze(data)
-        inst_score = await institutional_scorer.score(symbol, data, timeframe, smc_data)
+        # Phase 2: pass the self-learning weights into the scorer so
+        # the per-category scores (and the total) reflect the
+        # weights in force at emit time. The orchestrator's
+        # ``current_weights`` is the source of truth — anything
+        # else (the in-memory ``self_learning`` default) would
+        # defeat the feedback loop.
+        from app.services.weight_orchestrator import weight_orchestrator
+        active_weights = weight_orchestrator.weights_used_snapshot()
+        inst_score = await institutional_scorer.score(
+            symbol, data, timeframe, smc_data, weights=active_weights,
+        )
 
         details = inst_score.get("details", {})
         atr = details.get("atr") or indicator_service.latest_atr(data)

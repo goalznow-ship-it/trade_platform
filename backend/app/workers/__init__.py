@@ -162,6 +162,27 @@ def send_signal_notification(self, signal_id: int):
         self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=300)
+def adjust_scoring_weights(self):
+    """Recompute the self-learning weights from the SQL trade store.
+
+    Phase 2: scheduled by the beat scheduler (e.g. once an hour) so
+    the orchestrator's ``current_weights`` stays fresh. ``adjust_weights``
+    is idempotent — if a recent successful run already captured the
+    same trade window, the orchestrator's audit row will reflect a
+    skip and the in-memory weights stay where they were.
+    """
+    try:
+        from app.services.weight_orchestrator import weight_orchestrator
+
+        async def _run():
+            return await weight_orchestrator.adjust_weights()
+
+        return run_async(_run())
+    except Exception as exc:
+        self.retry(exc=exc)
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=120)
 def collect_news(self):
     try:

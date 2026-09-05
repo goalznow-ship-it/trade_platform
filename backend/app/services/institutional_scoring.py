@@ -35,12 +35,24 @@ class InstitutionalScorer:
 
     async def score(self, symbol: str, data: list, timeframe: str = "1h",
                     smc_data: dict | None = None,
-                    futures_data: dict | None = None) -> dict:
-        return self.score_sync(symbol, data, timeframe, smc_data, futures_data)
+                    futures_data: dict | None = None,
+                    weights: dict | None = None) -> dict:
+        """Compute the institutional score, optionally rescaled by
+        the self-learning weights.
+
+        ``weights`` is a {category: weight} dict in the same shape
+        ``WeightOrchestrator.current_weights`` returns — category
+        weights normalised to sum to 1.0. When supplied, the
+        per-category scores are scaled by ``(supplied / default)``
+        and the result is re-summed so the total reflects the
+        self-learning adjustments.
+        """
+        return self.score_sync(symbol, data, timeframe, smc_data, futures_data, weights)
 
     def score_sync(self, symbol: str, data: list, timeframe: str = "1h",
                    smc_data: dict | None = None,
-                   futures_data: dict | None = None) -> dict:
+                   futures_data: dict | None = None,
+                   weights: dict | None = None) -> dict:
         if len(data) < 50:
             return self._empty(symbol, timeframe, "Insufficient data")
 
@@ -51,7 +63,7 @@ class InstitutionalScorer:
         smc = self._score_smc(data, smc_data)
         risk = self._score_risk(data, futures_data)
 
-        scores = {
+        raw_scores = {
             "trend": trend,
             "momentum": momentum,
             "volume": volume,
@@ -59,6 +71,28 @@ class InstitutionalScorer:
             "smc": smc,
             "risk": risk,
         }
+
+        # Default category weights as the scorer was originally
+        # calibrated. When ``weights`` is supplied, each raw score
+        # is scaled by (supplied[c] / default[c]) so a category
+        # the self-learning loop has up-weighted produces a
+        # proportionally larger contribution to the total.
+        default_weights = {
+            "trend": self.trend_weight,
+            "momentum": self.momentum_weight,
+            "volume": self.volume_weight,
+            "liquidity": self.liquidity_weight,
+            "smc": self.smc_weight,
+            "risk": self.risk_weight,
+        }
+
+        scores = dict(raw_scores)
+        if weights:
+            for category, raw in raw_scores.items():
+                default = default_weights.get(category)
+                active = weights.get(category)
+                if default and active and default > 0:
+                    scores[category] = raw * (active / default)
 
         # Each category scorer already returns signed points capped by its
         # configured category weight. Summing them produces the intended
@@ -74,6 +108,19 @@ class InstitutionalScorer:
 
         details = self._build_details(data, scores)
 
+        # The emitted ``weights`` reflects the weights actually used
+        # to compute the score so downstream consumers (the signal
+        # pipeline, the canonical signal builder) can record what
+        # was in force at scoring time without re-deriving it.
+        emitted_weights = dict(default_weights)
+        if weights:
+            for category in default_weights:
+                active = weights.get(category)
+                if active:
+                    # Round to 4 dp so a stored row matches the
+                    # orchestrator's view.
+                    emitted_weights[category] = round(float(active) * default_weights[category], 4)
+
         return {
             "symbol": symbol,
             "timeframe": timeframe,
@@ -84,14 +131,7 @@ class InstitutionalScorer:
             "long_probability": round(long_prob, 1),
             "short_probability": round(short_prob, 1),
             "scores": {k: round(v, 1) for k, v in scores.items()},
-            "weights": {
-                "trend": self.trend_weight,
-                "momentum": self.momentum_weight,
-                "volume": self.volume_weight,
-                "liquidity": self.liquidity_weight,
-                "smc": self.smc_weight,
-                "risk": self.risk_weight,
-            },
+            "weights": emitted_weights,
             "details": details,
             "risk_level": "low" if abs_score >= 70 else "medium" if abs_score >= 40 else "high",
         }

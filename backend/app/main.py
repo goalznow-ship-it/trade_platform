@@ -73,6 +73,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"ML engine init skipped: {e}")
 
+    # Phase 2: hydrate self-learning weights from the most recent
+    # successful adjustment_runs row. Without this, every process
+    # restart would reset ``current_weights`` to the hardcoded
+    # defaults and erase the feedback the previous run had built up.
+    try:
+        from app.services.weight_orchestrator import weight_orchestrator
+        hydrated = await weight_orchestrator.hydrate_from_db()
+        logger.info(
+            "Self-learning weights hydrated: %s",
+            {k: round(v, 4) for k, v in hydrated.items()},
+        )
+    except Exception as e:
+        logger.warning(f"weight hydration skipped: {e}")
+
     yield
     if settings.ENABLE_BACKGROUND_SERVICES:
         await alert_service.stop()
