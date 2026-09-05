@@ -35,6 +35,12 @@ class Trade(Base):
     """
 
     __tablename__ = "trades"
+    # ``app.models.trade.Trade`` also declares ``__tablename__ =
+    # "trades"``; we share that table so the resolver's rows show up
+    # in the same place operators see in /admin. ``extend_existing``
+    # tells SQLAlchemy to merge the two declarations rather than
+    # raise on duplicate-table registration.
+    __table_args__ = {"extend_existing": True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_trade_id = Column(String(80), nullable=True, index=True)

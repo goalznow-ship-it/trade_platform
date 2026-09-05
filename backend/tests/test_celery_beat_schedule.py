@@ -22,6 +22,7 @@ EXPECTED_TASKS = {
     "app.workers.resolve_signal_outcomes",
     "app.workers.adjust_scoring_weights",
     "app.workers.prune_stale_signals",
+    "app.workers.evaluate_quality",
 }
 
 
@@ -104,6 +105,19 @@ def test_beat_schedule_prune_is_overnight():
     sched: crontab = entry["schedule"]
     assert 3 in sched.hour, f"prune hour drifted: {sched.hour}"
     assert 37 in sched.minute, f"prune minute drifted: {sched.minute}"
+
+
+def test_beat_schedule_quality_evaluates_quarter_hour():
+    """The quality-gate cron runs every 15 min (at :11, :26,
+    :41, :56). The minutes are pinned to avoid colliding with
+    the 5-min outcome resolver at :00, :05, :10, ... so the
+    SQL load doesn't spike at one instant.
+    """
+    entry = beat_schedule["evaluate-quality"]
+    sched: crontab = entry["schedule"]
+    assert {11, 26, 41, 56} == set(sched.minute), (
+        f"evaluate-quality minutes drifted: {sched.minute}"
+    )
 
 
 def test_workers_load_beat_schedule():

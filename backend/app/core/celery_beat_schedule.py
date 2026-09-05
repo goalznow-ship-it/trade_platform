@@ -53,6 +53,15 @@ beat_schedule: dict = {
         "task": "app.workers.prune_stale_signals",
         "schedule": crontab(hour=3, minute=37),
     },
+    # Phase 5: re-evaluate every active engine's hit rate and
+    # auto-disable any that fall below the quality threshold.
+    # 15-min cadence balances DB load against freshness. The
+    # minute is pinned to 11/26/41/56 so it doesn't race the
+    # 5-min outcome resolver.
+    "evaluate-quality": {
+        "task": "app.workers.evaluate_quality",
+        "schedule": crontab(minute="11,26,41,56"),
+    },
 }
 
 

@@ -13,6 +13,7 @@ from app.api.v1 import journal as journal_router
 from app.api.v1 import notifications as notifications_router
 from app.api.v1 import paper_trading as paper_router
 from app.api.v1 import performance as performance_router
+from app.api.v1 import quality as quality_router
 from app.api.v1 import risk as risk_router
 from app.api.v1 import skhy as skhy_router
 from app.api.v1 import watchlists as watchlists_router
@@ -138,6 +139,7 @@ app.include_router(news.router, prefix="/api/v1")
 app.include_router(performance_router.router, prefix="/api/v1")
 app.include_router(whales_router.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(quality_router.router, prefix="/api/v1")
 app.include_router(scanner.router, prefix="/api/v1")
 app.include_router(backtest.router, prefix="/api/v1")
 app.include_router(portfolio.router, prefix="/api/v1")

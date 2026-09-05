@@ -305,6 +305,62 @@ def prune_stale_signals(self):
         self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=300)
+def evaluate_quality(self):
+    """Phase 5: run the per-engine quality evaluation.
+
+    Iterates every distinct ``source_engine`` that has emitted
+    in the last 7 days, computes a fresh hit-rate / MAE / MFE
+    row, and flips ``is_disabled`` for engines that fall
+    below ``settings.QUALITY_MIN_HIT_RATE``. The signal
+    pipeline reads the latest row to decide whether to emit.
+
+    The task is idempotent — a fast re-run writes a second
+    row for the same window; the pipeline only cares about
+    the most-recent row.
+    """
+    try:
+        from app.services.quality_gate import (
+            evaluate_engine,
+            list_active_engines,
+        )
+        from app.services.observability import registry as metrics
+
+        async def _run():
+            engines = await list_active_engines()
+            evaluated = 0
+            disabled = 0
+            for engine in engines:
+                try:
+                    res = await evaluate_engine(engine)
+                    evaluated += 1
+                    metrics.quality_evaluations.inc(
+                        result=res.status, engine=engine,
+                    )
+                    if res.is_disabled:
+                        disabled += 1
+                        metrics.signals_blocked_quality.inc(engine=engine)
+                    metrics.engines_disabled.set(
+                        1.0 if res.is_disabled else 0.0,
+                        engine=engine,
+                    )
+                except Exception as exc:
+                    # A single engine's evaluation shouldn't
+                    # blow up the rest of the batch.
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"quality_eval_failed engine={engine}: {exc}"
+                    )
+            return {
+                "engines_evaluated": evaluated,
+                "engines_disabled": disabled,
+            }
+
+        return run_async(_run())
+    except Exception as exc:
+        self.retry(exc=exc)
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=120)
 def collect_news(self):
     try:

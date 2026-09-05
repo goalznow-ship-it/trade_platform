@@ -65,6 +65,7 @@ class SignalPipeline:
         capital: float = 10000,
         risk_percent: float = 0.02,
         db: AsyncSession | None = None,
+        source_engine: str = "institutional+ml",
     ) -> dict:
         """Run the full canonical pipeline and persist if a trade-grade
         signal survives the dedupe + threshold checks.
@@ -72,19 +73,61 @@ class SignalPipeline:
         Returns the enriched signal dict (with ``signal_id`` populated
         when persisted, ``None`` otherwise). Callers that need to know
         whether the signal hit the DB should check ``signal_id``.
+
+        Phase 5: before doing any work, consults the quality
+        gate and circuit breaker. If the engine is currently
+        disabled by either, returns a benign "blocked" dict
+        instead of composing a signal that the quality loop
+        will reject anyway.
         """
-        composed = await institutional_signal_engine._compose_signal(
-            symbol=symbol,
-            timeframe=timeframe,
-            capital=capital,
-            risk_percent=risk_percent,
-        )
+        from app.services import circuit_breaker
+        from app.services.observability import registry as metrics
+        from app.services.quality_gate import is_engine_disabled
+
+        if await is_engine_disabled(source_engine):
+            metrics.signals_blocked_quality.inc(engine=source_engine)
+            return {
+                "symbol": symbol, "timeframe": timeframe,
+                "error": "engine_disabled_by_quality_gate",
+                "direction": "neutral", "confidence": 0, "signal_id": None,
+                "source_engine": source_engine,
+            }
+        if await circuit_breaker.is_open(source_engine, scope="default"):
+            metrics.signals_blocked_breaker.inc(engine=source_engine)
+            return {
+                "symbol": symbol, "timeframe": timeframe,
+                "error": "engine_circuit_breaker_open",
+                "direction": "neutral", "confidence": 0, "signal_id": None,
+                "source_engine": source_engine,
+            }
+
+        try:
+            composed = await institutional_signal_engine._compose_signal(
+                symbol=symbol,
+                timeframe=timeframe,
+                capital=capital,
+                risk_percent=risk_percent,
+            )
+        except Exception as exc:
+            await circuit_breaker.record_failure(
+                source_engine, scope="default", reason=f"compose_failed:{exc}"
+            )
+            raise
+
         if composed is None:
             return {"symbol": symbol, "timeframe": timeframe, "error": "compose_failed",
                     "direction": "neutral", "confidence": 0, "signal_id": None}
-        return await self.persist_composed(
+
+        result = await self.persist_composed(
             composed, db=db, symbol=symbol, timeframe=timeframe,
+            source_engine=source_engine,
         )
+        if result.get("signal_id"):
+            await circuit_breaker.record_success(source_engine, scope="default")
+            metrics.signals_emitted.inc(
+                engine=source_engine, direction=result.get("direction", "unknown"),
+            )
+        return result
 
     async def persist_composed(
         self,
@@ -92,6 +135,7 @@ class SignalPipeline:
         db: AsyncSession | None = None,
         symbol: str | None = None,
         timeframe: str | None = None,
+        source_engine: str = "institutional+ml",
     ) -> dict:
         """Persist an already-composed signal dict.
 
@@ -107,27 +151,70 @@ class SignalPipeline:
             return {"symbol": sym, "timeframe": tf, "error": "missing_symbol",
                     "direction": "neutral", "confidence": 0, "signal_id": None}
 
+        from app.services import circuit_breaker
+        from app.services.observability import registry as metrics
+        from app.services.quality_gate import is_engine_disabled
+
+        if await is_engine_disabled(source_engine):
+            metrics.signals_blocked_quality.inc(engine=source_engine)
+            return {
+                "symbol": sym, "timeframe": tf,
+                "error": "engine_disabled_by_quality_gate",
+                "direction": "neutral", "confidence": 0, "signal_id": None,
+                "source_engine": source_engine,
+            }
+        if await circuit_breaker.is_open(source_engine, scope="default"):
+            metrics.signals_blocked_breaker.inc(engine=source_engine)
+            return {
+                "symbol": sym, "timeframe": tf,
+                "error": "engine_circuit_breaker_open",
+                "direction": "neutral", "confidence": 0, "signal_id": None,
+                "source_engine": source_engine,
+            }
+
         # ML boost — best-effort. If the ML layer isn't ready (no trained
         # model on disk yet, missing features, etc.) the boost is a
         # no-op and we record ml_bypass_v1 as the model_version so the
         # self-learning loop can filter for ML-aware rows.
-        composed, ml_boost, model_version = self._apply_ml_boost(
-            composed, symbol=sym, timeframe=tf
-        )
+        try:
+            composed, ml_boost, model_version = self._apply_ml_boost(
+                composed, symbol=sym, timeframe=tf
+            )
+        except Exception as exc:
+            await circuit_breaker.record_failure(
+                source_engine, scope="default", reason=f"ml_boost_failed:{exc}"
+            )
+            raise
 
         if not self._is_persistable(composed):
             composed.setdefault("signal_id", None)
             return composed
 
-        if db is None:
-            async with async_session_factory() as session:
-                signal_id = await self._persist(session, composed, ml_boost, model_version)
-        else:
-            signal_id = await self._persist(db, composed, ml_boost, model_version)
+        try:
+            if db is None:
+                async with async_session_factory() as session:
+                    signal_id = await self._persist(
+                        session, composed, ml_boost, model_version, source_engine
+                    )
+            else:
+                signal_id = await self._persist(
+                    db, composed, ml_boost, model_version, source_engine
+                )
+        except Exception as exc:
+            await circuit_breaker.record_failure(
+                source_engine, scope="default", reason=f"persist_failed:{exc}"
+            )
+            raise
+        await circuit_breaker.record_success(source_engine, scope="default")
         composed["signal_id"] = signal_id
         composed["pipeline_version"] = PIPELINE_VERSION
         composed["model_version"] = model_version
         composed["ml_boost"] = ml_boost
+        composed["source_engine"] = source_engine
+        if signal_id:
+            metrics.signals_emitted.inc(
+                engine=source_engine, direction=composed.get("direction", "unknown"),
+            )
         return composed
 
     def _apply_ml_boost(
@@ -209,6 +296,7 @@ class SignalPipeline:
         composed: dict,
         ml_boost: float,
         model_version: str,
+        source_engine: str = "institutional+ml",
     ) -> int | None:
         symbol = str(composed.get("symbol", ""))
         timeframe = str(composed.get("timeframe") or "1h")
@@ -267,7 +355,7 @@ class SignalPipeline:
             ml_boost=ml_boost if ml_boost else None,
             pipeline_version=PIPELINE_VERSION,
             model_version=model_version,
-            source_engine="institutional+ml",
+            source_engine=source_engine,
         )
         db.add(record)
         await db.commit()

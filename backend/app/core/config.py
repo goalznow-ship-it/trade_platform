@@ -69,6 +69,30 @@ class Settings(BaseSettings):
     # is expensive (OOS walk-forward) so we cache for an hour.
     BACKTEST_ML_CACHE_TTL: int = 3600
 
+    # ── Quality gate (Phase 5) ────────────────────────────────────
+    # Minimum rolling hit rate an engine must keep over the
+    # evaluation window. Below this, the engine is auto-disabled
+    # and the pipeline stops emitting until an operator (or a
+    # successful probe) re-enables it.
+    QUALITY_MIN_HIT_RATE: float = 0.40
+    # Window the quality gate reads from (hours). 24h gives
+    # the per-engine aggregator enough resolved signals to
+    # make a stable decision without lagging the live state.
+    QUALITY_WINDOW_HOURS: int = 24
+    # How often the cron job recomputes the quality row.
+    # 15 min is a good balance between DB load and freshness.
+    QUALITY_EVAL_INTERVAL_MINUTES: int = 15
+    # Per-engine circuit breaker. ``CB_FAILURE_THRESHOLD``
+    # consecutive failures trip the breaker; ``CB_OPEN_SECONDS``
+    # is how long the engine stays blocked before the
+    # half-open transition allows one probe.
+    CB_FAILURE_THRESHOLD: int = 5
+    CB_OPEN_SECONDS: int = 86_400  # 24h
+    # When the quality gate disables an engine, this is the
+    # minimum gap between evaluation runs before the gate may
+    # re-enable the engine on a fresh successful probe.
+    QUALITY_REENABLE_GRACE_MINUTES: int = 60
+
     @model_validator(mode="after")
     def validate_production_settings(self):
         # Use exact comparison for production gating — previous
