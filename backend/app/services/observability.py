@@ -126,6 +126,13 @@ class Histogram:
         self.buckets = tuple(sorted(buckets))
         self._counts: dict[tuple[tuple[str, str], ...], list[int]] = {}
         self._sums: dict[tuple[tuple[str, str], ...], float] = {}
+        # Raw observations kept per label set so ``quantile()`` can
+        # return an exact answer instead of a bucket approximation.
+        # Bounded by the number of label combinations times the
+        # total observations; for the API-latency histogram that's
+        # bounded by the route count * request count, well within
+        # the process memory budget for a single-tenant service.
+        self._observations: dict[tuple[tuple[str, str], ...], list[float]] = {}
         self._lock = threading.Lock()
 
     def observe(self, value: float, **labels: str) -> None:
@@ -139,6 +146,31 @@ class Histogram:
                     counts[i] += 1
             counts[-1] += 1  # +Inf bucket
             self._sums[key] = self._sums.get(key, 0.0) + float(value)
+            obs = self._observations.setdefault(key, [])
+            obs.append(float(value))
+
+    def quantile(self, q: float, **labels: str) -> float | None:
+        """Return the q-quantile (0 < q < 1) of observations with
+        matching labels. ``None`` if no observations match.
+
+        Uses linear interpolation between sorted observations, the
+        same way numpy.percentile does. The SLO test relies on this
+        to assert that p95 is under budget.
+        """
+        if not 0 < q < 1:
+            raise ValueError("q must be in (0, 1)")
+        key = tuple(sorted(labels.items()))
+        with self._lock:
+            obs = list(self._observations.get(key, []))
+        if not obs:
+            return None
+        obs.sort()
+        # Linear interpolation: pick the index ``q * (n - 1)``.
+        pos = q * (len(obs) - 1)
+        lo = int(pos)
+        hi = min(lo + 1, len(obs) - 1)
+        frac = pos - lo
+        return obs[lo] * (1 - frac) + obs[hi] * frac
 
     def render(self) -> list[str]:
         lines = []
@@ -281,6 +313,7 @@ class MetricsRegistry:
                   self.outcome_resolution_duration):
             m._counts.clear()
             m._sums.clear()
+            m._observations.clear()
 
 
 # Process-wide singleton. ``import metrics`` from anywhere.

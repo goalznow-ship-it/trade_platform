@@ -24,6 +24,7 @@ from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
 from app.core.database import async_session_factory, init_db
 from app.core.logging import logger
+from app.core.metrics_middleware import MetricsMiddleware
 from app.core.rate_limiter import RateLimitMiddleware
 from app.core.security import AuditMiddleware
 from app.core.websocket_manager import ws_manager
@@ -118,6 +119,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+# ``MetricsMiddleware`` runs *after* rate limiting and auth so the
+# latency histogram reflects what the user actually experienced,
+# including any 429s the rate limiter returned. Putting it first
+# would also include 401/403 revalidation overhead that is
+# orthogonal to backend performance.
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=settings.RATE_LIMIT_MAX, window_seconds=settings.RATE_LIMIT_WINDOW)
 # Security headers (X-Frame-Options, HSTS, etc.) — added last so

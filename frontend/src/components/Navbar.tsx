@@ -27,6 +27,7 @@ const MODULES = [
   { href: "/futures", label: "Futures Intel", icon: BarChart3, color: "text-orange-400" },
   { href: "/news", label: "News Intel", icon: Newspaper, color: "text-yellow-400" },
   { href: "/backtest", label: "Backtest", icon: History, color: "text-green-400" },
+  { href: "/performance", label: "Performance", icon: TrendingUp, color: "text-emerald-400", isNew: true },
   { href: "/dashboard", label: "Portfolio", icon: Shield, color: "text-gray-400" },
   { href: "/exchanges", label: "Exchanges", icon: Settings, color: "text-blue-400" },
   { href: "/matrix", label: "30 Aktiv", icon: BarChart3, color: "text-cyan-400" },
@@ -42,7 +43,7 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<{ symbol: string }[]>([])
   const [time, setTime] = useState(new Date())
-  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/monitor" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal" || pathname === "/exchanges" || pathname === "/ml"
+  const isDashboard = pathname?.startsWith("/dashboard") || pathname === "/terminal" || pathname === "/signals" || pathname === "/monitor" || pathname === "/futures" || pathname === "/news" || pathname === "/scanner" || pathname === "/radar" || pathname === "/backtest" || pathname === "/matrix" || pathname === "/admin" || pathname === "/pricing" || pathname === "/skhy-terminal" || pathname === "/exchanges" || pathname === "/ml" || pathname === "/performance"
 
   useEffect(() => {
     api.getOverview().then(setOverview).catch(() => {})

@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # minimum gap between evaluation runs before the gate may
     # re-enable the engine on a fresh successful probe.
     QUALITY_REENABLE_GRACE_MINUTES: int = 60
+    # Phase 6 SLO: p95 API latency must stay under this budget.
+    # The latency test reads the histogram and fails if the
+    # computed p95 exceeds the budget. A 1.0s budget is a common
+    # web SLO — anything slower and the dashboard starts feeling
+    # sluggish under real load.
+    SLO_API_P95_SECONDS: float = 1.0
 
     @model_validator(mode="after")
     def validate_production_settings(self):
