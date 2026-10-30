@@ -123,7 +123,7 @@ def upgrade() -> None:
                 max_drawdown_percent, max_favorable_excursion,
                 duration_hours, actual_outcome, scores_at_entry,
                 notes, recorded_at
-            FROM trades
+            FROM ml_trades
             WHERE source_trade_id IS NOT NULL
             ON CONFLICT (source_trade_id) DO NOTHING
             """

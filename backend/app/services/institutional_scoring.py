@@ -78,12 +78,12 @@ class InstitutionalScorer:
         # the self-learning loop has up-weighted produces a
         # proportionally larger contribution to the total.
         default_weights = {
-            "trend": self.trend_weight,
-            "momentum": self.momentum_weight,
-            "volume": self.volume_weight,
-            "liquidity": self.liquidity_weight,
-            "smc": self.smc_weight,
-            "risk": self.risk_weight,
+            "trend": self.trend_weight / 100,
+            "momentum": self.momentum_weight / 100,
+            "volume": self.volume_weight / 100,
+            "liquidity": self.liquidity_weight / 100,
+            "smc": self.smc_weight / 100,
+            "risk": self.risk_weight / 100,
         }
 
         scores = dict(raw_scores)

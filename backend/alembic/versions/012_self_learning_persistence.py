@@ -34,7 +34,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "trades",
+        "ml_trades",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("source_trade_id", sa.String(80), nullable=True, index=True),
         sa.Column(
@@ -69,14 +69,14 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_trades_symbol_recorded",
-        "trades",
+        "ix_ml_trades_symbol_recorded",
+        "ml_trades",
         ["symbol", "recorded_at"],
         unique=False,
     )
     op.create_index(
-        "ix_trades_outcome_recorded",
-        "trades",
+        "ix_ml_trades_outcome_recorded",
+        "ml_trades",
         ["actual_outcome", "recorded_at"],
         unique=False,
     )
@@ -112,6 +112,6 @@ def downgrade() -> None:
     op.drop_index("ix_adjustment_runs_status_started", table_name="adjustment_runs")
     op.drop_table("adjustment_runs")
 
-    op.drop_index("ix_trades_outcome_recorded", table_name="trades")
-    op.drop_index("ix_trades_symbol_recorded", table_name="trades")
-    op.drop_table("trades")
+    op.drop_index("ix_ml_trades_outcome_recorded", table_name="ml_trades")
+    op.drop_index("ix_ml_trades_symbol_recorded", table_name="ml_trades")
+    op.drop_table("ml_trades")

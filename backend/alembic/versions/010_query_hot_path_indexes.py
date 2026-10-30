@@ -46,15 +46,9 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        "ix_ai_analyses_active_created",
-        "ai_analyses",
-        ["is_active", "created_at"],
-        unique=False,
-    )
-    op.create_index(
         "ix_trade_history_user_created",
         "trade_history",
-        ["user_id", "created_at"],
+        ["user_id", "closed_at"],
         unique=False,
     )
     op.create_index(
@@ -68,6 +62,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_alerts_active_created", table_name="alerts")
     op.drop_index("ix_trade_history_user_created", table_name="trade_history")
-    op.drop_index("ix_ai_analyses_active_created", table_name="ai_analyses")
     op.drop_index("ix_signals_symbol_created", table_name="signals")
     op.drop_index("ix_signals_active_created", table_name="signals")

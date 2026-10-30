@@ -18,7 +18,7 @@ from app.core.logging import logger
 from app.core.redis import redis_client
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 # Redis is the SINGLE source of truth for token revocation. We previously
 # also kept a per-process in-memory set, but in any deployment with
@@ -192,8 +192,18 @@ def sanitize_input(value: str) -> str:
     return value[:1000]
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+async def get_current_user(token: str | None = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     from app.models.user import User
+
+    if settings.ENVIRONMENT == "development" and settings.DISABLE_AUTH:
+        result = await db.execute(select(User).order_by(User.id).limit(1))
+        user = result.scalar_one_or_none()
+        if user:
+            return user
+        raise HTTPException(500, "DISABLE_AUTH=true amma verilenler bazasinda user yoxdur")
+
+    if not token:
+        raise HTTPException(401, "Not authenticated")
     payload = decode_token(token)
     if await is_token_revoked(payload):
         raise HTTPException(401, "Token revoked")

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "TradeAnalyst Pro"
     VERSION: str = "2.0.0"
     DEBUG: bool = False
+    DISABLE_AUTH: bool = False
     ENVIRONMENT: str = "development"
     PORT: int = 8000
 
